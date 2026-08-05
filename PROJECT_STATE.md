@@ -32,9 +32,14 @@ Updated: 2026-08-05
 - Livox/FAST-LIO source revisions are recorded but are not yet compiled into the
   V2 image. The current container definition is therefore not deployable for
   real sensing yet.
-- Robot and cloud connection addresses are not present in this repository or
-  the current Mac SSH config. The cloud fixed job wrapper is not installed by
-  V2 yet.
+- The old hardware record identifies the robot maintenance endpoint as
+  `unitree@192.168.123.18`. On 2026-08-05 this Mac had no direct
+  `192.168.123.0/24` interface and the endpoint did not answer two probes, so no
+  SSH attempt or deployment was made.
+- The cloud connection address is not present in this repository, the current
+  Mac SSH config, or the relevant recent Codex task summaries. Those tasks also
+  recorded that deployment credentials/entrypoint were unavailable. The cloud
+  fixed job wrapper is not installed by V2 yet.
 - No V2 code has controlled robot motion.
 - First release target: live device status, 2D trajectory, 3D point-cloud
   preview, start/stop recording, sealed RecordingBundle, cloud map job, and
