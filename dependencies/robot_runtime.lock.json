@@ -1,0 +1,13 @@
+{
+  "schema": "gogoguard.robot_runtime_lock.v1",
+  "platform": "linux/arm64",
+  "base": "ros:humble-ros-base-jammy",
+  "thirdParty": {
+    "Livox-SDK2": "08f523c930b2f0ba1e98a6afaa8d7476bf479908",
+    "livox_ros_driver2": "4a1def929e5b59c7a8122d19fce6efba581ce9f7",
+    "FAST_LIO_ros2": "a4743b095409588842a5b30ddfa27e29d2f99164",
+    "unitree_sdk2": "5ea10f3230e41c6ab62aa79f49f84afa685d84aa",
+    "small_gicp": "8a2d3734f699c042db74ae61d295b0b928163526"
+  },
+  "status": "pins recorded; ARM64 image build not yet verified"
+}

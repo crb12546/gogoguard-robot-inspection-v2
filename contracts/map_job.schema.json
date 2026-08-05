@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gogoguard.map_job.v1",
+  "type": "object",
+  "required": ["schema", "jobId", "sessionId", "state", "progress"],
+  "properties": {
+    "schema": {"const": "gogoguard.map_job.v1"},
+    "jobId": {"type": "string", "minLength": 1},
+    "sessionId": {"type": "string", "minLength": 1},
+    "state": {"enum": ["queued", "uploading", "processing", "artifacts", "complete", "failed"]},
+    "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+    "overviewUrl": {"type": ["string", "null"]},
+    "pointCloudUrl": {"type": ["string", "null"]}
+  }
+}

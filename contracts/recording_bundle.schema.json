@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gogoguard.recording_bundle.v1",
+  "type": "object",
+  "required": ["schema", "sessionId", "robotId", "siteId", "startedAt", "stoppedAt", "files"],
+  "properties": {
+    "schema": {"const": "gogoguard.recording_bundle.v1"},
+    "sessionId": {"type": "string", "minLength": 1},
+    "robotId": {"type": "string", "minLength": 1},
+    "siteId": {"type": "string", "minLength": 1},
+    "startedAt": {"type": "string"},
+    "stoppedAt": {"type": "string"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "size": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}
+

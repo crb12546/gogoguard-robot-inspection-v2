@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gogoguard-robot-inspection-v2"
+version = "0.1.0"
+description = "Go2 inspection mapping and runtime V2"
+requires-python = ">=3.9"
+
+[project.scripts]
+gogoguard-site-console = "gogoguard_site_console.__main__:main"
+
+[tool.setuptools.packages.find]
+where = [
+  "modules/contracts",
+  "modules/device_io",
+  "modules/data_capture",
+  "modules/evidence",
+  "services/map_factory",
+  "apps/site_console/backend",
+]
+include = ["gogoguard_*"]

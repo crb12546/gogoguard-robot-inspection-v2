@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GoGoGuard 现场建图</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><div><small>GOGOGUARD · ROBOT INSPECTION V2</small><h1>现场建图控制台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
+  <main>
+    <section class="status-row">
+      <article><span>机器狗</span><strong id="robotState">等待数据</strong><small id="robotId">—</small></article>
+      <article><span>Livox</span><strong id="lidarRate">0 Hz</strong><small id="lidarAge">未收到点云</small></article>
+      <article><span>IMU</span><strong id="imuRate">0 Hz</strong><small id="diskFree">—</small></article>
+      <article><span>当前阶段</span><strong id="phase">观察模式</strong><small id="phaseHint">尚未录制</small></article>
+    </section>
+    <section class="workspace">
+      <article class="panel map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
+      <article class="panel map-panel"><div class="panel-title"><div><span>实时点云</span><small>拖动旋转 · 滚轮缩放</small></div><b id="pointCount">0 点</b></div><canvas id="cloud"></canvas></article>
+      <aside class="panel control-panel">
+        <div class="panel-title"><div><span>录制与建图</span><small>人工遥控机器狗移动</small></div></div>
+        <div class="step active"><i>1</i><div><strong>确认数据</strong><small>轨迹与点云持续更新</small></div></div>
+        <div class="step"><i>2</i><div><strong>录制现场</strong><small id="recordInfo">等待开始</small></div></div>
+        <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">停止录制后自动提交</small></div></div>
+        <div class="progress"><div id="jobProgress"></div></div>
+        <button id="recordButton">开始录制地图</button>
+        <div id="error" class="error"></div>
+      </aside>
+    </section>
+    <section class="results">
+      <article class="panel result-panel"><div class="panel-title"><div><span>最近建图结果</span><small id="resultMeta">还没有结果</small></div></div><div id="resultEmpty" class="empty">完成一次录制后，这里会显示云端 GLIM 返回的二维概览和三维点云。当前本机演示会明确标记为模拟结果。</div><img id="overview" alt="地图概览"><canvas id="resultCloud"></canvas></article>
+      <article class="panel history"><div class="panel-title"><div><span>录制历史</span><small>本机封存证据</small></div></div><div id="sessions"></div></article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

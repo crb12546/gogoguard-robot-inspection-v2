@@ -1,0 +1,14 @@
+{
+  "schema": "gogoguard.runtime_config.v1",
+  "topics": {
+    "lidar": "/mapping/livox/lidar",
+    "imu": "/mapping/livox/imu",
+    "odometry": "/Odometry"
+  },
+  "cloud": {
+    "host": "",
+    "user": "go2mapping",
+    "remote_root": "/opt/go2/jobs",
+    "remote_command": "/opt/go2/bin/gogoguard-map-job"
+  }
+}
