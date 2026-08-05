@@ -14,7 +14,7 @@ this index describes code state and never implies robot acceptance.
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | Local LiDAR-inertial odometry now; fixed-map localization in a later real slice | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration` |
-| `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | cloud, robot | `adapter_implemented_worker_pending` | `contracts`, `evidence` |
+| `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | cloud, robot | `robot_cloud_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
 | `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `planned_locked_technology` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `planned` | `contracts`, `map_factory` |
@@ -89,10 +89,10 @@ this index describes code state and never implies robot acceptance.
 
 - Manifest: `architecture/modules/map_factory.json`
 - Code roots: `services/map_factory`, `deployment/cloud`
-- Entrypoints: `gogoguard_map_factory.manager:MapJobManager`
+- Entrypoints: `gogoguard_map_factory.manager:MapJobManager`, `deployment/cloud/gogoguard-map-job`
 - Consumes: RecordingBundle
 - Produces: MapJob, map.ply, map.json, overview.svg
-- Provenance: V2 adapter; existing Alibaba Cloud GLIM capability to be migrated
+- Provenance: V2 adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline
 
 ### `mission`
 

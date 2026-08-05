@@ -7,6 +7,10 @@ command, and expects `output/map.json`, `output/map.ply`, and
 
 The server is known to have Ubuntu 24.04, ROS 2 Jazzy, GLIM and the
 PDAL/GDAL/Potree toolchain. A native PointCloud2+IMU smoke produced artifacts;
-dynamic production mapping has not yet been proven. The fixed
-`gogoguard-map-job` wrapper still needs to be installed and tested against a
-real recording before `--map-worker ssh` is production-capable.
+dynamic production mapping has not yet been proven.
+
+`gogoguard-map-job` is the narrow V2 adapter over that installed capability.
+It accepts exactly one immutable `/opt/go2/jobs/map-*/input` bundle, executes
+the pinned single-session pipeline as the unprivileged `go2mapping` user, and
+returns `map.json`, `map.ply`, `overview.svg`, and the GLIM build receipt under
+`output/`. It refuses an existing output or unsafe path.

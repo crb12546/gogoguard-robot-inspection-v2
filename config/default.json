@@ -6,8 +6,8 @@
     "odometry": "/Odometry"
   },
   "cloud": {
-    "host": "",
-    "user": "go2mapping",
+    "host": "39.96.72.215",
+    "user": "root",
     "remote_root": "/opt/go2/jobs",
     "remote_command": "/opt/go2/bin/gogoguard-map-job"
   }
