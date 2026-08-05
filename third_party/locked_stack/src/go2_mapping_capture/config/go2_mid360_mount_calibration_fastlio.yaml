@@ -1,0 +1,63 @@
+/**:
+  ros__parameters:
+    feature_extract_enable: false
+    # Calibration favors geometric observability over patrol-mode throughput.
+    # Retain more points than the production follower so the hand-eye solver
+    # is not driven by a ~150-point local map.
+    point_filter_num: 2
+    max_iteration: 3
+    filter_size_surf: 0.25
+    filter_size_map: 0.25
+    # FAST-LIO starts sliding the local map when the LiDAR approaches within
+    # 1.5 * det_range of an edge. A 120 m cube with an 80 m detection range
+    # puts the origin inside both edge bands, so the first map is immediately
+    # deleted.
+    cube_side_length: 1000.0
+    runtime_pos_log_enable: false
+    map_file_path: ""
+
+    common:
+      lid_topic: /calibration/livox/lidar
+      imu_topic: /calibration/livox/imu
+      lidar_qos_depth: 2
+      imu_qos_depth: 400
+      time_sync_en: false
+      time_offset_lidar_to_imu: 0.0
+
+    preprocess:
+      lidar_type: 4
+      scan_line: 4
+      blind: 0.5
+      timestamp_unit: 3
+      scan_rate: 10
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 80.0
+      extrinsic_est_en: false
+      # Factory T_imu_lidar expressed as LiDAR -> internal IMU, independent of
+      # the still-unknown physical T_base_lidar mount transform.
+      extrinsic_T: [-0.011, -0.02329, 0.04412]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+
+    output:
+      frame_mode: lidar_calibration
+      require_base_frame_calibration: false
+
+    publish:
+      path_en: false
+      effect_map_en: false
+      map_en: false
+      scan_publish_en: false
+      dense_publish_en: false
+      scan_bodyframe_pub_en: false
+
+    pcd_save:
+      pcd_save_en: false
+      interval: -1

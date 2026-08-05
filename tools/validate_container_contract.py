@@ -6,7 +6,7 @@ from pathlib import Path
 
 dockerfile, service = (Path(item) for item in sys.argv[1:3])
 checks = {
-    dockerfile: ["ros:humble-ros-base-jammy", "linux/arm64", "ros-humble-rosbag2", "gogoguard-site-console"],
+    dockerfile: ["ros:humble-ros-base-jammy", "linux/arm64", "ros-humble-rosbag2", "Livox-SDK2", "fast_lio", "gogoguard-edge-entrypoint"],
     service: ["/opt/gogoguard/bin/run-edge", "Restart=always", "After=docker.service"],
 }
 for path, needles in checks.items():

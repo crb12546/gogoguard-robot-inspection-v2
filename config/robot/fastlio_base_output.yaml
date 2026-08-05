@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    output.frame_mode: base_navigation
+    output.require_base_frame_calibration: true
+    output.base_to_imu_translation: [0.22076546074080503, 0.02329, 0.08181490659870658]
+    output.base_to_imu_rotation_xyzw: [0.0, 0.277672367991535, 0.0, 0.9606758329707132]
+    output.mount_calibration_sha256: 5d3c4ca09fa2ecfdefd381a4038728171c88684562f3146a6104a42a1163c03a
+    output.internal_calibration_sha256: c26cecef981a48a8860bcd1ad0d693f763dbe5da5f1688e39802960f97566b24

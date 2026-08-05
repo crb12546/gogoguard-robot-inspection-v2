@@ -1,0 +1,12 @@
+{
+  "id": "contracts",
+  "responsibility": "Stable product messages and persisted schemas shared across modules",
+  "runtime": ["robot", "cloud", "workstation"],
+  "status": "implemented_offline",
+  "codeRoots": ["modules/contracts", "contracts"],
+  "entrypoints": [],
+  "dependsOn": [],
+  "consumes": [],
+  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob"],
+  "sourceProvenance": ["V2 product contract"]
+}

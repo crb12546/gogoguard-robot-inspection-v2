@@ -1,0 +1,12 @@
+{
+  "id": "evidence",
+  "responsibility": "Append-only runtime events and receipts; no product decision logic",
+  "runtime": ["robot", "cloud", "workstation"],
+  "status": "implemented_offline",
+  "codeRoots": ["modules/evidence"],
+  "entrypoints": ["gogoguard_evidence.journal:EventJournal"],
+  "dependsOn": ["contracts"],
+  "consumes": ["module events"],
+  "produces": ["gogoguard.event.v1 JSONL"],
+  "sourceProvenance": ["V2 product infrastructure"]
+}

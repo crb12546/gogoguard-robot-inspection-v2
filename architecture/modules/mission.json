@@ -1,0 +1,12 @@
+{
+  "id": "mission",
+  "responsibility": "Inspection task state machine and orchestration without algorithm ownership",
+  "runtime": ["robot", "cloud"],
+  "status": "planned",
+  "codeRoots": [],
+  "entrypoints": [],
+  "dependsOn": ["contracts", "route", "navigation", "inspection", "evidence"],
+  "consumes": ["inspection task"],
+  "produces": ["mission state", "mission result"],
+  "sourceProvenance": ["V2 module boundary"]
+}

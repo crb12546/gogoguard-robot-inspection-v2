@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>go2_mapping_capture</name>
+  <version>0.1.0</version>
+  <description>Exclusive Livox MID360 PointCloud2 source for GLIM mapping capture.</description>
+  <maintainer email="devnull@example.com">GoGoGuard</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>fast_lio</exec_depend>
+  <exec_depend>go2_site_ops</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>unitree_go</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

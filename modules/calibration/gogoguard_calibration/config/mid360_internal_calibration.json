@@ -1,0 +1,33 @@
+{
+  "schema": "go2.sensor_internal_calibration.v1",
+  "calibrationId": "livox-mid360-factory-internal-20240422-v1",
+  "sensorModel": "Livox Mid-360",
+  "transform": {
+    "name": "T_lidar_imu",
+    "meaning": "p_lidar = T_lidar_imu * p_imu",
+    "parentFrame": "lidar_link",
+    "childFrame": "lidar_imu",
+    "tum": [
+      0.011,
+      0.02329,
+      -0.04412,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "basis": {
+    "orientation": "The official manual states that IMU acceleration and angular-velocity directions are the same as the point-cloud coordinates; therefore R_lidar_imu is identity.",
+    "translation": "The official manual gives the IMU chip position in point-cloud coordinates as x=11.0 mm, y=23.29 mm, z=-44.12 mm; converted to metres this is the translation of the IMU origin in the LiDAR frame."
+  },
+  "source": {
+    "kind": "manufacturer_manual",
+    "title": "Livox Mid-360 User Manual",
+    "revisionDate": "2024-04-22",
+    "url": "https://terra-1-g.djicdn.com/851d20f7b9f64838a34cd02351370894/Livox/Livox_Mid-360_User_Manual_EN.pdf",
+    "coordinatePage": 12,
+    "imuPage": 15
+  },
+  "validated": true
+}

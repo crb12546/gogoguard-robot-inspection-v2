@@ -34,11 +34,26 @@ Updated: 2026-08-05
   `3a7597c2af2f06efbe605b4e1ec216450db05d44`; its Livox, FAST-LIO and mapping
   capture paths are clean in the old worktree. Exact Git tree IDs are recorded
   in `dependencies/capability_migration.lock.json`.
+- A 406-file, 4.3 MB exact capability snapshot is now present under
+  `third_party/locked_stack`; its aggregate SHA-256 is enforced by
+  `make knowledge-check`. It contains only Livox SDK2/Driver2, FAST-LIO,
+  mapping capture and the old calibration source package.
+- The coordinate/calibration subset has been ported into
+  `modules/calibration`. The frozen 32.242667 degree mount pitch, robot/sensor
+  identity, MID-360 internal IMU transform and composed FAST-LIO base output are
+  covered by migration tests.
+- The ARM64 Dockerfile now defines compilation of the locked Livox SDK2,
+  Livox Driver2 and FAST-LIO trees and one runtime composition for driver,
+  calibration TF, FAST-LIO and Site Console. This is a build definition only;
+  it has not been built on ARM64.
+- Repository knowledge is now generated from per-module JSON manifests.
+  `make knowledge-check` validates module paths/dependencies, the generated
+  index and the immutable source snapshot.
 - No V2 image has been built or deployed to the robot.
 - Current Mac shell has no Docker executable, so the ARM64 image was not built.
-- Livox/FAST-LIO source revisions are recorded but are not yet compiled into the
-  V2 image. The current container definition is therefore not deployable for
-  real sensing yet.
+- Livox/FAST-LIO sources are migrated and wired into the image definition but
+  are not yet compiled into a V2 image. The definition is therefore still not
+  deployable for real sensing.
 - The old hardware record identifies the robot maintenance endpoint as
   `unitree@192.168.123.18`. On 2026-08-05 this Mac had no direct
   `192.168.123.0/24` interface and the endpoint did not answer two probes, so no

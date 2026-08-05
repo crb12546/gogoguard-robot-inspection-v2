@@ -11,6 +11,9 @@ the returned 2D/3D map.
 ## Repository rules
 
 - Read `PROJECT_STATE.md` before changing code. It is the current factual state.
+- Read `docs/generated/repository-index.md`, then the manifest under
+  `architecture/modules` for the module being changed. Do not begin with a
+  whole-repository archaeology pass when the index identifies the owner.
 - Keep the old `gogoguard_dog_go2_real_code` repository read-only. It is the
   capability source for the frozen technology stack. Selectively port its
   Livox, FAST-LIO, GLIM, small_gicp, Nav2, Unitree and hardware integration
@@ -35,6 +38,9 @@ the returned 2D/3D map.
   the current task. Mapping motion is performed by the human remote control.
 - Keep `PROJECT_STATE.md` current whenever a verified capability, deployed
   digest, known failure, or next experiment changes.
+- Update the owning module manifest when its entrypoint, dependency, contract,
+  runtime or status changes. Run `make knowledge` after manifest changes;
+  generated documentation is never edited manually.
 
 ## Required checks
 
@@ -43,6 +49,7 @@ Run before handing off changes:
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q modules apps services
+make knowledge-check
 ```
 
 For UI changes also run `make ui-smoke`. For container changes run

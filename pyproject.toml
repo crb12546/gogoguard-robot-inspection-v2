@@ -10,10 +10,12 @@ requires-python = ">=3.9"
 
 [project.scripts]
 gogoguard-site-console = "gogoguard_site_console.__main__:main"
+gogoguard-mount-tf = "gogoguard_calibration.mount_tf_publisher:main"
 
 [tool.setuptools.packages.find]
 where = [
   "modules/contracts",
+  "modules/calibration",
   "modules/device_io",
   "modules/data_capture",
   "modules/evidence",
@@ -21,3 +23,6 @@ where = [
   "apps/site_console/backend",
 ]
 include = ["gogoguard_*"]
+
+[tool.setuptools.package-data]
+gogoguard_calibration = ["config/*.json"]

@@ -5,17 +5,43 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-pip python3-setuptools python3-colcon-common-extensions \
+    build-essential cmake git ninja-build pkg-config \
+    python3-dev python3-matplotlib python3-pip python3-setuptools python3-yaml \
+    python3-colcon-common-extensions python3-rosdep \
+    libapr1-dev libboost-all-dev libeigen3-dev libomp-dev libpcl-dev \
     ros-humble-rosbag2 ros-humble-rosbag2-storage-mcap ros-humble-sensor-msgs-py \
-    ros-humble-nav-msgs ros-humble-tf2-ros ros-humble-pcl-ros \
+    ros-humble-nav-msgs ros-humble-tf2-ros ros-humble-pcl-ros ros-humble-pcl-conversions \
+    ros-humble-rmw-cyclonedds-cpp ros-humble-navigation2 ros-humble-nav2-bringup \
     openssh-client rsync ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/gogoguard/app
 COPY . /opt/gogoguard/app
-RUN python3 -m pip install --no-cache-dir --no-deps .
+
+# Build the exact robot capability snapshot retained from the established stack.
+# These are not fresh upstream clones: the locked snapshot includes the timing,
+# shutdown and base-frame changes previously made for this Go2/MID-360 runtime.
+RUN cmake -S third_party/locked_stack/src/Livox-SDK2 -B /tmp/livox-sdk-build \
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /tmp/livox-sdk-build --parallel \
+    && cmake --install /tmp/livox-sdk-build \
+    && test -f /usr/local/lib/liblivox_lidar_sdk_shared.so \
+    && rm -rf /tmp/livox-sdk-build
+
+RUN mkdir -p /opt/gogoguard/ros_ws/src \
+    && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
+    && source /opt/ros/humble/setup.bash \
+    && cd /opt/gogoguard/ros_ws \
+    && colcon build --merge-install --packages-select livox_ros_driver2 fast_lio \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 -DDISTRO_ROS=humble \
+    && test -x install/lib/livox_ros_driver2/livox_ros_driver2_node \
+    && test -x install/lib/fast_lio/fastlio_mapping \
+    && rm -rf build log
+
+RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
+    && install -m 0755 deployment/container/edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint
 
 VOLUME ["/var/lib/gogoguard"]
 EXPOSE 8080
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["gogoguard-site-console", "--mode", "robot", "--map-worker", "ssh", "--host", "0.0.0.0", "--port", "8080", "--data-root", "/var/lib/gogoguard", "--config", "/etc/gogoguard/runtime.json", "--static-root", "/opt/gogoguard/app/apps/site_console/frontend"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/gogoguard-edge-entrypoint"]

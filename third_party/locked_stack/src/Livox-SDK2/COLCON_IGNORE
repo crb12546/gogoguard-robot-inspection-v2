@@ -1,0 +1,3 @@
+# Livox-SDK2 is built once by tools/install_livox_sdk2.sh into the locked
+# dependency prefix. Do not let colcon discover and rebuild the same SDK as an
+# unrelated generic CMake package inside the ROS workspace.

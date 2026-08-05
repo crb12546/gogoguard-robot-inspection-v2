@@ -1,0 +1,12 @@
+{
+  "id": "inspection",
+  "responsibility": "Camera, video and site inspection actions at route checkpoints",
+  "runtime": ["robot"],
+  "status": "planned",
+  "codeRoots": [],
+  "entrypoints": [],
+  "dependsOn": ["contracts", "device_io", "evidence"],
+  "consumes": ["inspection action request"],
+  "produces": ["image evidence", "video evidence", "action result"],
+  "sourceProvenance": ["Z1Pro capability will be selectively migrated after navigation slice"]
+}

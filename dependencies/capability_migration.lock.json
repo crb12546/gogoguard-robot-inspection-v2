@@ -3,6 +3,12 @@
   "sourceRepository": "crb12546/gogoguard_dog_go2_real_code",
   "sourceCommit": "3a7597c2af2f06efbe605b4e1ec216450db05d44",
   "policy": "selective capability migration; no wholesale application copy",
+  "localSnapshot": {
+    "root": "third_party/locked_stack",
+    "fileCount": 406,
+    "aggregateSha256": "52b14cabfebe83460102641a3fab9098aa3e1e2e0284544396d03e1e5f2e28ca",
+    "digestAlgorithm": "sha256(relative_posix_path + NUL + sha256(file_bytes) + NUL) in sorted path order"
+  },
   "firstRealSlice": {
     "sourceTrees": {
       "src/Livox-SDK2": "cd372ba3ed228b492188fbc16e9d010d3cdfb9aa",

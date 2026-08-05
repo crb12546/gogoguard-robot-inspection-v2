@@ -1,0 +1,12 @@
+{
+  "id": "route",
+  "responsibility": "Versioned map-bound route model, validation and execution request",
+  "runtime": ["robot", "workstation", "cloud"],
+  "status": "planned",
+  "codeRoots": [],
+  "entrypoints": [],
+  "dependsOn": ["contracts", "map_factory"],
+  "consumes": ["released map", "operator route edits"],
+  "produces": ["released route"],
+  "sourceProvenance": ["V2 module boundary; existing route capability will be selectively migrated"]
+}

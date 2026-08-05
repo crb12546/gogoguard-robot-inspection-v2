@@ -1,0 +1,12 @@
+{
+  "id": "localization",
+  "responsibility": "Local LiDAR-inertial odometry now; fixed-map localization in a later real slice",
+  "runtime": ["robot"],
+  "status": "migrating_locked_source",
+  "codeRoots": ["third_party/locked_stack/src/FAST_LIO"],
+  "entrypoints": ["ros2 run fast_lio fastlio_mapping"],
+  "dependsOn": ["contracts", "device_io", "calibration"],
+  "consumes": ["/mapping/livox/lidar", "/mapping/livox/imu"],
+  "produces": ["/Odometry"],
+  "sourceProvenance": ["old FAST-LIO tree 36ee56ee; small_gicp later slice remains pinned"]
+}

@@ -1,0 +1,120 @@
+{
+  "schema": "go2.coordinate_contract.v1",
+  "contract_id": "go2-mid360-navigation-v1",
+  "deployment_target": "replacement_navigation_stack",
+  "frames": {
+    "map": {
+      "frame_id": "map",
+      "meaning": "Versioned site frame; gravity-aligned and fixed at map publication"
+    },
+    "odom": {
+      "frame_id": "odom",
+      "meaning": "Continuous local LIO frame; never reset for a patrol command"
+    },
+    "base": {
+      "frame_id": "base_link",
+      "meaning": "Rigid Go2 body frame: x forward, y left, z up at nominal stance; may roll and pitch with the body"
+    },
+    "lidar": {
+      "frame_id": "lidar_link",
+      "meaning": "Physical Livox MID360 LiDAR frame"
+    },
+    "imu": {
+      "frame_id": "lidar_imu",
+      "meaning": "Livox MID360 built-in IMU frame"
+    }
+  },
+  "tf_edges": [
+    {
+      "parent_role": "map",
+      "child_role": "odom",
+      "kind": "dynamic",
+      "authority": "global_localizer"
+    },
+    {
+      "parent_role": "odom",
+      "child_role": "base",
+      "kind": "dynamic",
+      "authority": "local_lio"
+    },
+    {
+      "parent_role": "base",
+      "child_role": "lidar",
+      "kind": "static",
+      "authority": "mount_calibration"
+    },
+    {
+      "parent_role": "lidar",
+      "child_role": "imu",
+      "kind": "static",
+      "authority": "sensor_internal_calibration"
+    }
+  ],
+  "topic_frames": [
+    {
+      "topic": "/livox/lidar",
+      "semantic": "raw_lidar",
+      "frame_role": "lidar"
+    },
+    {
+      "topic": "/livox/imu",
+      "semantic": "raw_imu",
+      "frame_role": "imu"
+    },
+    {
+      "topic": "/mapping/livox/lidar",
+      "semantic": "mapping_raw_lidar_pointcloud2",
+      "frame_role": "lidar"
+    },
+    {
+      "topic": "/mapping/livox/imu",
+      "semantic": "mapping_raw_imu",
+      "frame_role": "imu"
+    },
+    {
+      "topic": "/navigation/cloud_body",
+      "semantic": "body_obstacle_cloud",
+      "frame_role": "base"
+    },
+    {
+      "topic": "/navigation/cloud_lidar",
+      "semantic": "undistorted_lidar",
+      "frame_role": "lidar"
+    },
+    {
+      "topic": "/navigation/map_cloud",
+      "semantic": "global_map_cloud",
+      "frame_role": "map"
+    },
+    {
+      "topic": "/localization/pose",
+      "semantic": "continuous_map_pose",
+      "frame_role": "map"
+    },
+    {
+      "topic": "/localization/status",
+      "semantic": "versioned_localization_quality",
+      "frame_role": "map"
+    },
+    {
+      "topic": "/localization/usable",
+      "semantic": "motion_safety_gate",
+      "frame_role": "map"
+    }
+  ],
+  "artifact_frames": {
+    "optimized_map": "map",
+    "localization_map": "map",
+    "route": "map",
+    "coverage_grid": "map",
+    "local_costmap": "odom"
+  },
+  "invariants": {
+    "map_gravity_aligned": true,
+    "raw_sensor_data_immutable": true,
+    "route_fixed_in_map": true,
+    "forbid_posthoc_map_leveling": true,
+    "forbid_runtime_route_anchoring": true,
+    "require_validated_mount_for_motion": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "calibration",
+  "responsibility": "One authoritative base-to-lidar mount and lidar-to-IMU internal transform",
+  "runtime": ["robot", "workstation"],
+  "status": "ported_offline_ros_runtime_pending",
+  "codeRoots": ["modules/calibration", "third_party/locked_stack/src/go2_site_ops"],
+  "entrypoints": ["gogoguard_calibration.mount_tf_publisher:main"],
+  "dependsOn": ["contracts"],
+  "consumes": ["go2.mount_calibration.v3", "go2.sensor_internal_calibration.v1"],
+  "produces": ["base_link -> lidar_link", "lidar_link -> lidar_imu"],
+  "sourceProvenance": ["pure calibration subset ported from old capability commit 3a7597c; source snapshot retained for diff", "LLYJ0001/ARMCP1U0038561 fixed calibration"]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "navigation",
+  "responsibility": "Use a released route through Nav2 FollowPath, MPPI and collision monitoring",
+  "runtime": ["robot"],
+  "status": "planned_locked_technology",
+  "codeRoots": [],
+  "entrypoints": [],
+  "dependsOn": ["contracts", "localization", "route"],
+  "consumes": ["released route", "map pose", "local obstacle cloud"],
+  "produces": ["safe velocity candidate", "navigation feedback"],
+  "sourceProvenance": ["ROS 2 Humble Nav2 architecture fixed; migration begins after real map slice"]
+}
