@@ -45,9 +45,10 @@ Updated: 2026-08-05
 - The ARM64 Dockerfile compiles the locked Livox SDK2, Livox Driver2 and
   FAST-LIO trees and composes driver, calibration TF, FAST-LIO and Site
   Console. The 2026-08-05 native ARM64 build completed successfully. Its local
-  image ID is
-  `sha256:ecaf0e01f4663905a244cf202c9a2e3b25448f74969d42715f0d5953fdd045f1`
-  and its unpacked size is 1,068,416,033 bytes.
+  manifest-list digest is
+  `sha256:d528f0a80bb880641e8f4afadf918027dca63661893fbc85b60887f4f4bb8786`;
+  the ARM64 config digest deployed on the robot is
+  `sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225`.
 - Repository knowledge is now generated from per-module JSON manifests.
   `make knowledge-check` validates module paths/dependencies, the generated
   index and the immutable source snapshot.
@@ -59,7 +60,9 @@ Updated: 2026-08-05
 - The first unbounded C++ build exhausted the local builder. Native build
   parallelism is now deliberately limited to two jobs for reproducibility on
   both the builder and the 16 GB Orin NX.
-- V2 is not deployed to the robot yet.
+- V2 is deployed as `gogoguard-edge.service`. Production policy is to keep it
+  running and enabled at boot. Routine tests do not stop it; an update or
+  explicit recovery may perform one managed restart.
 - The robot maintenance endpoint `unitree@192.168.123.18` is connected over
   the Mac adapter at `192.168.123.222/24`; three probes had 0% loss and about
   0.9 ms average latency. Key-based SSH succeeds.
@@ -68,7 +71,23 @@ Updated: 2026-08-05
   the root filesystem. The `unitree` account needs sudo for Docker.
 - The robot wired interface owns `192.168.1.5/24`, and MID-360 at
   `192.168.1.161` answers with 0% loss. No Livox, FAST-LIO or Nav2 process was
-  running during the audit; the three existing SaaS services remained active.
+  running during the initial audit; the three existing SaaS services remained
+  active throughout V2 deployment.
+- Real ROS measurements on the robot are approximately 10.07 Hz PointCloud2,
+  200.10 Hz IMU and 10.07 Hz `/Odometry`. FAST-LIO initialized and converged,
+  and the fixed robot/sensor-bound mount calibration was active.
+- A five-minute stationary window passed without runtime error logs. The last
+  180 seconds ended 1.48 cm apart with per-axis spans of 4.66--5.18 cm.
+- The running container used about 254 MiB (1.65% of robot memory) and 1.34 CPU
+  cores; CPU temperature was about 51 C and GPU load was zero. This supports
+  the current Livox/FAST-LIO slice on this Orin NX but is not yet a benchmark
+  for concurrent camera AI, speech or remote control.
+- Real recording `20260805T122228Z-33e75803` sealed successfully: 29.70 seconds,
+  150.1 MiB rosbag, 6,539 messages and 171,089,287 bundle bytes. All three
+  manifest hashes were recomputed successfully.
+- Site Console currently under-counts the IMU messages it consumes even though
+  `ros2 topic hz` verifies about 200 Hz. Treat that number as an instrumentation
+  defect, not sensor loss.
 - The cloud connection address is not present in this repository, the current
   Mac SSH config, or the relevant recent Codex task summaries. Those tasks also
   recorded that deployment credentials/entrypoint were unavailable. The cloud
@@ -80,13 +99,16 @@ Updated: 2026-08-05
 
 ## Current deployed release
 
-- V2 Git commit: none
-- Robot image digest: none
-- Robot verification: none
+- V2 Git commit: `7eea253`
+- Robot image config digest:
+  `sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225`
+- Robot service: `enabled`, `active`, live status at port 8080
+- Robot verification: stationary sensing and real recording passed; dynamic
+  mapping, cloud GLIM round trip and motion remain unverified
 
 ## Next experiment
 
-Transfer the image to the connected robot, install the V2 service/configuration,
-and perform the zero-motion experiment in
-`docs/FIRST_ROBOT_EXPERIMENT.md`. Cloud GLIM remains blocked on restoring the
-already-provisioned cloud host address and fixed job wrapper configuration.
+Restore the already-provisioned cloud GLIM host address and fixed job wrapper,
+correct the Site Console IMU instrumentation, then record one short human-
+remote-controlled out-and-back mapping loop. Do not add autonomous motion to
+that experiment.

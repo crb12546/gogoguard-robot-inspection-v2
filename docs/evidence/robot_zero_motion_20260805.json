@@ -1,0 +1,61 @@
+{
+  "schema": "gogoguard.robot_zero_motion_receipt.v1",
+  "observed_at": "2026-08-05T20:29:14+08:00",
+  "source_commit": "7eea253",
+  "target": {
+    "ssh": "unitree@192.168.123.18",
+    "model": "NVIDIA Orin NX Developer Kit",
+    "architecture": "aarch64",
+    "memory_gib": 15,
+    "robot_host_ip": "192.168.1.5",
+    "lidar_ip": "192.168.1.161"
+  },
+  "release": {
+    "image_tag": "gogoguard-robot-inspection:v2-dev",
+    "image_config_digest": "sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225",
+    "service": "gogoguard-edge.service",
+    "service_active": true,
+    "service_enabled_at_boot": true,
+    "started_at": "2026-08-05T20:28:53+08:00"
+  },
+  "ros_topic_rates_hz": {
+    "/mapping/livox/lidar": 10.066,
+    "/mapping/livox/imu": 200.099,
+    "/Odometry": 10.066
+  },
+  "stationary_window": {
+    "duration_minutes": 5,
+    "trajectory_samples_in_last_180_seconds": 1800,
+    "endpoint_displacement_m": 0.0148,
+    "x_span_m": 0.0476,
+    "y_span_m": 0.0466,
+    "z_span_m": 0.0518,
+    "fast_lio_match_converged": true,
+    "runtime_error_log_matches": 0
+  },
+  "performance": {
+    "container_cpu_percent": 133.94,
+    "container_memory_mib": 254.3,
+    "container_memory_percent": 1.65,
+    "cpu_temperature_c": 51.156,
+    "gpu_percent": 0
+  },
+  "recording": {
+    "session_id": "20260805T122228Z-33e75803",
+    "state": "sealed",
+    "duration_seconds": 29.697500167,
+    "bag_size_mib": 150.1,
+    "messages": 6539,
+    "lidar_messages": 299,
+    "imu_messages": 5941,
+    "odometry_messages": 299,
+    "bundle_files": 3,
+    "bundle_bytes": 171089287,
+    "all_bundle_hashes_valid": true
+  },
+  "known_limits": [
+    "The Site Console IMU consumer counter under-reports the real ROS topic rate; ros2 topic hz measured approximately 200 Hz.",
+    "The cloud map job map-8e6a89c9df24 failed only because the cloud GLIM SSH adapter has no host configuration.",
+    "No robot motion command was issued and no dynamic mapping loop has been recorded yet."
+  ]
+}

@@ -10,12 +10,15 @@ checks pass.
   config;
 - an ARM64 image is built and its immutable digest recorded;
 - MID-360 host and sensor IPs are confirmed for this robot;
-- the cloud SSH host and the fixed `gogoguard-map-job` wrapper are configured;
 - the old production services and rollback command are inventoried.
+
+The cloud SSH host and fixed `gogoguard-map-job` wrapper are required before
+the cloud step, but they do not block robot-side live sensing or recording.
 
 ## Acceptance sequence
 
-1. Start the V2 container without enabling it at boot.
+1. Start the V2 container under systemd. After the stationary receipts pass,
+   keep the production service running and enable it at boot.
 2. Confirm the page says `机器狗实时`, never `本机演示`.
 3. Observe Livox PointCloud2 and IMU rate for five stationary minutes.
 4. Confirm `/Odometry` is finite and stationary drift is recorded.
