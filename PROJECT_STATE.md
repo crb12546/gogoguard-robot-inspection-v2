@@ -22,7 +22,7 @@ Updated: 2026-08-05
 - Local demo vertical slice is implemented: live trajectory and point cloud,
   recording, sealed SHA-256 bundle, asynchronous map job, PLY/JSON/SVG output,
   and result display in the same page.
-- 2026-08-05 local checks: 3 unit/vertical-slice tests pass; Python compilation,
+- 2026-08-05 local checks: 10 unit/vertical-slice tests pass; Python compilation,
   UI contract, HTTP start/record/stop/map flow, and container file contract pass.
 - The local HTTP receipt returned 340 live points, 4 recorded preview samples,
   a sealed bundle, and a 340-point demo map. It is explicitly demo evidence,
@@ -42,22 +42,33 @@ Updated: 2026-08-05
   `modules/calibration`. The frozen 32.242667 degree mount pitch, robot/sensor
   identity, MID-360 internal IMU transform and composed FAST-LIO base output are
   covered by migration tests.
-- The ARM64 Dockerfile now defines compilation of the locked Livox SDK2,
-  Livox Driver2 and FAST-LIO trees and one runtime composition for driver,
-  calibration TF, FAST-LIO and Site Console. This is a build definition only;
-  it has not been built on ARM64.
+- The ARM64 Dockerfile compiles the locked Livox SDK2, Livox Driver2 and
+  FAST-LIO trees and composes driver, calibration TF, FAST-LIO and Site
+  Console. The 2026-08-05 native ARM64 build completed successfully. Its local
+  image ID is
+  `sha256:ecaf0e01f4663905a244cf202c9a2e3b25448f74969d42715f0d5953fdd045f1`
+  and its unpacked size is 1,068,416,033 bytes.
 - Repository knowledge is now generated from per-module JSON manifests.
   `make knowledge-check` validates module paths/dependencies, the generated
   index and the immutable source snapshot.
-- No V2 image has been built or deployed to the robot.
-- Current Mac shell has no Docker executable, so the ARM64 image was not built.
-- Livox/FAST-LIO sources are migrated and wired into the image definition but
-  are not yet compiled into a V2 image. The definition is therefore still not
-  deployable for real sensing.
-- The old hardware record identifies the robot maintenance endpoint as
-  `unitree@192.168.123.18`. On 2026-08-05 this Mac had no direct
-  `192.168.123.0/24` interface and the endpoint did not answer two probes, so no
-  SSH attempt or deployment was made.
+- Homebrew, Docker CLI, Buildx and Colima are installed on the Mac. The local
+  builder is native ARM64 with 6 CPUs, 10 GiB RAM and a 60 GiB container disk.
+- The image contains executable Livox Driver2 and FAST-LIO nodes with no
+  missing dynamic libraries. ROS package discovery, Python package imports,
+  entrypoint syntax and containerized Site Console HTTP status all pass.
+- The first unbounded C++ build exhausted the local builder. Native build
+  parallelism is now deliberately limited to two jobs for reproducibility on
+  both the builder and the 16 GB Orin NX.
+- V2 is not deployed to the robot yet.
+- The robot maintenance endpoint `unitree@192.168.123.18` is connected over
+  the Mac adapter at `192.168.123.222/24`; three probes had 0% loss and about
+  0.9 ms average latency. Key-based SSH succeeds.
+- A 2026-08-05 read-only robot audit confirms NVIDIA Orin NX, aarch64, 8 CPUs,
+  15 GiB RAM, Ubuntu 20.04.5, L4T R35.3.1, Docker 24.0.5 and 406 GiB free on
+  the root filesystem. The `unitree` account needs sudo for Docker.
+- The robot wired interface owns `192.168.1.5/24`, and MID-360 at
+  `192.168.1.161` answers with 0% loss. No Livox, FAST-LIO or Nav2 process was
+  running during the audit; the three existing SaaS services remained active.
 - The cloud connection address is not present in this repository, the current
   Mac SSH config, or the relevant recent Codex task summaries. Those tasks also
   recorded that deployment credentials/entrypoint were unavailable. The cloud
@@ -75,6 +86,7 @@ Updated: 2026-08-05
 
 ## Next experiment
 
-Port the locked real Livox/FAST-LIO/mapping-capture closure into V2 modules,
-build it in the ARM64 image, restore robot/cloud connectivity, and then perform
-the zero-motion experiment in `docs/FIRST_ROBOT_EXPERIMENT.md`.
+Transfer the image to the connected robot, install the V2 service/configuration,
+and perform the zero-motion experiment in
+`docs/FIRST_ROBOT_EXPERIMENT.md`. Cloud GLIM remains blocked on restoring the
+already-provisioned cloud host address and fixed job wrapper configuration.

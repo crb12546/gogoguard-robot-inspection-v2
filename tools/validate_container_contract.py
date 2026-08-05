@@ -4,10 +4,11 @@ import sys
 from pathlib import Path
 
 
-dockerfile, service = (Path(item) for item in sys.argv[1:3])
+dockerfile, service, installer = (Path(item) for item in sys.argv[1:4])
 checks = {
     dockerfile: ["ros:humble-ros-base-jammy", "linux/arm64", "ros-humble-rosbag2", "Livox-SDK2", "fast_lio", "gogoguard-edge-entrypoint"],
     service: ["/opt/gogoguard/bin/run-edge", "Restart=always", "After=docker.service"],
+    installer: ["sha256sum --check", "docker load --input", "systemctl daemon-reload", "Service is not started or enabled"],
 }
 for path, needles in checks.items():
     if not path.is_file():

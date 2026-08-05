@@ -15,15 +15,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client rsync ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep native C++ builds within the memory envelope of both the local builder
+# and the 16 GB Orin NX target. Unbounded CMake/colcon parallelism can launch
+# multiple compiler trees and exhaust the host before producing an image.
+ARG BUILD_JOBS=2
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS} MAKEFLAGS=-j${BUILD_JOBS}
+
 WORKDIR /opt/gogoguard/app
-COPY . /opt/gogoguard/app
+COPY third_party/locked_stack /opt/gogoguard/app/third_party/locked_stack
 
 # Build the exact robot capability snapshot retained from the established stack.
 # These are not fresh upstream clones: the locked snapshot includes the timing,
 # shutdown and base-frame changes previously made for this Go2/MID-360 runtime.
 RUN cmake -S third_party/locked_stack/src/Livox-SDK2 -B /tmp/livox-sdk-build \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /tmp/livox-sdk-build --parallel \
+    && cmake --build /tmp/livox-sdk-build --parallel "${BUILD_JOBS}" \
     && cmake --install /tmp/livox-sdk-build \
     && test -f /usr/local/lib/liblivox_lidar_sdk_shared.so \
     && rm -rf /tmp/livox-sdk-build
@@ -31,13 +37,20 @@ RUN cmake -S third_party/locked_stack/src/Livox-SDK2 -B /tmp/livox-sdk-build \
 RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
+    && cp /opt/gogoguard/ros_ws/src/livox_ros_driver2/package_ROS2.xml \
+      /opt/gogoguard/ros_ws/src/livox_ros_driver2/package.xml \
+    && cp -a /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch_ROS2 \
+      /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch \
     && source /opt/ros/humble/setup.bash \
     && cd /opt/gogoguard/ros_ws \
-    && colcon build --merge-install --packages-select livox_ros_driver2 fast_lio \
+    && colcon build --executor sequential --merge-install \
+      --packages-select livox_ros_driver2 fast_lio \
       --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 -DDISTRO_ROS=humble \
     && test -x install/lib/livox_ros_driver2/livox_ros_driver2_node \
     && test -x install/lib/fast_lio/fastlio_mapping \
     && rm -rf build log
+
+COPY . /opt/gogoguard/app
 
 RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
     && install -m 0755 deployment/container/edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint

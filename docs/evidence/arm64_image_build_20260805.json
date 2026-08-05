@@ -1,0 +1,52 @@
+{
+  "schema": "gogoguard.arm64_image_build_receipt.v1",
+  "observed_at": "2026-08-05T20:05:41+08:00",
+  "source_base_commit": "a731f91",
+  "image": {
+    "tag": "gogoguard-robot-inspection:v2-dev",
+    "id": "sha256:ecaf0e01f4663905a244cf202c9a2e3b25448f74969d42715f0d5953fdd045f1",
+    "architecture": "arm64",
+    "operating_system": "linux",
+    "size_bytes": 1068416033
+  },
+  "builder": {
+    "runtime": "Colima 0.10.3 / Docker Engine 29.5.2",
+    "architecture": "aarch64",
+    "cpus": 6,
+    "memory_gib": 10,
+    "container_disk_gib": 60,
+    "build_jobs": 2
+  },
+  "compiled": [
+    "Livox-SDK2",
+    "livox_ros_driver2",
+    "FAST-LIO"
+  ],
+  "installed_runtime": [
+    "ROS 2 Humble",
+    "Nav2",
+    "Nav2 MPPI Controller",
+    "Nav2 Collision Monitor",
+    "rosbag2 MCAP",
+    "PCL",
+    "Cyclone DDS",
+    "GoGoGuard V2 Site Console",
+    "GoGoGuard mount calibration"
+  ],
+  "verification": {
+    "repository_tests_passed": 10,
+    "python_compile": "passed",
+    "ui_contract": "passed",
+    "container_contract": "passed",
+    "repository_knowledge": "current",
+    "ros_package_discovery": "passed",
+    "dynamic_library_scan": "passed",
+    "python_import_smoke": "passed",
+    "site_console_http_status": "passed"
+  },
+  "notes": [
+    "An unbounded first native build exhausted builder memory; the Dockerfile now limits native build parallelism to two jobs.",
+    "Livox Driver2 package_ROS2.xml and launch_ROS2 preparation is explicit in the Dockerfile instead of relying on its destructive build.sh wrapper.",
+    "This receipt proves local ARM64 construction and container smoke behavior, not robot sensor behavior or cloud GLIM mapping."
+  ]
+}

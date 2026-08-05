@@ -19,7 +19,7 @@ ui-smoke:
 	$(PYTHON) tools/ui_smoke.py apps/site_console/frontend
 
 container-validate:
-	$(PYTHON) tools/validate_container_contract.py deployment/container/Dockerfile deployment/robot/gogoguard-edge.service
+	$(PYTHON) tools/validate_container_contract.py deployment/container/Dockerfile deployment/robot/gogoguard-edge.service deployment/robot/install-release
 
 knowledge:
 	$(PYTHON) tools/knowledge.py write

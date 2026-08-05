@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "install-release must run as root" >&2
+  exit 1
+fi
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: install-release STAGING_DIRECTORY" >&2
+  exit 2
+fi
+
+readonly STAGING_DIRECTORY=$1
+readonly IMAGE_ARCHIVE="$STAGING_DIRECTORY/gogoguard-edge-image.tar"
+readonly IMAGE_SHA256="$STAGING_DIRECTORY/gogoguard-edge-image.tar.sha256"
+
+for required_file in \
+  "$IMAGE_ARCHIVE" \
+  "$IMAGE_SHA256" \
+  "$STAGING_DIRECTORY/runtime.env" \
+  "$STAGING_DIRECTORY/release.env" \
+  "$STAGING_DIRECTORY/runtime.json" \
+  "$STAGING_DIRECTORY/run-edge" \
+  "$STAGING_DIRECTORY/gogoguard-edge.service"; do
+  if [[ ! -f $required_file ]]; then
+    echo "missing staged release file: $required_file" >&2
+    exit 3
+  fi
+done
+
+if [[ $(uname -m) != aarch64 ]]; then
+  echo "this release is only valid on an aarch64 robot" >&2
+  exit 4
+fi
+
+command -v docker >/dev/null
+command -v sha256sum >/dev/null
+
+(
+  cd "$STAGING_DIRECTORY"
+  sha256sum --check "$(basename "$IMAGE_SHA256")"
+)
+
+docker load --input "$IMAGE_ARCHIVE"
+
+install -d -m 0755 /opt/gogoguard/bin /etc/gogoguard /var/lib/gogoguard
+install -m 0755 "$STAGING_DIRECTORY/run-edge" /opt/gogoguard/bin/run-edge
+install -m 0644 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
+install -m 0644 "$STAGING_DIRECTORY/release.env" /etc/gogoguard/release.env
+install -m 0644 "$STAGING_DIRECTORY/runtime.json" /etc/gogoguard/runtime.json
+install -m 0644 "$STAGING_DIRECTORY/gogoguard-edge.service" \
+  /etc/systemd/system/gogoguard-edge.service
+
+systemctl daemon-reload
+
+# Installation is deliberately separate from activation. The first start is a
+# supervised, zero-motion experiment; it is enabled at boot only after that
+# experiment has produced its receipts.
+echo "GoGoGuard V2 installed. Service is not started or enabled."
