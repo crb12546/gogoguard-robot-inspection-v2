@@ -46,9 +46,9 @@ Updated: 2026-08-05
   FAST-LIO trees and composes driver, calibration TF, FAST-LIO and Site
   Console. The 2026-08-05 native ARM64 build completed successfully. Its local
   manifest-list digest is
-  `sha256:d759fefa64a8a43802a0130ba63607d6220310f6663fdf75c7c66968b835b445`;
+  `sha256:e5ed6cc638b87cfaa0baa37461198c3bc289f4ae8d9b8ea8997db1f2eea2f558`;
   the ARM64 config digest deployed on the robot is
-  `sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777`.
+  `sha256:5d996c27735c2fb30125f5ec8c87676c24db7d7fd9d0c02b9b678796e2853ff6`.
 - Repository knowledge is now generated from per-module JSON manifests.
   `make knowledge-check` validates module paths/dependencies, the generated
   index and the immutable source snapshot.
@@ -102,6 +102,20 @@ Updated: 2026-08-05
 - The uncompressed 150.1 MiB public-cloud upload took about 237 seconds and UI
   progress stayed at 10% during rsync. Transfer progress/compression is a known
   experience issue, not a mapping correctness failure.
+- The commissioned Z1Pro at `192.168.144.108:554` now appears in Site Console
+  through an on-demand WebRTC preview. The pinned MediaMTX v1.20.0 ARM64 gateway
+  runs inside the same primary container and remuxes the camera H.264 stream
+  without transcoding.
+- Real browser sessions passed with the camera's native 1920x1080, 30 FPS,
+  H.264 High Profile level 5.2 stream in Chromium and Safari/WebKit. Both peer
+  connections established over LAN UDP/ICE and reported zero discarded output
+  frames during the receipt window.
+- With live camera readers, the complete edge container used about 299 MiB
+  (1.94% of robot memory). A one-shot whole-container CPU reading was 1.41
+  cores; this includes Livox, FAST-LIO, the UI and video forwarding and is not a
+  camera-only benchmark.
+- The camera preview is a `device_io` observation capability. Versioned patrol
+  snapshots/video remain a separate future `inspection` responsibility.
 - No V2 code has controlled robot motion.
 - First release target: live device status, 2D trajectory, 3D point-cloud
   preview, start/stop recording, sealed RecordingBundle, cloud map job, and
@@ -109,12 +123,13 @@ Updated: 2026-08-05
 
 ## Current deployed release
 
-- V2 Git commit: `5a0e2be`
+- V2 Git commit: `82135a6`
 - Robot image config digest:
-  `sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777`
+  `sha256:5d996c27735c2fb30125f5ec8c87676c24db7d7fd9d0c02b9b678796e2853ff6`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Robot verification: stationary sensing, real recording and cloud GLIM round
-  trip passed; dynamic mapping and robot motion remain unverified
+- Robot verification: stationary sensing, real recording, cloud GLIM round trip
+  and Z1Pro LAN WebRTC preview passed; dynamic mapping and robot motion remain
+  unverified
 
 ## Next experiment
 

@@ -33,6 +33,7 @@ Hardware and infrastructure
 device_io
   -> contracts.SensorSnapshot
   -> site_console live 2D trajectory + 3D cloud
+  -> contracts.CameraStreamStatus + Z1Pro WebRTC preview
   -> data_capture RecordingBundle
   -> map_factory MapJob
   -> cloud GLIM adapter

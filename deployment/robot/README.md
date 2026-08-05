@@ -14,6 +14,11 @@ the container. MID-360 at `192.168.1.161` and its robot-side host address
 `192.168.1.5` are both present. Robot installation still requires sudo because
 the `unitree` account cannot access the Docker daemon directly.
 
+The same primary container also runs the pinned MediaMTX v1.20.0 ARM64 binary.
+It pulls the commissioned Z1Pro H.264 RTSP stream on demand and exposes the LAN
+WebRTC player on TCP 8889 with ICE on TCP/UDP 8189. This is a remux-only live
+preview; it does not own patrol recording or inspection evidence.
+
 `install-release` validates the transferred image archive, loads it, and
 installs the runtime files. Installation is separate from activation so a bad
 release cannot silently replace a running one. Once the stationary receipts

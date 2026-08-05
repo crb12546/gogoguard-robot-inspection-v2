@@ -1,0 +1,70 @@
+{
+  "schema": "gogoguard.z1pro_webrtc_receipt.v1",
+  "observed_at": "2026-08-05T21:45:34+08:00",
+  "source_commit": "82135a6",
+  "robot": {
+    "service_enabled": true,
+    "service_active": true,
+    "container_state": "running",
+    "image_manifest_list_digest": "sha256:e5ed6cc638b87cfaa0baa37461198c3bc289f4ae8d9b8ea8997db1f2eea2f558",
+    "image_config_digest": "sha256:5d996c27735c2fb30125f5ec8c87676c24db7d7fd9d0c02b9b678796e2853ff6",
+    "local_docker_size_bytes": 1126550055,
+    "robot_unpacked_size_bytes": 3448738724
+  },
+  "camera": {
+    "model": "Z1Pro",
+    "transport": "RTSP over TCP",
+    "address": "192.168.144.108:554",
+    "codec": "H264",
+    "profile": "High",
+    "level": "5.2",
+    "width": 1920,
+    "height": 1080,
+    "frames_per_second": 30,
+    "track_count": 1,
+    "audio_present": false
+  },
+  "gateway": {
+    "name": "MediaMTX",
+    "version": "1.20.0",
+    "release_archive_sha256": "6aa3c03da7b6477f1e110c8e18e819cf9ef121e8981b52b8f8219982dae35f2f",
+    "stream_path": "z1pro",
+    "source_on_demand": true,
+    "transcoding": false,
+    "webrtc_http_tcp_port": 8889,
+    "ice_udp_port": 8189,
+    "ice_tcp_port": 8189,
+    "control_api": "127.0.0.1:9997"
+  },
+  "site_console": {
+    "camera_status_endpoint": "/api/v1/camera",
+    "camera_status": "ready",
+    "iframe_query": "controls=false&muted=true&autoplay=true&playsInline=true&disablepictureinpicture=false",
+    "map_history_preserved": true
+  },
+  "browser_receipts": [
+    {
+      "engine": "Chromium 150",
+      "peer_connection_established": true,
+      "outbound_rtp_packets_observed": 31143,
+      "outbound_frames_discarded": 0
+    },
+    {
+      "engine": "WebKit / Safari 26.2",
+      "peer_connection_established": true,
+      "outbound_rtp_packets_observed": 45015,
+      "outbound_frames_discarded": 0
+    }
+  ],
+  "runtime_snapshot": {
+    "whole_container_cpu_percent": 140.6,
+    "whole_container_memory_mib": 298.7,
+    "whole_container_memory_percent": 1.94,
+    "note": "This includes Livox, FAST-LIO, Site Console and MediaMTX; it is not a camera-only benchmark."
+  },
+  "limits": [
+    "This receipt verifies the wired LAN preview. Remote SaaS viewing still requires an HTTPS signaling endpoint and TURN or another controlled relay.",
+    "The current Z1Pro stream contains video only; no audio track was advertised.",
+    "Live preview is separate from versioned inspection image/video evidence and does not yet create evidence artifacts."
+  ]
+}
