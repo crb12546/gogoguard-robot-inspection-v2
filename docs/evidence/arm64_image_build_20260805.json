@@ -1,14 +1,14 @@
 {
   "schema": "gogoguard.arm64_image_build_receipt.v1",
   "observed_at": "2026-08-05T20:05:41+08:00",
-  "source_base_commit": "7eea253",
+  "source_base_commit": "5a0e2be",
   "image": {
     "tag": "gogoguard-robot-inspection:v2-dev",
-    "manifest_list_digest": "sha256:d528f0a80bb880641e8f4afadf918027dca63661893fbc85b60887f4f4bb8786",
-    "config_digest": "sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225",
+    "manifest_list_digest": "sha256:d759fefa64a8a43802a0130ba63607d6220310f6663fdf75c7c66968b835b445",
+    "config_digest": "sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777",
     "architecture": "arm64",
     "operating_system": "linux",
-    "local_docker_size_bytes": 1068408932
+    "local_docker_size_bytes": 1068408995
   },
   "builder": {
     "runtime": "Colima 0.10.3 / Docker Engine 29.5.2",
@@ -51,6 +51,6 @@
   "notes": [
     "An unbounded first native build exhausted builder memory; the Dockerfile now limits native build parallelism to two jobs.",
     "Livox Driver2 package_ROS2.xml and launch_ROS2 preparation is explicit in the Dockerfile instead of relying on its destructive build.sh wrapper.",
-    "Robot sensor behavior is recorded separately in robot_zero_motion_20260805.json; cloud GLIM mapping remains unverified."
+    "Robot sensor behavior and the cloud GLIM round trip are recorded in separate receipts."
   ]
 }

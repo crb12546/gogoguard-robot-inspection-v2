@@ -46,9 +46,9 @@ Updated: 2026-08-05
   FAST-LIO trees and composes driver, calibration TF, FAST-LIO and Site
   Console. The 2026-08-05 native ARM64 build completed successfully. Its local
   manifest-list digest is
-  `sha256:d528f0a80bb880641e8f4afadf918027dca63661893fbc85b60887f4f4bb8786`;
+  `sha256:d759fefa64a8a43802a0130ba63607d6220310f6663fdf75c7c66968b835b445`;
   the ARM64 config digest deployed on the robot is
-  `sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225`.
+  `sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777`.
 - Repository knowledge is now generated from per-module JSON manifests.
   `make knowledge-check` validates module paths/dependencies, the generated
   index and the immutable source snapshot.
@@ -88,10 +88,20 @@ Updated: 2026-08-05
 - Site Console currently under-counts the IMU messages it consumes even though
   `ros2 topic hz` verifies about 200 Hz. Treat that number as an instrumentation
   defect, not sensor loss.
-- The cloud connection address is not present in this repository, the current
-  Mac SSH config, or the relevant recent Codex task summaries. Those tasks also
-  recorded that deployment credentials/entrypoint were unavailable. The cloud
-  fixed job wrapper is not installed by V2 yet.
+- The existing Alibaba Cloud host is connected at `39.96.72.215`. A dedicated
+  robot-side Ed25519 key with strict host verification is mounted read-only in
+  the container; the cloud account password is not stored on the robot.
+- `/opt/go2/bin/gogoguard-map-job` is installed as a narrow adapter over the
+  existing pinned Jazzy GLIM pipeline. It runs the pipeline as unprivileged
+  `go2mapping` and returns the V2 `map.json`, `map.ply`, `overview.svg` and GLIM
+  build receipt contracts.
+- End-to-end job `map-7b26b091874f` passed from robot recording through rsync,
+  cloud GLIM and artifact return. The stationary 29.70 second bag produced 267
+  optimized poses, one submap and 557 displayed points; the result is an
+  engineering candidate, not a usable site map.
+- The uncompressed 150.1 MiB public-cloud upload took about 237 seconds and UI
+  progress stayed at 10% during rsync. Transfer progress/compression is a known
+  experience issue, not a mapping correctness failure.
 - No V2 code has controlled robot motion.
 - First release target: live device status, 2D trajectory, 3D point-cloud
   preview, start/stop recording, sealed RecordingBundle, cloud map job, and
@@ -99,16 +109,16 @@ Updated: 2026-08-05
 
 ## Current deployed release
 
-- V2 Git commit: `7eea253`
+- V2 Git commit: `5a0e2be`
 - Robot image config digest:
-  `sha256:648cc1a3f3bcb71dfd4dd82446002501015029cd04d1de4083efcfed2920d225`
+  `sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Robot verification: stationary sensing and real recording passed; dynamic
-  mapping, cloud GLIM round trip and motion remain unverified
+- Robot verification: stationary sensing, real recording and cloud GLIM round
+  trip passed; dynamic mapping and robot motion remain unverified
 
 ## Next experiment
 
-Restore the already-provisioned cloud GLIM host address and fixed job wrapper,
-correct the Site Console IMU instrumentation, then record one short human-
-remote-controlled out-and-back mapping loop. Do not add autonomous motion to
-that experiment.
+Record one short human-remote-controlled out-and-back mapping loop and inspect
+the returned GLIM candidate. Do not add autonomous motion to that experiment.
+Separately correct the Site Console IMU instrumentation and add real rsync
+progress or compressed transfer.

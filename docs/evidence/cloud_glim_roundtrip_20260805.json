@@ -1,0 +1,57 @@
+{
+  "schema": "gogoguard.cloud_glim_roundtrip_receipt.v1",
+  "observed_at": "2026-08-05T20:53:40+08:00",
+  "source_commit": "5a0e2be",
+  "robot": {
+    "service_enabled": true,
+    "service_active": true,
+    "image_config_digest": "sha256:d15e1a4a409dd5742044442ed3c1b071f9835888652e863b083057d5523e9777",
+    "cloud_key_fingerprint": "SHA256:As+7sTwXI+we5SvtdIIMoDQZ5ySxKaFbem/ancr/WDE"
+  },
+  "cloud": {
+    "host": "39.96.72.215",
+    "operating_system": "Ubuntu 24.04.4 LTS",
+    "architecture": "x86_64",
+    "ros_distro": "jazzy",
+    "host_key_fingerprint": "SHA256:TANUbH6YZvaPrdTW8eeqfBSFVV8bzs0Kypsjo1yAXsA",
+    "adapter_path": "/opt/go2/bin/gogoguard-map-job",
+    "adapter_sha256": "249751a93b428105c5e5ae1036254c61a6a6aa010734df6ed9060fcda5f63821"
+  },
+  "recording": {
+    "session_id": "20260805T124847Z-4e193ffa",
+    "duration_seconds": 29.699477658,
+    "bag_size_mib": 150.1,
+    "messages": 6539,
+    "lidar_messages": 299,
+    "imu_messages": 5941,
+    "odometry_messages": 299
+  },
+  "job": {
+    "job_id": "map-7b26b091874f",
+    "state": "complete",
+    "total_seconds": 262.504,
+    "upload_seconds": 237.413,
+    "message": "云端 GLIM 地图已返回"
+  },
+  "glim": {
+    "build_state": "review_artifacts_ready",
+    "duration_seconds": 26.43,
+    "pose_count": 267,
+    "imu_pose_count": 267,
+    "submap_count": 1,
+    "trajectory_distance_m": 0.065,
+    "maximum_pose_step_m": 0.002,
+    "point_count": 557
+  },
+  "artifacts": {
+    "glim-build.json": "d4bdd0a6e44260516d305381636b323b90ac6fdf0387453d8e163896757755f9",
+    "map.json": "aac5633b4455cdb1368699dffc21efeb1c3af116fe8b4eb07b9fbbddbeb145d9",
+    "map.ply": "ba3676da58315af8ae06dd2a0689db8fb12989b75c3bb549568be4687ef3a418",
+    "overview.svg": "917a07a2eb56b8a95eca9d9b691eb6a4d36bc3ea63be55537691bc72bc6fb7d1"
+  },
+  "limits": [
+    "The robot remained stationary, so this proves the automated cloud round trip but is not a usable site map.",
+    "The upload progress stays at 10 percent during rsync and the uncompressed 150 MiB bag took about four minutes over the public uplink.",
+    "Dynamic mapping and production map review remain unverified."
+  ]
+}
