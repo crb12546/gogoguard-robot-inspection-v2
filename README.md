@@ -1,8 +1,9 @@
 # Gogoguard Robot Inspection V2
 
-Clean V2 implementation for the Go2 inspection product. It deliberately does
-not build on the unverified AI candidate implementation in the previous
-repository.
+V2 product structure for the established Go2 inspection capability stack. It
+selectively migrates the existing algorithms, device integration, verified
+patches and configurations into explicit module boundaries; it does not copy
+the previous repository's mixed application structure wholesale.
 
 The first usable release provides one visible mapping loop:
 

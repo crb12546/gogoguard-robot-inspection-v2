@@ -27,6 +27,13 @@ Updated: 2026-08-05
 - The local HTTP receipt returned 340 live points, 4 recorded preview samples,
   a sealed bundle, and a 340-point demo map. It is explicitly demo evidence,
   not GLIM or robot evidence.
+- Product direction corrected on 2026-08-05: the established algorithm stack
+  is retained and selectively migrated. V2 rewrites composition and module
+  boundaries, not Livox/FAST-LIO/GLIM/small_gicp/Nav2 capabilities.
+- The first capability source is locked to old-repository commit
+  `3a7597c2af2f06efbe605b4e1ec216450db05d44`; its Livox, FAST-LIO and mapping
+  capture paths are clean in the old worktree. Exact Git tree IDs are recorded
+  in `dependencies/capability_migration.lock.json`.
 - No V2 image has been built or deployed to the robot.
 - Current Mac shell has no Docker executable, so the ARM64 image was not built.
 - Livox/FAST-LIO source revisions are recorded but are not yet compiled into the
@@ -53,6 +60,6 @@ Updated: 2026-08-05
 
 ## Next experiment
 
-Restore explicit robot/cloud connection configuration, complete and build the
-locked Livox/FAST-LIO ARM64 image, then perform the zero-motion robot experiment
-in `docs/FIRST_ROBOT_EXPERIMENT.md` while the robot is externally powered.
+Port the locked real Livox/FAST-LIO/mapping-capture closure into V2 modules,
+build it in the ARM64 image, restore robot/cloud connectivity, and then perform
+the zero-motion experiment in `docs/FIRST_ROBOT_EXPERIMENT.md`.

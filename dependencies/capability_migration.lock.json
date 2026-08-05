@@ -1,0 +1,39 @@
+{
+  "schema": "gogoguard.capability_migration_lock.v1",
+  "sourceRepository": "crb12546/gogoguard_dog_go2_real_code",
+  "sourceCommit": "3a7597c2af2f06efbe605b4e1ec216450db05d44",
+  "policy": "selective capability migration; no wholesale application copy",
+  "firstRealSlice": {
+    "sourceTrees": {
+      "src/Livox-SDK2": "cd372ba3ed228b492188fbc16e9d010d3cdfb9aa",
+      "src/livox_ros_driver2": "d4125247f446f0db053e14f423b633a8f48c51a5",
+      "src/FAST_LIO": "36ee56ee7b975b51996c475c611e75fb9cf943c4",
+      "src/go2_mapping_capture": "25d46136d2333af73df811c090f5342d969ae7ec",
+      "src/go2_site_ops": "bafba19fc5e10b110bb60a86b910d03ae18cc706",
+      "deploy/robot_humble": "acf8ddfa6ba859d6cc4cb23edc645008d6ed61fa"
+    },
+    "migrationDecision": {
+      "copyExactlyThenRefactor": [
+        "Livox-SDK2",
+        "livox_ros_driver2",
+        "FAST_LIO hardware and timing modifications"
+      ],
+      "extractByResponsibility": [
+        "go2_mapping_capture launch and configuration",
+        "coordinate and calibration subset of go2_site_ops",
+        "cloud GLIM runner and artifact contract"
+      ],
+      "doNotMigrate": [
+        "old Site Console implementation",
+        "mixed SaaS monolith",
+        "generated build/install trees",
+        "duplicate systemd entrypoints"
+      ]
+    }
+  },
+  "laterSlices": {
+    "localization": "small_gicp@8a2d3734f699c042db74ae61d295b0b928163526",
+    "motion": "ROS 2 Humble Nav2 FollowPath + MPPI + Collision Monitor",
+    "robotControl": "unitree_sdk2@5ea10f3230e41c6ab62aa79f49f84afa685d84aa"
+  }
+}

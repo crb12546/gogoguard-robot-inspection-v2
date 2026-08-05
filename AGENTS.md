@@ -2,18 +2,24 @@
 
 ## Product rule
 
-Build one reproducible Go2 inspection product through real vertical slices. The
-first slice is: connect to the robot, show live trajectory and point cloud,
+Repackage the established Go2 capability stack into one reproducible inspection
+product through real vertical slices. The first slice is: run the existing
+Livox/FAST-LIO capability on the robot, show live trajectory and point cloud,
 record a sealed dataset, submit it to the existing cloud GLIM worker, and show
 the returned 2D/3D map.
 
 ## Repository rules
 
 - Read `PROJECT_STATE.md` before changing code. It is the current factual state.
-- Keep the old `gogoguard_dog_go2_real_code` repository read-only. Do not import
-  its application implementation into V2. Verified hardware facts, datasets,
-  third-party revisions, SaaS protocol facts, and cloud runtime facts may be
-  referenced explicitly.
+- Keep the old `gogoguard_dog_go2_real_code` repository read-only. It is the
+  capability source for the frozen technology stack. Selectively port its
+  Livox, FAST-LIO, GLIM, small_gicp, Nav2, Unitree and hardware integration
+  code/configuration with provenance and tests. Do not wholesale-copy its large
+  application files, mixed orchestration, generated output, or duplicate
+  deployment entrypoints.
+- V2 is a reorganization of proven/candidate capabilities, not a new algorithm
+  project. Do not replace a frozen technology without an explicit product
+  decision backed by real data.
 - One task owns one primary module. State cross-module changes before making them.
 - Modules communicate through `modules/contracts`; do not import another
   module's internal implementation.
@@ -21,6 +27,8 @@ the returned 2D/3D map.
   slice requires it.
 - The robot has one primary ROS 2 Humble runtime container. GLIM remains on the
   existing Alibaba Cloud Jazzy worker. GoGoGuard SaaS remains external.
+- Demo mode is only a UI/contract regression harness. It is never a product
+  milestone and never substitutes for the migrated capability stack.
 - A passing unit test means only offline verification. Never describe code as
   robot-verified or production-ready without the corresponding real receipt.
 - Do not connect to or move the robot unless the user explicitly asks during
@@ -39,4 +47,3 @@ python3 -m compileall -q modules apps services
 
 For UI changes also run `make ui-smoke`. For container changes run
 `make container-validate`; building the ARM64 image requires Docker.
-
