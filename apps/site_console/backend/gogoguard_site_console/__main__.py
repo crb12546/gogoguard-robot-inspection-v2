@@ -26,7 +26,8 @@ def main() -> None:
     config = json.loads(args.config.read_text(encoding="utf-8"))
     app = InspectionApplication(data_root=args.data_root, mode=args.mode, map_worker=args.map_worker,
                                 robot_id=args.robot_id, site_id=args.site_id,
-                                topics=config["topics"], cloud=config.get("cloud"))
+                                topics=config["topics"], cloud=config.get("cloud"),
+                                camera=config.get("camera"))
     app.start()
     server = SiteConsoleServer((args.host, args.port), app, args.static_root)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())

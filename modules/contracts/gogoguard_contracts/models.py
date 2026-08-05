@@ -45,6 +45,24 @@ class DeviceStatus:
 
 
 @dataclass
+class CameraStreamStatus:
+    schema: str = "gogoguard.camera_stream_status.v1"
+    source: str = "unconfigured"
+    enabled: bool = False
+    online: bool = False
+    ready: bool = False
+    protocol: str = "webrtc"
+    stream_path: str = ""
+    port: int = 0
+    width: int | None = None
+    height: int | None = None
+    profile: str | None = None
+    level: str | None = None
+    message: str = "camera stream is not configured"
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass
 class SensorSnapshot:
     schema: str = "gogoguard.sensor_snapshot.v1"
     sequence: int = 0

@@ -27,6 +27,8 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.status())
             if path == "/api/v1/live":
                 return self._json(200, self.server.application.live())
+            if path == "/api/v1/camera":
+                return self._json(200, self.server.application.camera_status())
             if path == "/api/v1/sessions":
                 return self._json(200, {"items": self.server.application.sessions()})
             match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)", path)

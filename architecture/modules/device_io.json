@@ -2,11 +2,11 @@
   "id": "device_io",
   "responsibility": "Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters",
   "runtime": ["robot"],
-  "status": "migrating_locked_source",
-  "codeRoots": ["modules/device_io", "third_party/locked_stack/src/Livox-SDK2", "third_party/locked_stack/src/livox_ros_driver2"],
-  "entrypoints": ["gogoguard_device_io.gateway:create_gateway"],
+  "status": "robot_sensors_verified_camera_candidate",
+  "codeRoots": ["modules/device_io", "config/robot/mediamtx.yml", "third_party/locked_stack/src/Livox-SDK2", "third_party/locked_stack/src/livox_ros_driver2"],
+  "entrypoints": ["gogoguard_device_io.gateway:create_gateway", "gogoguard_device_io.camera:create_camera_gateway", "mediamtx config/robot/mediamtx.yml"],
   "dependsOn": ["contracts"],
-  "consumes": ["MID-360 UDP", "ROS 2 PointCloud2", "ROS 2 Imu"],
-  "produces": ["SensorSnapshot", "/mapping/livox/lidar", "/mapping/livox/imu"],
-  "sourceProvenance": ["old capability commit 3a7597c; exact SDK and driver trees locked"]
+  "consumes": ["MID-360 UDP", "ROS 2 PointCloud2", "ROS 2 Imu", "Z1Pro RTSP H264"],
+  "produces": ["SensorSnapshot", "CameraStreamStatus", "/mapping/livox/lidar", "/mapping/livox/imu", "Z1Pro WebRTC stream"],
+  "sourceProvenance": ["old capability commit 3a7597c; exact SDK and driver trees locked", "commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release"]
 }

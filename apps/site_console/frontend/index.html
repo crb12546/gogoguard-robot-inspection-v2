@@ -16,7 +16,10 @@
       <article><span>当前阶段</span><strong id="phase">观察模式</strong><small id="phaseHint">尚未录制</small></article>
     </section>
     <section class="workspace">
-      <article class="panel map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
+      <div class="visual-stack">
+        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe></article>
+        <article class="panel compact-map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
+      </div>
       <article class="panel map-panel"><div class="panel-title"><div><span>实时点云</span><small>拖动旋转 · 滚轮缩放</small></div><b id="pointCount">0 点</b></div><canvas id="cloud"></canvas></article>
       <aside class="panel control-panel">
         <div class="panel-title"><div><span>录制与建图</span><small>人工遥控机器狗移动</small></div></div>

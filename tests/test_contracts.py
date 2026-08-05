@@ -1,6 +1,6 @@
 import unittest
 
-from gogoguard_contracts import DeviceStatus, MapJob, RecordingSession, json_ready
+from gogoguard_contracts import CameraStreamStatus, DeviceStatus, MapJob, RecordingSession, json_ready
 
 
 class ContractsTest(unittest.TestCase):
@@ -8,3 +8,4 @@ class ContractsTest(unittest.TestCase):
         self.assertEqual(json_ready(RecordingSession())["state"], "idle")
         self.assertEqual(json_ready(MapJob())["state"], "queued")
         self.assertEqual(json_ready(DeviceStatus())["schema"], "gogoguard.device_status.v1")
+        self.assertEqual(json_ready(CameraStreamStatus())["protocol"], "webrtc")

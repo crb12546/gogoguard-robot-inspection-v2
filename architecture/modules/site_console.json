@@ -2,11 +2,11 @@
   "id": "site_console",
   "responsibility": "One field-facing page for observation, recording, mapping and later route release",
   "runtime": ["robot", "browser"],
-  "status": "implemented_demo_real_topics_pending",
+  "status": "robot_mapping_verified_camera_candidate",
   "codeRoots": ["apps/site_console"],
   "entrypoints": ["gogoguard_site_console.__main__:main"],
   "dependsOn": ["contracts", "device_io", "data_capture", "map_factory", "evidence"],
-  "consumes": ["SensorSnapshot", "RecordingSession", "MapJob"],
+  "consumes": ["SensorSnapshot", "CameraStreamStatus", "RecordingSession", "MapJob"],
   "produces": ["operator commands", "field visualization"],
   "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale"]
 }

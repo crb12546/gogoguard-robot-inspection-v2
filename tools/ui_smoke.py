@@ -6,9 +6,9 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 required = {
-    "index.html": ["trajectory", "cloud", "recordButton", "app.js"],
-    "app.js": ["/api/v1/live", "/api/v1/sessions/start", "map-jobs", "map_job_id", "drawCloud"],
-    "styles.css": [".workspace", ".control-panel", "@media"],
+    "index.html": ["trajectory", "cloud", "cameraFrame", "recordButton", "app.js"],
+    "app.js": ["/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start", "map-jobs", "map_job_id", "drawCloud"],
+    "styles.css": [".workspace", ".camera-panel", ".control-panel", "@media"],
 }
 for name, needles in required.items():
     path = root / name

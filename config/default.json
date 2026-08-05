@@ -5,6 +5,13 @@
     "imu": "/mapping/livox/imu",
     "odometry": "/Odometry"
   },
+  "camera": {
+    "enabled": true,
+    "source": "z1pro",
+    "stream_path": "z1pro",
+    "webrtc_port": 8889,
+    "status_url": "http://127.0.0.1:9997/v3/paths/get/z1pro"
+  },
   "cloud": {
     "host": "39.96.72.215",
     "user": "root",

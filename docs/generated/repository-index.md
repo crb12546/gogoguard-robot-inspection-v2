@@ -10,7 +10,7 @@ this index describes code state and never implies robot acceptance.
 | `calibration` | One authoritative base-to-lidar mount and lidar-to-IMU internal transform | robot, workstation | `ported_offline_ros_runtime_pending` | `contracts` |
 | `contracts` | Stable product messages and persisted schemas shared across modules | robot, cloud, workstation | `implemented_offline` | — |
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
-| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `migrating_locked_source` | `contracts` |
+| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_verified_camera_candidate` | `contracts` |
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | Local LiDAR-inertial odometry now; fixed-map localization in a later real slice | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration` |
@@ -18,7 +18,7 @@ this index describes code state and never implies robot acceptance.
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
 | `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `planned_locked_technology` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `planned` | `contracts`, `map_factory` |
-| `site_console` | One field-facing page for observation, recording, mapping and later route release | robot, browser | `implemented_demo_real_topics_pending` | `contracts`, `device_io`, `data_capture`, `map_factory`, `evidence` |
+| `site_console` | One field-facing page for observation, recording, mapping and later route release | robot, browser | `robot_mapping_verified_camera_candidate` | `contracts`, `device_io`, `data_capture`, `map_factory`, `evidence` |
 
 ## Module details
 
@@ -52,11 +52,11 @@ this index describes code state and never implies robot acceptance.
 ### `device_io`
 
 - Manifest: `architecture/modules/device_io.json`
-- Code roots: `modules/device_io`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`
-- Entrypoints: `gogoguard_device_io.gateway:create_gateway`
-- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu
-- Produces: SensorSnapshot, /mapping/livox/lidar, /mapping/livox/imu
-- Provenance: old capability commit 3a7597c; exact SDK and driver trees locked
+- Code roots: `modules/device_io`, `config/robot/mediamtx.yml`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`
+- Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`
+- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264
+- Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream
+- Provenance: old capability commit 3a7597c; exact SDK and driver trees locked; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release
 
 ### `evidence`
 
@@ -126,6 +126,6 @@ this index describes code state and never implies robot acceptance.
 - Manifest: `architecture/modules/site_console.json`
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
-- Consumes: SensorSnapshot, RecordingSession, MapJob
+- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob
 - Produces: operator commands, field visualization
 - Provenance: V2 implementation; old Site Console intentionally not migrated wholesale

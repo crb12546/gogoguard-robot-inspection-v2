@@ -4,14 +4,15 @@ from pathlib import Path
 
 from gogoguard_contracts import json_ready
 from gogoguard_data_capture import CaptureManager
-from gogoguard_device_io import SnapshotStore, create_gateway
+from gogoguard_device_io import SnapshotStore, create_camera_gateway, create_gateway
 from gogoguard_evidence import EventJournal
 from gogoguard_map_factory import MapJobManager
 
 
 class InspectionApplication:
     def __init__(self, *, data_root: Path, mode: str, map_worker: str, robot_id: str, site_id: str,
-                 topics: dict[str, str], cloud: dict | None = None) -> None:
+                 topics: dict[str, str], cloud: dict | None = None,
+                 camera: dict | None = None) -> None:
         data_root.mkdir(parents=True, exist_ok=True)
         self.data_root = data_root
         self.mode = mode
@@ -20,6 +21,7 @@ class InspectionApplication:
         self.store = SnapshotStore(robot_id, mode, data_root)
         self.journal = EventJournal(data_root / "events" / "runtime.jsonl")
         self.gateway = create_gateway(mode, self.store, robot_id, topics)
+        self.camera = create_camera_gateway(mode, camera)
         self.capture = CaptureManager(data_root, self.store, self.journal, mode, topics)
         self.maps = MapJobManager(data_root, map_worker, self.journal, cloud)
 
@@ -43,6 +45,9 @@ class InspectionApplication:
 
     def live(self) -> dict:
         return json_ready(self.store.get())
+
+    def camera_status(self) -> dict:
+        return json_ready(self.camera.status())
 
     def start_recording(self) -> dict:
         return json_ready(self.capture.start(self.site_id, self.robot_id))

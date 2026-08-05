@@ -50,6 +50,19 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && test -x install/lib/fast_lio/fastlio_mapping \
     && rm -rf build log
 
+# Pinned ARM64 MediaMTX release. The checksum is the upstream v1.20.0 release
+# checksum; the gateway only remuxes the commissioned Z1Pro H.264 RTSP stream.
+ARG MEDIAMTX_ARCHIVE_URL=https://github.com/bluenviron/mediamtx/releases/download/v1.20.0/mediamtx_v1.20.0_linux_arm64.tar.gz
+ADD --checksum=sha256:6aa3c03da7b6477f1e110c8e18e819cf9ef121e8981b52b8f8219982dae35f2f \
+    ${MEDIAMTX_ARCHIVE_URL} \
+    /tmp/mediamtx.tar.gz
+
+RUN mkdir -p /tmp/mediamtx-release /usr/share/licenses/mediamtx \
+    && tar -xzf /tmp/mediamtx.tar.gz -C /tmp/mediamtx-release \
+    && install -m 0755 /tmp/mediamtx-release/mediamtx /usr/local/bin/mediamtx \
+    && install -m 0644 /tmp/mediamtx-release/LICENSE /usr/share/licenses/mediamtx/LICENSE \
+    && rm -rf /tmp/mediamtx.tar.gz /tmp/mediamtx-release
+
 # Livox SDK2 installs its shared library under /usr/local/lib. The target's
 # runtime linker cache is host-specific, so make that application-owned path
 # explicit inside the container rather than relying on a build-host cache.
@@ -67,5 +80,5 @@ RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
     && rm /tmp/gogoguard-edge-entrypoint
 
 VOLUME ["/var/lib/gogoguard"]
-EXPOSE 8080
+EXPOSE 8080 8889/tcp 8189/tcp 8189/udp
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/gogoguard-edge-entrypoint"]
