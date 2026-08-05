@@ -2,6 +2,7 @@
 set -euo pipefail
 source /etc/gogoguard/release.env
 exec docker run --rm --name gogoguard-edge \
+  --stop-timeout 15 \
   --network host \
   --ipc host \
   --privileged \

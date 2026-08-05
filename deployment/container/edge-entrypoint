@@ -17,7 +17,29 @@ declare -a CHILD_PIDS=()
 cleanup() {
   trap - INT TERM EXIT
   for child_pid in "${CHILD_PIDS[@]:-}"; do
-    kill -INT "$child_pid" >/dev/null 2>&1 || true
+    kill -INT -- "-$child_pid" >/dev/null 2>&1 || true
+  done
+
+  shutdown_deadline=$((SECONDS + 8))
+  while (( SECONDS < shutdown_deadline )); do
+    children_alive=0
+    for child_pid in "${CHILD_PIDS[@]:-}"; do
+      if kill -0 -- "-$child_pid" >/dev/null 2>&1; then
+        children_alive=1
+      fi
+    done
+    if (( children_alive == 0 )); then
+      break
+    fi
+    sleep 0.2
+  done
+
+  for child_pid in "${CHILD_PIDS[@]:-}"; do
+    kill -TERM -- "-$child_pid" >/dev/null 2>&1 || true
+  done
+  sleep 0.5
+  for child_pid in "${CHILD_PIDS[@]:-}"; do
+    kill -KILL -- "-$child_pid" >/dev/null 2>&1 || true
   done
   for child_pid in "${CHILD_PIDS[@]:-}"; do
     wait "$child_pid" >/dev/null 2>&1 || true
@@ -25,7 +47,7 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
+setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -r __node:=livox_mapping_publisher \
   -r /livox/lidar:=/mapping/livox/lidar \
   -r /livox/imu:=/mapping/livox/imu \
@@ -40,20 +62,20 @@ ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   >"$LOG_ROOT/livox.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
-gogoguard-mount-tf --ros-args \
+setsid gogoguard-mount-tf --ros-args \
   -p calibration_path:="$APP_ROOT/modules/calibration/gogoguard_calibration/config/go2-u2-mid360.json" \
   -p robot_id:="$ROBOT_ID" \
   -p sensor_id:="$SENSOR_ID" \
   >"$LOG_ROOT/calibration.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
-ros2 run fast_lio fastlio_mapping --ros-args \
+setsid ros2 run fast_lio fastlio_mapping --ros-args \
   --params-file "$APP_ROOT/third_party/locked_stack/src/go2_mapping_capture/config/go2_mid360_capture_fastlio.yaml" \
   --params-file "$APP_ROOT/config/robot/fastlio_base_output.yaml" \
   >"$LOG_ROOT/fastlio.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
-gogoguard-site-console \
+setsid gogoguard-site-console \
   --mode robot \
   --map-worker "$MAP_WORKER" \
   --host 0.0.0.0 \

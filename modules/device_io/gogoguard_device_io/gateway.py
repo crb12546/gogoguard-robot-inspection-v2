@@ -203,7 +203,8 @@ class Ros2SensorGateway:
                 sequence += 1
         finally:
             node.destroy_node()
-            rclpy.shutdown()
+            if rclpy.ok():
+                rclpy.shutdown()
 
     def _publish_error(self) -> None:
         snapshot = self.store.get()

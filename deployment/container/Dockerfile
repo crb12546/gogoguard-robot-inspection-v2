@@ -50,10 +50,21 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && test -x install/lib/fast_lio/fastlio_mapping \
     && rm -rf build log
 
-COPY . /opt/gogoguard/app
+# Livox SDK2 installs its shared library under /usr/local/lib. The target's
+# runtime linker cache is host-specific, so make that application-owned path
+# explicit inside the container rather than relying on a build-host cache.
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
+COPY pyproject.toml setup.py /opt/gogoguard/app/
+COPY modules /opt/gogoguard/app/modules
+COPY apps /opt/gogoguard/app/apps
+COPY services /opt/gogoguard/app/services
+COPY config /opt/gogoguard/app/config
+COPY deployment/container/edge-entrypoint /tmp/gogoguard-edge-entrypoint
 
 RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
-    && install -m 0755 deployment/container/edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint
+    && install -m 0755 /tmp/gogoguard-edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint \
+    && rm /tmp/gogoguard-edge-entrypoint
 
 VOLUME ["/var/lib/gogoguard"]
 EXPOSE 8080

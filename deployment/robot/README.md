@@ -15,9 +15,10 @@ the container. MID-360 at `192.168.1.161` and its robot-side host address
 the `unitree` account cannot access the Docker daemon directly.
 
 `install-release` validates the transferred image archive, loads it, and
-installs the runtime files. It deliberately does not start or enable the
-service. The first start must remain supervised and stationary; boot-time
-activation comes only after the real sensor receipts pass.
+installs the runtime files. Installation is separate from activation so a bad
+release cannot silently replace a running one. Once the stationary receipts
+pass, the production policy is to keep this service running and enable it at
+boot. Explicit Docker stop handling keeps later upgrades under systemd control.
 
 The first robot deployment is an explicit experiment with these receipts:
 
