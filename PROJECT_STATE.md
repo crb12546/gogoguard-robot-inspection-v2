@@ -132,8 +132,8 @@ Updated: 2026-08-06
 - The r2 release archive SHA-256 is
   `3e18d1a4694e2bb959ac9dce12f8d35bd83a986c9c82378dc2f98c86b2462dfc`.
   The corrected host service uses the commissioned robot's Docker-compatible
-  `docker stop -t 15` form, starts only after the NTP gate, and remains enabled
-  across reboots.
+  `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
+  starts only after the NTP gate, and remains enabled across reboots.
 - 2026-08-06 boot receipt: MID-360 network passed; raw ROS rates were 10.07 Hz
   PointCloud2, about 200 Hz IMU and about 9.8 Hz `/Odometry`; Z1Pro WebRTC and
   workstation proxy status passed. No motion command was sent.

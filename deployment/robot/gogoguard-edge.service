@@ -11,6 +11,7 @@ Type=simple
 ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60
 ExecStart=/opt/gogoguard/bin/run-edge
 ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=25
