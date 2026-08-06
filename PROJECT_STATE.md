@@ -123,15 +123,15 @@ Updated: 2026-08-06
 
 ## Current deployed release
 
-- V2 image implementation commit: `ea3fb34f9bf0`; commissioned robot service
+- Active V2 implementation commit: `a78887181e18`; commissioned robot service
   compatibility follow-up: `8e4cc6cc2140`.
 - Robot image config digest:
-  `sha256:cc0ca38422ab3914b5b6959a0a7ae6205e95baab8f7684162d7ed39fd3f05cc1`
+  `sha256:3ab47f84b88d2af58c454d7f6e086f8c9455669b150b71917be32579ac199744`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260806-r2`; robot runtime no
+- Active image: `gogoguard-robot-inspection:v2-edge-20260806-r3`; robot runtime no
   longer mounts cloud SSH material and its map worker is `none`.
-- The r2 release archive SHA-256 is
-  `3e18d1a4694e2bb959ac9dce12f8d35bd83a986c9c82378dc2f98c86b2462dfc`.
+- The r3 release archive SHA-256 is
+  `9f2989e016859fe6493a7766ef073c2eb47d43953617a8e82343d3da8fa8d48e`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -182,10 +182,11 @@ Updated: 2026-08-06
   configured 45 percent ratio. The Go2 advanced only 0.074 m and Nav2 correctly
   aborted on the 0.20 m / 15 s progress contract. StopZone did not trigger,
   localization remained accepted, and clock skew was not involved.
-- A navigation-only correction is prepared from that trace: preserve StopZone,
+- A navigation-only correction is deployed from that trace: preserve StopZone,
   narrow SlowZone from +/-0.65 m to +/-0.55 m (body half-width plus 0.35 m),
-  and raise slowdown from 45 to 70 percent. Deployment and the repeat patrol
-  receipt are pending.
+  and raise slowdown from 45 to 70 percent. The installed r3 profile, active
+  service, stable-NTP restart, online sensors and generation-2 candidate were
+  verified without starting Nav2; the repeat patrol receipt is pending.
 - Robot motion and continuous fixed-map localization are now field-verified;
   dynamic map quality and a complete patrol remain unverified.
 

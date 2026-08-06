@@ -17,7 +17,7 @@ this index describes code state and never implies robot acceptance.
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
-| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `robot_motion_verified_slow_zone_field_fix_prepared` | `contracts`, `localization`, `route` |
+| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `robot_motion_verified_slow_zone_field_fix_deployed_repeat_pending` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_robot_deployed_generation_2` | `contracts`, `map_factory` |
 | `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `three_end_ui_and_api_deployed_real_map_review_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_to_workstation_resumable_transfer_verified` | `contracts`, `evidence` |
@@ -121,7 +121,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_navigation.manager:NavigationManager`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
 - Produces: safe velocity candidate, navigation feedback
-- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; first moving patrol receipt isolated a persistent 45 percent SlowZone reduction below the Go2 gait deadband; prepared profile uses +/-0.55 m and 70 percent
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; first moving patrol receipt isolated a persistent 45 percent SlowZone reduction below the Go2 gait deadband; deployed r3 profile uses +/-0.55 m and 70 percent
 
 ### `route`
 

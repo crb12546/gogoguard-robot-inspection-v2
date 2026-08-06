@@ -2,11 +2,11 @@
   "id": "navigation",
   "responsibility": "Use a released route through Nav2 FollowPath, MPPI and collision monitoring",
   "runtime": ["robot"],
-  "status": "robot_motion_verified_slow_zone_field_fix_prepared",
+  "status": "robot_motion_verified_slow_zone_field_fix_deployed_repeat_pending",
   "codeRoots": ["modules/navigation", "third_party/locked_stack/src/go2_nav2_runtime", "third_party/locked_stack/src/go2_nav2_interfaces", "third_party/locked_stack/src/go2_fastlio_patrol"],
   "entrypoints": ["gogoguard_navigation.manager:NavigationManager", "gogoguard_navigation.observer:main", "ros2 launch go2_nav2_runtime active_map_patrol.launch.py"],
   "dependsOn": ["contracts", "localization", "route"],
   "consumes": ["released route", "map pose", "local obstacle cloud"],
   "produces": ["safe velocity candidate", "navigation feedback"],
-  "sourceProvenance": ["old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c", "ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor", "2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds", "first moving patrol receipt isolated a persistent 45 percent SlowZone reduction below the Go2 gait deadband; prepared profile uses +/-0.55 m and 70 percent"]
+  "sourceProvenance": ["old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c", "ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor", "2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds", "first moving patrol receipt isolated a persistent 45 percent SlowZone reduction below the Go2 gait deadband; deployed r3 profile uses +/-0.55 m and 70 percent"]
 }
