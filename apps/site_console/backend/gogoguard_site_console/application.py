@@ -103,6 +103,9 @@ class InspectionApplication:
     def receive_map_artifact(self, job_id: str, name: str, reader, length: int, sha256: str) -> dict:
         return self.exchange.receive_map_artifact(job_id, name, reader, length, sha256)
 
+    def map_import_descriptor(self, job_id: str) -> dict:
+        return self.exchange.map_import_descriptor(job_id)
+
     def commit_map_import(self, job_id: str, payload: dict) -> dict:
         return self.exchange.commit_map_import(job_id, payload)
 

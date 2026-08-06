@@ -34,6 +34,9 @@ class EdgeTransferApplication:
     def receive_map_artifact(self, job_id, name, reader, length, sha256):
         return self.exchange.receive_map_artifact(job_id, name, reader, length, sha256)
 
+    def map_import_descriptor(self, job_id: str) -> dict:
+        return self.exchange.map_import_descriptor(job_id)
+
     def commit_map_import(self, job_id: str, payload: dict) -> dict:
         return self.exchange.commit_map_import(job_id, payload)
 
@@ -127,10 +130,38 @@ class EdgeTransferTest(unittest.TestCase):
             )
             self.assertEqual(committed["stage"], "deployed_to_robot")
             self.assertTrue((self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply").is_file())
+
+            # Repeated selection is a no-op transfer and remains successful.
+            repeated = client.deploy_map(
+                {
+                    "job_id": JOB_ID,
+                    "session_id": SESSION_ID,
+                    "created_at": "2026-08-06T01:02:03+00:00",
+                    "updated_at": "2026-08-06T01:03:03+00:00",
+                    "metrics": {"worker": "cloud-glim"},
+                },
+                artifacts,
+            )
+            self.assertEqual(repeated["stage"], "deployed_to_robot")
+            self.assertFalse((self.root / "workstation-imports" / JOB_ID).exists())
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_repeated_staged_artifact_consumes_the_request_body(self) -> None:
+        import io
+
+        content = b"map artifact" * 4096
+        first = io.BytesIO(content)
+        self.exchange.receive_map_artifact(
+            JOB_ID, "map.ply", first, len(content), digest(content)
+        )
+        repeated = io.BytesIO(content)
+        self.exchange.receive_map_artifact(
+            JOB_ID, "map.ply", repeated, len(content), digest(content)
+        )
+        self.assertEqual(repeated.tell(), len(content))
 
     def test_navigation_map_import_rejects_non_glim_artifact(self) -> None:
         values = {

@@ -159,13 +159,36 @@ class RobotClient:
         for path in sorted(artifact_root.iterdir()):
             if not path.is_file() or path.name.startswith("."):
                 continue
-            item = {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
+            files.append(
+                {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
+            )
+
+        remote_files: dict[str, dict] = {}
+        try:
+            descriptor = self.get(f"api/v1/edge/map-imports/{job['job_id']}")
+            remote_files = {
+                str(item.get("name", "")): item
+                for item in descriptor.get("files") or []
+                if isinstance(item, dict)
+            }
+        except RobotConnectionError:
+            # Compatibility with an older edge release: PUT remains safe once
+            # its server-side request-body handling is upgraded.
+            remote_files = {}
+
+        for item in files:
+            remote = remote_files.get(item["name"])
+            if remote and (
+                int(remote.get("bytes", -1)) == item["bytes"]
+                and str(remote.get("sha256", "")) == item["sha256"]
+            ):
+                continue
+            path = artifact_root / item["name"]
             self._put_file(
                 f"api/v1/edge/map-imports/{job['job_id']}/artifacts/{quote(path.name, safe='')}",
                 path,
                 item["sha256"],
             )
-            files.append(item)
         payload = {
             "schema": "gogoguard.workstation_map_deployment.v1",
             "job_id": job["job_id"],

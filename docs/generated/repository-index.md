@@ -20,7 +20,7 @@ this index describes code state and never implies robot acceptance.
 | `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `robot_motion_verified_slow_zone_field_fix_deployed_repeat_pending` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_robot_deployed_generation_2` | `contracts`, `map_factory` |
 | `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `three_end_ui_and_api_deployed_real_map_review_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
-| `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_to_workstation_resumable_transfer_verified` | `contracts`, `evidence` |
+| `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_transfer_verified_and_idempotent_map_import_offline_verified` | `contracts`, `evidence` |
 
 ## Module details
 

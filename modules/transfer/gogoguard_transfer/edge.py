@@ -105,6 +105,16 @@ class EdgeArtifactExchange:
         target = staging / artifact_name
         if target.is_file():
             if target.stat().st_size == content_length and _sha256(target) == expected_sha256:
+                # An HTTP client may already be streaming the request body when
+                # this idempotency check succeeds. Consume it before replying;
+                # returning early closes the socket under the sender and
+                # surfaces as BrokenPipeError on large repeated deployments.
+                remaining = content_length
+                while remaining:
+                    chunk = reader.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise TransferContractError("artifact upload ended before Content-Length")
+                    remaining -= len(chunk)
                 return {"name": artifact_name, "bytes": content_length, "sha256": expected_sha256}
             raise TransferContractError("immutable staged artifact already exists with different content")
         temporary = target.with_name(f".{target.name}.part")
@@ -130,6 +140,32 @@ class EdgeArtifactExchange:
                 temporary.unlink()
         return {"name": artifact_name, "bytes": content_length, "sha256": expected_sha256}
 
+    def map_import_descriptor(self, job_id: str) -> dict:
+        """Describe immutable artifacts already held for a map deployment."""
+        self._validate_job(job_id)
+        final_artifacts = self.map_jobs_root / job_id / "artifacts"
+        staged_artifacts = self.import_root / job_id / "artifacts"
+        if final_artifacts.is_dir():
+            state = "committed"
+            root = final_artifacts
+        elif staged_artifacts.is_dir():
+            state = "staged"
+            root = staged_artifacts
+        else:
+            state = "empty"
+            root = None
+        files = [] if root is None else [
+            {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
+            for path in sorted(root.iterdir())
+            if path.is_file() and not path.name.startswith(".")
+        ]
+        return {
+            "schema": "gogoguard.edge_map_import.v1",
+            "job_id": job_id,
+            "state": state,
+            "files": files,
+        }
+
     def commit_map_import(self, job_id: str, payload: dict) -> dict:
         self._validate_job(job_id)
         if payload.get("schema") != "gogoguard.workstation_map_deployment.v1":
@@ -145,27 +181,27 @@ class EdgeArtifactExchange:
             raise TransferContractError(f"map deployment is missing artifacts: {missing}")
         staging_root = self.import_root / job_id
         staging_artifacts = staging_root / "artifacts"
+        final_root = self.map_jobs_root / job_id
+        final_artifacts = final_root / "artifacts"
+        verification_root = final_artifacts if final_artifacts.is_dir() else staging_artifacts
         for item in files:
             name = str(item.get("name", ""))
             self._validate_artifact_name(name)
-            path = staging_artifacts / name
+            path = verification_root / name
             if not path.is_file():
-                raise TransferContractError(f"staged map artifact is missing: {name}")
+                raise TransferContractError(f"map artifact is missing: {name}")
             if path.stat().st_size != int(item.get("bytes", -1)):
-                raise TransferContractError(f"staged map artifact size mismatch: {name}")
+                raise TransferContractError(f"map artifact size mismatch: {name}")
             if _sha256(path) != str(item.get("sha256", "")):
-                raise TransferContractError(f"staged map artifact hash mismatch: {name}")
-        artifact = _json(staging_artifacts / "map.json")
+                raise TransferContractError(f"map artifact hash mismatch: {name}")
+        artifact = _json(verification_root / "map.json")
         if artifact.get("source") != "cloud-glim":
             raise TransferContractError("navigation accepts only cloud GLIM maps")
 
-        final_root = self.map_jobs_root / job_id
-        final_artifacts = final_root / "artifacts"
         if final_artifacts.exists():
-            for item in files:
-                existing = final_artifacts / str(item["name"])
-                if not existing.is_file() or _sha256(existing) != str(item["sha256"]):
-                    raise TransferContractError("immutable robot map version already differs")
+            # A repeated or resumed deployment can leave a verified staging
+            # copy behind. The committed immutable version is authoritative.
+            shutil.rmtree(staging_root, ignore_errors=True)
         else:
             final_root.mkdir(parents=True, exist_ok=True)
             os.replace(staging_artifacts, final_artifacts)

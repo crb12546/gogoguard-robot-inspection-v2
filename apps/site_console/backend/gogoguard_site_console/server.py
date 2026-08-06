@@ -49,6 +49,13 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                     200, self.server.application.recording_export(match.group(1))
                 )
             match = re.fullmatch(
+                r"/api/v1/edge/map-imports/(map-[A-Za-z0-9]{12})", path
+            )
+            if match:
+                return self._json(
+                    200, self.server.application.map_import_descriptor(match.group(1))
+                )
+            match = re.fullmatch(
                 r"/api/v1/edge/recordings/([A-Za-z0-9-]+)/files/(.+)", path
             )
             if match:
