@@ -123,7 +123,8 @@ Updated: 2026-08-06
 
 ## Current deployed release
 
-- V2 Git commit for the active release: `ea3fb34f9bf0`
+- V2 image implementation commit: `ea3fb34f9bf0`; commissioned robot service
+  compatibility follow-up: `8e4cc6cc2140`.
 - Robot image config digest:
   `sha256:cc0ca38422ab3914b5b6959a0a7ae6205e95baab8f7684162d7ed39fd3f05cc1`
 - Robot service: `enabled`, `active`, live status at port 8080
@@ -134,6 +135,8 @@ Updated: 2026-08-06
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
+  The final restart receipt recorded `gogoguard-edge.service: Succeeded`, then
+  passed the stable-NTP gate and returned to `active` without a failure result.
 - 2026-08-06 boot receipt: MID-360 network passed; raw ROS rates were 10.07 Hz
   PointCloud2, about 200 Hz IMU and about 9.8 Hz `/Odometry`; Z1Pro WebRTC and
   workstation proxy status passed. No motion command was sent.
