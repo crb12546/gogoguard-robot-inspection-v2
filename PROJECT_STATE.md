@@ -160,10 +160,12 @@ Updated: 2026-08-06
   robot as offline.
 - The updated ARM64 robot image is built locally as
   `gogoguard-robot-inspection:v2-edge-20260806`, image ID
-  `sha256:d5970bab1713dd6a22b86e217a77e50a3ec3f3c2a314ff88d6026642695112ed`.
+  `sha256:8ddb8f2ff3d78f4882ae613c4e4b706dc82434dcad234f51a5b4ac8e2fd88853`.
   Its imports, ROS entrypoint and edge-only map-worker contract passed inside
-  the image. A checksummed five-gigabyte release is prepared under
-  `release-cache/edge-20260806` and is intentionally outside Git.
+  the image. A checksummed 1.1 GiB export of the 5.03 GB virtual image is
+  prepared under `release-cache/edge-20260806` and is intentionally outside
+  Git. Its exported archive SHA-256 is
+  `dd3a7a7d243ddf1a6c98c68a297e8f69a46b9aefc91b2c24f4e2644140266df7`.
 - The new Edge Agent, cloud progress wrapper and release remain undeployed
   while the robot is powered off. Dynamic field acceptance is still pending.
 
