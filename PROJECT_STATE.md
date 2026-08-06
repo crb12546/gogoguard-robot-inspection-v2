@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Verified external facts
 
@@ -123,15 +123,14 @@ Updated: 2026-08-06
 
 ## Current deployed release
 
-- Active V2 implementation commit: `a78887181e18`; commissioned robot service
-  compatibility follow-up: `8e4cc6cc2140`.
+- Active V2 implementation commit: `7ac9b3874fc3a5d52bbec62e1190ad8af30155d4`.
 - Robot image config digest:
-  `sha256:3ab47f84b88d2af58c454d7f6e086f8c9455669b150b71917be32579ac199744`
+  `sha256:38ab20106377c491b8b07740419c13755a4cc08e3deeed4b2736027245b48357`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260806-r3`; robot runtime no
+- Active image: `gogoguard-robot-inspection:v2-edge-20260807-r4`; robot runtime no
   longer mounts cloud SSH material and its map worker is `none`.
-- The r3 release archive SHA-256 is
-  `9f2989e016859fe6493a7766ef073c2eb47d43953617a8e82343d3da8fa8d48e`.
+- The r4 release archive SHA-256 is
+  `99636f88dfc2d573a62798a74ba7302b3b7c49162fff6f9602f0f0b3ddc586cc`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -185,21 +184,30 @@ Updated: 2026-08-06
 - A navigation-only correction is deployed from that trace: preserve StopZone,
   narrow SlowZone from +/-0.65 m to +/-0.55 m (body half-width plus 0.35 m),
   and raise slowdown from 45 to 70 percent. The installed r3 profile, active
-  service, stable-NTP restart, online sensors and generation-2 candidate were
-  verified without starting Nav2; the repeat patrol receipt is pending.
-- Robot motion and continuous fixed-map localization are now field-verified;
-  dynamic map quality and a complete patrol remain unverified.
+  service, stable-NTP restart and generation-2 candidate were verified. The
+  repeat patrol then completed the 18.116 m recorded route in 91.16 seconds
+  with Nav2 accepting the goal and the first final nonzero command emitted
+  200.7 ms after the request (`ROUTE_COMPLETE`).
+- Outdoor GLIM job `map-28acad0c6b0e` completed from recording
+  `20260806T161544Z-47354601`: 660 samples over 263 seconds produced 2,648
+  optimized poses, 156 submaps and 3,096,005 displayed points. Its recorded
+  route is 191.09 m with 645 generation-2 waypoints. Map quality and patrol on
+  this new outdoor version have not yet been field-accepted.
+- Release r4 makes workstation-to-robot map deployment idempotent. The robot
+  exposes existing immutable artifact sizes and SHA-256 values, the Mac skips
+  exact copies, and repeated PUT handling consumes the full HTTP request body.
+  With the 52,916,127-byte outdoor map already committed, two consecutive
+  prepare operations completed without transfer or `Broken pipe`; both
+  returned candidate `map-28acad0c6b0e`. Nav2 and the motion bridge remained
+  stopped throughout this receipt.
+- Robot motion, continuous fixed-map localization and one complete indoor
+  recorded-route patrol are now field-verified.
 
 ## Known field follow-ups
 
-- Collect a cold-boot receipt for the prepared Livox/NTP correction and a
-  repeat patrol receipt through the observed narrow section for the SlowZone
-  correction.
-- Make workstation map deployment idempotent when an immutable copy of the
-  selected artifact already exists on the robot. The current PUT path rejects
-  before consuming the request body, which can surface as `Broken pipe`; the
-  existing imported map can still be prepared directly and was used for the
-  generation-2 receipt above.
+- Collect a cold-boot receipt for the prepared Livox/NTP correction.
+- Field-test localization and patrol on outdoor map `map-28acad0c6b0e`; the
+  map and route are prepared but its Nav2 runtime has not yet been started.
 - Preserve the exact Nav2/TF failure detail in the navigation status contract
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
