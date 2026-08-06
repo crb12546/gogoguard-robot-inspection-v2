@@ -2,7 +2,7 @@
   "id": "map_factory",
   "responsibility": "Submit a sealed recording to cloud GLIM and return versioned map artifacts",
   "runtime": ["workstation", "cloud"],
-  "status": "workstation_orchestration_offline_cloud_worker_previously_verified",
+  "status": "real_workstation_to_cloud_glim_roundtrip_verified",
   "codeRoots": ["services/map_factory", "deployment/cloud"],
   "entrypoints": ["gogoguard_map_factory.manager:MapJobManager", "deployment/cloud/gogoguard-map-job"],
   "dependsOn": ["contracts", "evidence"],

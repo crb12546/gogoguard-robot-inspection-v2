@@ -2,7 +2,7 @@
   "id": "transfer",
   "responsibility": "Immutable and resumable artifact exchange across robot, workstation and cloud boundaries",
   "runtime": ["robot", "workstation"],
-  "status": "implemented_and_offline_contract_tested",
+  "status": "real_robot_to_workstation_resumable_transfer_verified",
   "codeRoots": ["modules/transfer"],
   "entrypoints": ["gogoguard_transfer.edge:EdgeArtifactExchange", "gogoguard_field_workstation.robot_client:RobotClient"],
   "dependsOn": ["contracts", "evidence"],

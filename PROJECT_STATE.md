@@ -123,15 +123,24 @@ Updated: 2026-08-06
 
 ## Current deployed release
 
-- V2 Git commit: `82135a6`
+- V2 Git commit prepared for the active release: `3369fee`
 - Robot image config digest:
-  `sha256:5d996c27735c2fb30125f5ec8c87676c24db7d7fd9d0c02b9b678796e2853ff6`
+  `sha256:d670f7605c0c5fd6162f38355a6f282f213efa6a063d43612c328330edde3f0b`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Robot verification: stationary sensing, real recording, cloud GLIM round trip
-  and Z1Pro LAN WebRTC preview passed; dynamic mapping and robot motion remain
-  unverified
+- Active image: `gogoguard-robot-inspection:v2-edge-20260806`; robot runtime no
+  longer mounts cloud SSH material and its map worker is `none`.
+- 2026-08-06 boot receipt: MID-360 network passed; raw ROS rates were 10.07 Hz
+  PointCloud2, about 200 Hz IMU and about 9.8 Hz `/Odometry`; Z1Pro WebRTC and
+  workstation proxy status passed. No motion command was sent.
+- The Mac workstation completed the new robot-to-Mac-to-cloud flow for the 92
+  and 485 sample historical recordings. Jobs `map-e4895ff7ba37` and
+  `map-13bbdfcf2824` returned local 2D SVG, 3D JSON and PLY artifacts. A new
+  39-second recording also completed as `map-648e606fb9a5`.
+- Browser verification showed the 2D overview, rotatable 3D point cloud,
+  camera, live trajectory and separate available-map/task history sections.
+- Dynamic mapping quality and robot motion remain unverified.
 
-## 2026-08-06 local architecture correction (not yet deployed)
+## 2026-08-06 three-end architecture correction
 
 - The production workflow is now explicitly robot + Mac workstation + cloud.
   The robot seals recordings and runs realtime algorithms; Mac owns UI,
@@ -166,12 +175,13 @@ Updated: 2026-08-06
   prepared under `release-cache/edge-20260806` and is intentionally outside
   Git. Its exported archive SHA-256 is
   `dd3a7a7d243ddf1a6c98c68a297e8f69a46b9aefc91b2c24f4e2644140266df7`.
-- The new Edge Agent, cloud progress wrapper and release remain undeployed
-  while the robot is powered off. Dynamic field acceptance is still pending.
+- The Edge Agent and Mac workflow are deployed and have completed historical
+  and short-recording GLIM round trips. The cloud progress wrapper still needs
+  an explicit deployment receipt. Dynamic field acceptance is still pending.
 
 ## Next experiment
 
-Deploy the workstation and updated Edge Agent, verify robot-to-Mac transfer and
-the real staged progress flow using the existing recording first, then record
-one short open-area mapping loop. Only after selecting and deploying its GLIM
-map should the localization/Nav2 patrol experiment begin.
+Record one intentional open-area mapping loop, review its GLIM artifacts on the
+Mac, select and deploy that map to the robot, then verify fixed-map localization
+before starting the Nav2 patrol experiment. Existing indoor/stationary maps are
+engineering evidence and should not be treated as the field navigation map.

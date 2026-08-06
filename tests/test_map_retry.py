@@ -28,6 +28,7 @@ class MapRetryTest(unittest.TestCase):
             initial = manager.submit(session)
             failed = self._wait(manager, initial.job_id, MapJobState.FAILED)
             self.assertIn("snapshots.jsonl", failed.error)
+            self.assertLess(failed.progress, 100)
 
             samples = recording / "samples"
             samples.mkdir()

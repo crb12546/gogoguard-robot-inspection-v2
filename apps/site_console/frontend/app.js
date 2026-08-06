@@ -266,12 +266,19 @@ async function showResult(job) {
 }
 
 function renderMapHistory() {
-  $('maps').innerHTML = state.mapJobs.map(job => {
+  const completed = state.mapJobs.filter(job => job.state === 'complete');
+  const tasks = state.mapJobs.filter(job => job.state !== 'complete');
+  $('maps').innerHTML = completed.map(job => {
     const selected = state.latestMapJob?.job_id === job.job_id ? ' selected' : '';
-    const selectable = job.state === 'complete' ? ' selectable' : '';
-    const retry = job.state === 'failed' ? '<button class="mini-button retry-map" type="button">从断点重试</button>' : '';
-    return `<div class="session${selectable}${selected}" data-map-job="${escapeHtml(job.job_id)}"><div><strong>${escapeHtml(job.job_id)}</strong><small>${escapeHtml(job.message || job.stage)} · ${escapeHtml(job.session_id)}</small>${retry}</div><b>${escapeHtml(job.state)} ${Number(job.progress || 0)}%</b></div>`;
-  }).join('') || '<div class="empty">暂无地图版本</div>';
+    return `<div class="session selectable${selected}" data-map-job="${escapeHtml(job.job_id)}"><div><strong>${escapeHtml(job.job_id)}</strong><small>${escapeHtml(job.message || job.stage)} · ${escapeHtml(job.session_id)}</small></div><b>可用</b></div>`;
+  }).join('') || '<div class="asset-empty">暂无可用地图</div>';
+  $('mapTasks').innerHTML = tasks.map(job => {
+    const failed = job.state === 'failed';
+    const retry = failed ? '<button class="mini-button retry-map" type="button">重试此任务</button>' : '';
+    const detail = failed ? (job.error || job.message || '未知错误') : (job.message || job.stage);
+    const status = failed ? '失败' : `${escapeHtml(job.state)} ${Number(job.progress || 0)}%`;
+    return `<div class="session" data-map-job="${escapeHtml(job.job_id)}"><div><strong>${escapeHtml(job.job_id)}</strong><small>${escapeHtml(detail)} · ${escapeHtml(job.session_id)}</small>${retry}</div><b class="${failed ? 'failed' : 'pending'}">${status}</b></div>`;
+  }).join('') || '<div class="asset-empty">当前没有处理任务</div>';
 }
 
 async function refreshMapJobs() {
@@ -455,7 +462,7 @@ $('resetMapView').addEventListener('click', () => {
   Object.assign(state.views.result, {yaw: 0.7, pitch: 0.55, zoom: 18});
   redrawResult();
 });
-$('maps').addEventListener('click', async event => {
+async function handleMapClick(event) {
   const row = event.target.closest('[data-map-job]');
   if (!row) return;
   const job = state.mapJobs.find(item => item.job_id === row.dataset.mapJob);
@@ -472,7 +479,9 @@ $('maps').addEventListener('click', async event => {
     return;
   }
   if (job?.state === 'complete') await showResult(job);
-});
+}
+$('maps').addEventListener('click', handleMapClick);
+$('mapTasks').addEventListener('click', handleMapClick);
 $('sessions').addEventListener('click', async event => {
   const row = event.target.closest('[data-session-id]');
   if (!row) return;

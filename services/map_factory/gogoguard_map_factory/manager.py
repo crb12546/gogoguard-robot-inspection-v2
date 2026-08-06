@@ -80,10 +80,11 @@ class MapJobManager:
             target = self._run_demo if self.worker == "demo" else self._run_ssh
             target(job_id, session_root)
         except Exception as exc:
+            current_progress = min(self.get(job_id).progress, 99)
             self._update(
                 job_id,
                 MapJobState.FAILED,
-                100,
+                current_progress,
                 "建图工作流失败",
                 stage="failed",
                 error=str(exc),
@@ -188,7 +189,8 @@ class MapJobManager:
                          point_cloud_url=prefix + "/map.json", metrics=metrics)
             self.journal.append("map.completed", job_id=job_id, **metrics)
         except Exception as exc:
-            self._update(job_id, MapJobState.FAILED, 100, "建图失败", stage="failed", error=str(exc))
+            current_progress = min(self.get(job_id).progress, 99)
+            self._update(job_id, MapJobState.FAILED, current_progress, "建图失败", stage="failed", error=str(exc))
             self.journal.append("map.failed", job_id=job_id, error=str(exc))
 
     def _run_ssh(self, job_id: str, session_root: Path) -> None:
@@ -241,7 +243,8 @@ class MapJobManager:
                          artifact_root=str(artifact_root), overview_url=prefix + "/overview.svg",
                          point_cloud_url=prefix + "/map.json", metrics={"worker": "cloud-glim"})
         except Exception as exc:
-            self._update(job_id, MapJobState.FAILED, 100, "云端建图失败", stage="failed", error=str(exc))
+            current_progress = min(self.get(job_id).progress, 99)
+            self._update(job_id, MapJobState.FAILED, current_progress, "云端建图失败", stage="failed", error=str(exc))
 
     def _rsync_with_progress(
         self,
