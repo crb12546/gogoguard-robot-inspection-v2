@@ -1,0 +1,12 @@
+{
+  "id": "transfer",
+  "responsibility": "Immutable and resumable artifact exchange across robot, workstation and cloud boundaries",
+  "runtime": ["robot", "workstation"],
+  "status": "implemented_and_offline_contract_tested",
+  "codeRoots": ["modules/transfer"],
+  "entrypoints": ["gogoguard_transfer.edge:EdgeArtifactExchange", "gogoguard_field_workstation.robot_client:RobotClient"],
+  "dependsOn": ["contracts", "evidence"],
+  "consumes": ["sealed RecordingBundle", "cloud GLIM map artifacts"],
+  "produces": ["verified workstation recording", "immutable robot map version"],
+  "sourceProvenance": ["V2 three-end transfer contract designed from the 2026-08-05 field transfer receipt"]
+}

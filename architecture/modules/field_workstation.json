@@ -1,0 +1,12 @@
+{
+  "id": "field_workstation",
+  "responsibility": "Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment",
+  "runtime": ["workstation", "browser"],
+  "status": "implemented_offline_deployment_pending",
+  "codeRoots": ["apps/field_workstation", "deployment/workstation"],
+  "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
+  "dependsOn": ["contracts", "transfer", "map_factory", "site_console", "evidence"],
+  "consumes": ["robot Edge Agent API", "sealed RecordingBundle", "cloud GLIM progress and artifacts"],
+  "produces": ["field workflow UI", "map version catalog", "selected robot map deployment", "robot release staging"],
+  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06"]
+}

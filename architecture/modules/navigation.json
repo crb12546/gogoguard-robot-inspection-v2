@@ -2,11 +2,11 @@
   "id": "navigation",
   "responsibility": "Use a released route through Nav2 FollowPath, MPPI and collision monitoring",
   "runtime": ["robot"],
-  "status": "planned_locked_technology",
-  "codeRoots": [],
-  "entrypoints": [],
+  "status": "migrated_offline_robot_pending",
+  "codeRoots": ["modules/navigation", "third_party/locked_stack/src/go2_nav2_runtime", "third_party/locked_stack/src/go2_nav2_interfaces", "third_party/locked_stack/src/go2_fastlio_patrol"],
+  "entrypoints": ["gogoguard_navigation.manager:NavigationManager", "gogoguard_navigation.observer:main", "ros2 launch go2_nav2_runtime active_map_patrol.launch.py"],
   "dependsOn": ["contracts", "localization", "route"],
   "consumes": ["released route", "map pose", "local obstacle cloud"],
   "produces": ["safe velocity candidate", "navigation feedback"],
-  "sourceProvenance": ["ROS 2 Humble Nav2 architecture fixed; migration begins after real map slice"]
+  "sourceProvenance": ["old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c", "ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor"]
 }

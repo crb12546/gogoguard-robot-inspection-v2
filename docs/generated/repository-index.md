@@ -10,15 +10,17 @@ this index describes code state and never implies robot acceptance.
 | `calibration` | One authoritative base-to-lidar mount and lidar-to-IMU internal transform | robot, workstation | `ported_offline_ros_runtime_pending` | `contracts` |
 | `contracts` | Stable product messages and persisted schemas shared across modules | robot, cloud, workstation | `implemented_offline` | — |
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
-| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_and_camera_webrtc_verified` | `contracts` |
+| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_unitree_motion_migrated_offline` | `contracts` |
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
+| `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `implemented_offline_deployment_pending` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
-| `localization` | Local LiDAR-inertial odometry now; fixed-map localization in a later real slice | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration` |
-| `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | cloud, robot | `robot_cloud_roundtrip_verified` | `contracts`, `evidence` |
+| `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
+| `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `workstation_orchestration_offline_cloud_worker_previously_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
-| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `planned_locked_technology` | `contracts`, `localization`, `route` |
-| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `planned` | `contracts`, `map_factory` |
-| `site_console` | One field-facing page for observation, recording, mapping and later route release | robot, browser | `robot_mapping_and_camera_webrtc_verified` | `contracts`, `device_io`, `data_capture`, `map_factory`, `evidence` |
+| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `migrated_offline_robot_pending` | `contracts`, `localization`, `route` |
+| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_implemented_offline` | `contracts`, `map_factory` |
+| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `three_end_ui_and_api_offline_robot_deployment_pending` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
+| `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `implemented_and_offline_contract_tested` | `contracts`, `evidence` |
 
 ## Module details
 
@@ -52,11 +54,11 @@ this index describes code state and never implies robot acceptance.
 ### `device_io`
 
 - Manifest: `architecture/modules/device_io.json`
-- Code roots: `modules/device_io`, `config/robot/mediamtx.yml`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`
-- Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`
-- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264
-- Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream
-- Provenance: old capability commit 3a7597c; exact SDK and driver trees locked; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release
+- Code roots: `modules/device_io`, `config/robot/mediamtx.yml`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`, `third_party/locked_stack/src/go2_cmd_vel_bridge`, `third_party/locked_stack/src/unitree_api`
+- Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
+- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, safety-filtered Twist
+- Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, Unitree SDK2 Move and StopMove
+- Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release
 
 ### `evidence`
 
@@ -66,6 +68,15 @@ this index describes code state and never implies robot acceptance.
 - Consumes: module events
 - Produces: gogoguard.event.v1 JSONL
 - Provenance: V2 product infrastructure
+
+### `field_workstation`
+
+- Manifest: `architecture/modules/field_workstation.json`
+- Code roots: `apps/field_workstation`, `deployment/workstation`
+- Entrypoints: `gogoguard_field_workstation.__main__:main`, `deployment/workstation/run-native`, `deployment/workstation/compose.yaml`
+- Consumes: robot Edge Agent API, sealed RecordingBundle, cloud GLIM progress and artifacts
+- Produces: field workflow UI, map version catalog, selected robot map deployment, robot release staging
+- Provenance: V2 three-end ownership correction agreed 2026-08-06
 
 ### `inspection`
 
@@ -79,11 +90,11 @@ this index describes code state and never implies robot acceptance.
 ### `localization`
 
 - Manifest: `architecture/modules/localization.json`
-- Code roots: `third_party/locked_stack/src/FAST_LIO`
-- Entrypoints: `ros2 run fast_lio fastlio_mapping`
-- Consumes: /mapping/livox/lidar, /mapping/livox/imu
-- Produces: /Odometry
-- Provenance: old FAST-LIO tree 36ee56ee; small_gicp later slice remains pinned
+- Code roots: `third_party/locked_stack/src/FAST_LIO`, `third_party/locked_stack/src/go2_map_manager`
+- Entrypoints: `ros2 run fast_lio fastlio_mapping`, `ros2 run go2_map_manager calibrated_cloud_transformer`, `ros2 run go2_map_manager continuous_map_localizer`
+- Consumes: /mapping/livox/lidar, /mapping/livox/imu, /navigation/cloud_body, versioned localization map PCD
+- Produces: /Odometry, map -> odom, /localization/pose, /localization/status, /localization/usable
+- Provenance: old FAST-LIO tree 36ee56ee; old go2_map_manager tree 3a512028; small_gicp commit 8a2d373
 
 ### `map_factory`
 
@@ -92,7 +103,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_map_factory.manager:MapJobManager`, `deployment/cloud/gogoguard-map-job`
 - Consumes: RecordingBundle
 - Produces: MapJob, map.ply, map.json, overview.svg
-- Provenance: V2 adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline
+- Provenance: V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline
 
 ### `mission`
 
@@ -106,26 +117,35 @@ this index describes code state and never implies robot acceptance.
 ### `navigation`
 
 - Manifest: `architecture/modules/navigation.json`
-- Code roots: none yet
-- Entrypoints: none yet
+- Code roots: `modules/navigation`, `third_party/locked_stack/src/go2_nav2_runtime`, `third_party/locked_stack/src/go2_nav2_interfaces`, `third_party/locked_stack/src/go2_fastlio_patrol`
+- Entrypoints: `gogoguard_navigation.manager:NavigationManager`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
 - Produces: safe velocity candidate, navigation feedback
-- Provenance: ROS 2 Humble Nav2 architecture fixed; migration begins after real map slice
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor
 
 ### `route`
 
 - Manifest: `architecture/modules/route.json`
-- Code roots: none yet
-- Entrypoints: none yet
-- Consumes: released map, operator route edits
-- Produces: released route
-- Provenance: V2 module boundary; existing route capability will be selectively migrated
+- Code roots: `modules/route`, `third_party/locked_stack/src/go2_site_ops/go2_site_ops/route_contract.py`
+- Entrypoints: `gogoguard_route.manager:RouteManager`
+- Consumes: cloud GLIM map artifact and optimized trajectory
+- Produces: map-bound go2.route.v1 candidate and runtime profile
+- Provenance: V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c
 
 ### `site_console`
 
 - Manifest: `architecture/modules/site_console.json`
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
-- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob
-- Produces: operator commands, field visualization
-- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale
+- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status
+- Produces: record, prepare, localize, patrol and stop commands, field visualization
+- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction
+
+### `transfer`
+
+- Manifest: `architecture/modules/transfer.json`
+- Code roots: `modules/transfer`
+- Entrypoints: `gogoguard_transfer.edge:EdgeArtifactExchange`, `gogoguard_field_workstation.robot_client:RobotClient`
+- Consumes: sealed RecordingBundle, cloud GLIM map artifacts
+- Produces: verified workstation recording, immutable robot map version
+- Provenance: V2 three-end transfer contract designed from the 2026-08-05 field transfer receipt

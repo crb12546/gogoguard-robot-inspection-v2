@@ -1,12 +1,12 @@
 {
   "id": "site_console",
-  "responsibility": "One field-facing page for observation, recording, mapping and later route release",
-  "runtime": ["robot", "browser"],
-  "status": "robot_mapping_and_camera_webrtc_verified",
+  "responsibility": "Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs",
+  "runtime": ["robot", "workstation", "browser"],
+  "status": "three_end_ui_and_api_offline_robot_deployment_pending",
   "codeRoots": ["apps/site_console"],
   "entrypoints": ["gogoguard_site_console.__main__:main"],
-  "dependsOn": ["contracts", "device_io", "data_capture", "map_factory", "evidence"],
-  "consumes": ["SensorSnapshot", "CameraStreamStatus", "RecordingSession", "MapJob"],
-  "produces": ["operator commands", "field visualization"],
-  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale"]
+  "dependsOn": ["contracts", "device_io", "data_capture", "transfer", "map_factory", "route", "localization", "navigation", "evidence"],
+  "consumes": ["SensorSnapshot", "CameraStreamStatus", "RecordingSession", "MapJob", "navigation and localization status"],
+  "produces": ["record, prepare, localize, patrol and stop commands", "field visualization"],
+  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale", "2026-08-06 robot/workstation ownership correction"]
 }

@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Verified external facts
 
@@ -88,9 +88,9 @@ Updated: 2026-08-05
 - Site Console currently under-counts the IMU messages it consumes even though
   `ros2 topic hz` verifies about 200 Hz. Treat that number as an instrumentation
   defect, not sensor loss.
-- The existing Alibaba Cloud host is connected at `39.96.72.215`. A dedicated
-  robot-side Ed25519 key with strict host verification is mounted read-only in
-  the container; the cloud account password is not stored on the robot.
+- The existing Alibaba Cloud host is connected at `39.96.72.215`. The
+  2026-08-06 target architecture moves its SSH adapter and key to the Mac
+  workstation; the next robot release removes the robot-side cloud mount.
 - `/opt/go2/bin/gogoguard-map-job` is installed as a narrow adapter over the
   existing pinned Jazzy GLIM pipeline. It runs the pipeline as unprivileged
   `go2mapping` and returns the V2 `map.json`, `map.ply`, `overview.svg` and GLIM
@@ -131,9 +131,45 @@ Updated: 2026-08-05
   and Z1Pro LAN WebRTC preview passed; dynamic mapping and robot motion remain
   unverified
 
+## 2026-08-06 local architecture correction (not yet deployed)
+
+- The production workflow is now explicitly robot + Mac workstation + cloud.
+  The robot seals recordings and runs realtime algorithms; Mac owns UI,
+  history, transfer, cloud orchestration and releases; cloud only runs GLIM.
+- Edge Agent export and import contracts are implemented. Recording transfer is
+  manifest-whitelisted, HTTP Range resumable and SHA-256 verified. Imported
+  navigation maps are immutable and must identify as cloud GLIM artifacts.
+- The Mac workstation persists recordings, map jobs and their relationship. It
+  reports robot-to-Mac, Mac-to-cloud, GLIM and cloud-to-Mac stages with byte and
+  transfer-rate fields. A failed map job can retry from existing partial data.
+- The browser can select historical recordings/maps, view the 2D overview and
+  rotate/zoom the 3D point cloud, then deploy a selected completed map to the
+  robot before navigation preparation.
+- A separate lightweight workstation Dockerfile/Compose definition and a
+  Mac-to-robot image staging script are present. The robot default map worker
+  is now `none`; it no longer needs GitHub, compilation, or a cloud SSH mount.
+- The commissioned Mac runs the workstation natively so wired-LAN and cloud
+  traffic use the Mac network directly; the 51 MB ARM64 workstation container
+  remains a portable delivery form. Docker Compose 5.4.0 is installed.
+- The Mac Ed25519 public key is now authorized on the Alibaba Cloud worker, and
+  non-interactive SSH verified `/opt/go2/bin/gogoguard-map-job` is executable.
+- This new flow has passed local Python compilation, UI contract tests and
+  25 unit/integration tests, transfer/import integration, browser layout checks
+  and a 48.3 MB compressed-layer ARM64 workstation image build. The native Mac
+  workstation is running at port 8080 and correctly reports the powered-off
+  robot as offline.
+- The updated ARM64 robot image is built locally as
+  `gogoguard-robot-inspection:v2-edge-20260806`, image ID
+  `sha256:d5970bab1713dd6a22b86e217a77e50a3ec3f3c2a314ff88d6026642695112ed`.
+  Its imports, ROS entrypoint and edge-only map-worker contract passed inside
+  the image. A checksummed five-gigabyte release is prepared under
+  `release-cache/edge-20260806` and is intentionally outside Git.
+- The new Edge Agent, cloud progress wrapper and release remain undeployed
+  while the robot is powered off. Dynamic field acceptance is still pending.
+
 ## Next experiment
 
-Record one short human-remote-controlled out-and-back mapping loop and inspect
-the returned GLIM candidate. Do not add autonomous motion to that experiment.
-Separately correct the Site Console IMU instrumentation and add real rsync
-progress or compressed transfer.
+Deploy the workstation and updated Edge Agent, verify robot-to-Mac transfer and
+the real staged progress flow using the existing recording first, then record
+one short open-area mapping loop. Only after selecting and deploying its GLIM
+map should the localization/Nav2 patrol experiment begin.

@@ -1,12 +1,12 @@
 {
   "id": "map_factory",
   "responsibility": "Submit a sealed recording to cloud GLIM and return versioned map artifacts",
-  "runtime": ["cloud", "robot"],
-  "status": "robot_cloud_roundtrip_verified",
+  "runtime": ["workstation", "cloud"],
+  "status": "workstation_orchestration_offline_cloud_worker_previously_verified",
   "codeRoots": ["services/map_factory", "deployment/cloud"],
   "entrypoints": ["gogoguard_map_factory.manager:MapJobManager", "deployment/cloud/gogoguard-map-job"],
   "dependsOn": ["contracts", "evidence"],
   "consumes": ["RecordingBundle"],
   "produces": ["MapJob", "map.ply", "map.json", "overview.svg"],
-  "sourceProvenance": ["V2 adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline"]
+  "sourceProvenance": ["V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline"]
 }
