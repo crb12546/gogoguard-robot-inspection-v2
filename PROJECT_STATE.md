@@ -123,12 +123,17 @@ Updated: 2026-08-06
 
 ## Current deployed release
 
-- V2 Git commit prepared for the active release: `3369fee`
+- V2 Git commit for the active release: `ea3fb34f9bf0`
 - Robot image config digest:
-  `sha256:d670f7605c0c5fd6162f38355a6f282f213efa6a063d43612c328330edde3f0b`
+  `sha256:cc0ca38422ab3914b5b6959a0a7ae6205e95baab8f7684162d7ed39fd3f05cc1`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260806`; robot runtime no
+- Active image: `gogoguard-robot-inspection:v2-edge-20260806-r2`; robot runtime no
   longer mounts cloud SSH material and its map worker is `none`.
+- The r2 release archive SHA-256 is
+  `3e18d1a4694e2bb959ac9dce12f8d35bd83a986c9c82378dc2f98c86b2462dfc`.
+  The corrected host service uses the commissioned robot's Docker-compatible
+  `docker stop -t 15` form, starts only after the NTP gate, and remains enabled
+  across reboots.
 - 2026-08-06 boot receipt: MID-360 network passed; raw ROS rates were 10.07 Hz
   PointCloud2, about 200 Hz IMU and about 9.8 Hz `/Odometry`; Z1Pro WebRTC and
   workstation proxy status passed. No motion command was sent.
@@ -154,12 +159,20 @@ Updated: 2026-08-06
   the 0.10 m/s command changed posture but odometry advanced only 0.064 m in
   15 seconds, below the configured 0.20 m requirement. Obstacle handling was
   not the cause of this attempt either.
-- Release `v2-edge-20260806-r2` is prepared with three field corrections:
+- Release `v2-edge-20260806-r2` is deployed with three field corrections:
   stable-NTP startup gating plus runtime Livox epoch rebasing; fail-closed
   rejection of future-stamped obstacle clouds; and a commissioned Go2 forward
   gait range of 0.20--0.45 m/s with a route speed limit of 0.40 m/s. The motion
-  bridge also performs StandUp and BalanceStand before Nav2 starts. Robot
-  deployment and field acceptance are still pending.
+  bridge also performs StandUp and BalanceStand before Nav2 starts.
+- Post-deployment receipt: NTP reported synchronized, the startup gate reported
+  stable realtime, and raw Livox PointCloud2, Livox IMU and FAST-LIO odometry
+  stamps stayed aligned with the host instead of retaining the old 28-second
+  future offset. Device status reported online at about 10 Hz LiDAR and 10 Hz
+  odometry. No Nav2 runtime or motion bridge was started.
+- Candidate generation 2 was regenerated for `map-648e606fb9a5`: 65 waypoints,
+  18.116 m route, 0.40 m/s route limit and 0.20 m/s MPPI minimum forward
+  sample. The candidate is selected on the page, but patrol motion acceptance
+  is still pending an operator-started field run.
 - Dynamic mapping quality and robot motion remain unverified.
 
 ## Known field follow-ups
@@ -167,6 +180,11 @@ Updated: 2026-08-06
 - Collect a cold-boot receipt for the prepared Livox/NTP correction and a
   controlled patrol receipt for the Go2 gait correction before either is
   considered dynamically verified.
+- Make workstation map deployment idempotent when an immutable copy of the
+  selected artifact already exists on the robot. The current PUT path rejects
+  before consuming the request body, which can surface as `Broken pipe`; the
+  existing imported map can still be prepared directly and was used for the
+  generation-2 receipt above.
 - Preserve the exact Nav2/TF failure detail in the navigation status contract
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and

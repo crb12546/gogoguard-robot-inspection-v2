@@ -2,7 +2,7 @@
   "id": "navigation",
   "responsibility": "Use a released route through Nav2 FollowPath, MPPI and collision monitoring",
   "runtime": ["robot"],
-  "status": "robot_goal_acceptance_verified_gait_and_clock_fixes_prepared",
+  "status": "robot_goal_acceptance_verified_gait_and_clock_fixes_deployed_motion_pending",
   "codeRoots": ["modules/navigation", "third_party/locked_stack/src/go2_nav2_runtime", "third_party/locked_stack/src/go2_nav2_interfaces", "third_party/locked_stack/src/go2_fastlio_patrol"],
   "entrypoints": ["gogoguard_navigation.manager:NavigationManager", "gogoguard_navigation.observer:main", "ros2 launch go2_nav2_runtime active_map_patrol.launch.py"],
   "dependsOn": ["contracts", "localization", "route"],
