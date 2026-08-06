@@ -2,11 +2,11 @@
   "id": "device_io",
   "responsibility": "Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters",
   "runtime": ["robot"],
-  "status": "robot_sensors_camera_verified_unitree_motion_migrated_offline",
+  "status": "robot_sensors_camera_verified_clock_rebase_motion_fix_prepared",
   "codeRoots": ["modules/device_io", "config/robot/mediamtx.yml", "third_party/locked_stack/src/Livox-SDK2", "third_party/locked_stack/src/livox_ros_driver2", "third_party/locked_stack/src/go2_cmd_vel_bridge", "third_party/locked_stack/src/unitree_api"],
   "entrypoints": ["gogoguard_device_io.gateway:create_gateway", "gogoguard_device_io.camera:create_camera_gateway", "mediamtx config/robot/mediamtx.yml", "ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver"],
   "dependsOn": ["contracts"],
   "consumes": ["MID-360 UDP", "ROS 2 PointCloud2", "ROS 2 Imu", "Z1Pro RTSP H264", "safety-filtered Twist"],
   "produces": ["SensorSnapshot", "CameraStreamStatus", "/mapping/livox/lidar", "/mapping/livox/imu", "Z1Pro WebRTC stream", "Unitree SDK2 Move and StopMove"],
-  "sourceProvenance": ["old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked", "unitree_sdk2 commit 5ea10f3", "commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release"]
+  "sourceProvenance": ["old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked", "unitree_sdk2 commit 5ea10f3", "commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release", "field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP"]
 }

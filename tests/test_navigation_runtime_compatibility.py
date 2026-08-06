@@ -27,6 +27,11 @@ LOCALIZER_CONFIG = (
     / "third_party/locked_stack/src/go2_map_manager/config"
     / "continuous_map_localizer.yaml"
 )
+NAV2_CONFIG = (
+    ROOT
+    / "third_party/locked_stack/src/go2_nav2_runtime/config"
+    / "go2_nav2_patrol.yaml"
+)
 
 
 class NavigationRuntimeCompatibilityTest(unittest.TestCase):
@@ -67,6 +72,11 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIsInstance(qos, ast.Name)
         self.assertEqual(qos.id, "qos_profile_sensor_data")
 
+    def test_future_sensor_clock_fails_the_cloud_watchdog_closed(self) -> None:
+        source = SAFE_CMD_NODE.read_text(encoding="utf-8")
+        self.assertIn("sensor_clock_future", source)
+        self.assertIn("max_future_cloud_stamp_s", source)
+
     def test_patrol_start_rejects_a_dead_motion_bridge(self) -> None:
         class Process:
             def __init__(self, return_code):
@@ -103,6 +113,20 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
 
         self.assertEqual(environment["LD_LIBRARY_PATH"], UNITREE_SDK_LIBRARY_PATH)
         self.assertNotIn("/opt/ros/humble/lib", environment["LD_LIBRARY_PATH"])
+
+    def test_motion_bridge_prepares_balance_posture_before_nav2(self) -> None:
+        source = (
+            ROOT / "modules/navigation/gogoguard_navigation/manager.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '[str(SDK_RECEIVER), "eth0", "5005", "prepare-posture"]',
+            source,
+        )
+
+    def test_mppi_forward_samples_clear_the_commissioned_gait_deadband(self) -> None:
+        config = NAV2_CONFIG.read_text(encoding="utf-8")
+        self.assertIn("vx_min: 0.20", config)
+        self.assertIn("required_movement_radius: 0.20", config)
 
     def test_startup_search_preserves_the_250_point_quality_gate(self) -> None:
         config = LOCALIZER_CONFIG.read_text(encoding="utf-8")

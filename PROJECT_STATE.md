@@ -138,7 +138,39 @@ Updated: 2026-08-06
   39-second recording also completed as `map-648e606fb9a5`.
 - Browser verification showed the 2D overview, rotatable 3D point cloud,
   camera, live trajectory and separate available-map/task history sections.
+- The first patrol attempt for `map-648e606fb9a5` was accepted by Nav2 but
+  aborted before motion. Livox PointCloud2, Livox IMU and FAST-LIO odometry
+  were about 28 seconds ahead of the host clock, so the controller could not
+  transform the robot pose into the global plan frame. No nonzero final motion
+  command was emitted and obstacle handling was not the cause.
+- The clock skew was traced to startup ordering: the Livox no-sync timestamp
+  mapper anchored before the host completed its first real NTP synchronization
+  and retained the pre-correction epoch. A managed edge-service restart after
+  NTP synchronization temporarily recovered sensor/odometry timestamps to
+  within about 0.35 seconds of the host. The old navigation fault was cleared;
+  no patrol was started during recovery.
+- A second patrol was accepted after that recovery and emitted a nonzero
+  command within about 0.15 seconds. It then failed Nav2's progress checker:
+  the 0.10 m/s command changed posture but odometry advanced only 0.064 m in
+  15 seconds, below the configured 0.20 m requirement. Obstacle handling was
+  not the cause of this attempt either.
+- Release `v2-edge-20260806-r2` is prepared with three field corrections:
+  stable-NTP startup gating plus runtime Livox epoch rebasing; fail-closed
+  rejection of future-stamped obstacle clouds; and a commissioned Go2 forward
+  gait range of 0.20--0.45 m/s with a route speed limit of 0.40 m/s. The motion
+  bridge also performs StandUp and BalanceStand before Nav2 starts. Robot
+  deployment and field acceptance are still pending.
 - Dynamic mapping quality and robot motion remain unverified.
+
+## Known field follow-ups
+
+- Collect a cold-boot receipt for the prepared Livox/NTP correction and a
+  controlled patrol receipt for the Go2 gait correction before either is
+  considered dynamically verified.
+- Preserve the exact Nav2/TF failure detail in the navigation status contract
+  and display a specific sensor-clock error instead of the generic `FAULT`
+  message. Correct the UI inconsistency that can display `定位可用` and
+  `not_converged` at the same time.
 
 ## 2026-08-06 three-end architecture correction
 

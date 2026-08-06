@@ -10,15 +10,15 @@ this index describes code state and never implies robot acceptance.
 | `calibration` | One authoritative base-to-lidar mount and lidar-to-IMU internal transform | robot, workstation | `ported_offline_ros_runtime_pending` | `contracts` |
 | `contracts` | Stable product messages and persisted schemas shared across modules | robot, cloud, workstation | `implemented_offline` | — |
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
-| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_unitree_motion_migrated_offline` | `contracts` |
+| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_clock_rebase_motion_fix_prepared` | `contracts` |
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
 | `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `deployed_real_robot_mac_cloud_roundtrip_verified` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
-| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `migrated_offline_robot_pending` | `contracts`, `localization`, `route` |
-| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_implemented_offline` | `contracts`, `map_factory` |
+| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `robot_goal_acceptance_verified_gait_and_clock_fixes_prepared` | `contracts`, `localization`, `route` |
+| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_robot_prepared_generation_2` | `contracts`, `map_factory` |
 | `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `three_end_ui_and_api_deployed_real_map_review_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_to_workstation_resumable_transfer_verified` | `contracts`, `evidence` |
 
@@ -58,7 +58,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
 - Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, safety-filtered Twist
 - Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, Unitree SDK2 Move and StopMove
-- Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release
+- Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release; field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP
 
 ### `evidence`
 
@@ -121,7 +121,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_navigation.manager:NavigationManager`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
 - Produces: safe velocity candidate, navigation feedback
-- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds
 
 ### `route`
 
@@ -130,7 +130,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_route.manager:RouteManager`
 - Consumes: cloud GLIM map artifact and optimized trajectory
 - Produces: map-bound go2.route.v1 candidate and runtime profile
-- Provenance: V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c
+- Provenance: V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c; candidate generation 2 raises the commissioned patrol speed limit from 0.25 to 0.40 m/s
 
 ### `site_console`
 

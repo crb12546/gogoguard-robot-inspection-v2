@@ -24,7 +24,8 @@ command -v ssh >/dev/null
 command -v rsync >/dev/null
 
 for required in gogoguard-edge-image.tar gogoguard-edge-image.tar.sha256 \
-  runtime.env release.env runtime.json run-edge gogoguard-edge.service install-release; do
+  runtime.env release.env runtime.json run-edge wait-clock-sync \
+  gogoguard-edge.service install-release; do
   if [[ ! -f $PREPARED_DIRECTORY/$required ]]; then
     echo "prepared release is missing: $required" >&2
     exit 4

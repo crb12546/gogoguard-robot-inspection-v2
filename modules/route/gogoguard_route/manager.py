@@ -13,6 +13,7 @@ from typing import Any, Iterable
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
+CANDIDATE_GENERATION = 2
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -165,6 +166,8 @@ class RouteManager:
                         and _canonical_hash(route_payload) == existing["route_hash"]
                     )
                     if (
+                        existing.get("candidate_generation") == CANDIDATE_GENERATION
+                        and
                         existing.get("source_ply_sha256") == source_ply_hash
                         and existing.get("source_map_json_sha256") == source_map_json_hash
                         and artifacts_unchanged
@@ -207,7 +210,7 @@ class RouteManager:
                 },
                 "patrol": {
                     "loopMode": "once",
-                    "speedLimitMps": 0.25,
+                    "speedLimitMps": 0.40,
                     "startMaxDistanceM": 1.5,
                     "startMaxYawDeg": 45.0,
                     "pathSampleSpacingM": 0.15,
@@ -221,6 +224,7 @@ class RouteManager:
             )
             metadata = {
                 "schema": "gogoguard.navigation_candidate.v1",
+                "candidate_generation": CANDIDATE_GENERATION,
                 "candidate_id": job_id,
                 "site_id": self.site_id,
                 "map_job_id": job_id,

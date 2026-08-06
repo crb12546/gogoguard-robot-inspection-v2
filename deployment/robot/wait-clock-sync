@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TIMEOUT_SECONDS=${1:-60}
+if [[ ! $TIMEOUT_SECONDS =~ ^[0-9]+$ || $TIMEOUT_SECONDS -lt 1 ]]; then
+  echo "usage: wait-clock-sync [positive-timeout-seconds]" >&2
+  exit 2
+fi
+
+readonly DEADLINE=$((SECONDS + TIMEOUT_SECONDS))
+while (( SECONDS < DEADLINE )); do
+  synchronized=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
+  if [[ $synchronized == yes ]]; then
+    before=$(date +%s)
+    sleep 2
+    after=$(date +%s)
+    elapsed=$((after - before))
+    if (( elapsed >= 1 && elapsed <= 3 )); then
+      echo "GoGoGuard clock gate ready: NTP synchronized and realtime stable"
+      exit 0
+    fi
+    echo "GoGoGuard clock gate observed a realtime correction; rechecking" >&2
+  fi
+  sleep 1
+done
+
+# The robot must remain usable at an offline site.  The Livox mapper also
+# detects and rebases a later host clock correction, so a missing public NTP
+# server delays startup but does not permanently disable the edge runtime.
+echo "GoGoGuard clock gate timed out without NTP; starting with runtime rebase protection" >&2
+exit 0

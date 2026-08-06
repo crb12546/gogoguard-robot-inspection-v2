@@ -133,14 +133,17 @@ class NavigationManager:
                 receiver_log_path = self.log_root / f"motion-bridge-{candidate_id}.log"
                 self._receiver_log_handle = receiver_log_path.open("ab", buffering=0)
                 self._receiver_process = subprocess.Popen(
-                    [str(SDK_RECEIVER), "eth0", "5005"],
+                    [str(SDK_RECEIVER), "eth0", "5005", "prepare-posture"],
                     stdin=subprocess.DEVNULL,
                     stdout=self._receiver_log_handle,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                     env=self._receiver_environment(),
                 )
-                time.sleep(0.75)
+                # The receiver performs an explicit StandUp + BalanceStand
+                # before advertising readiness. Give that bounded posture
+                # transition time to fail closed before Nav2 is launched.
+                time.sleep(3.75)
                 if self._receiver_process.poll() is not None:
                     exit_code = self._receiver_process.returncode
                     self._receiver_process = None

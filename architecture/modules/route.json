@@ -2,11 +2,11 @@
   "id": "route",
   "responsibility": "Versioned map-bound route model, validation and execution request",
   "runtime": ["robot", "workstation", "cloud"],
-  "status": "recorded_glim_route_implemented_offline",
+  "status": "recorded_glim_route_robot_prepared_generation_2",
   "codeRoots": ["modules/route", "third_party/locked_stack/src/go2_site_ops/go2_site_ops/route_contract.py"],
   "entrypoints": ["gogoguard_route.manager:RouteManager"],
   "dependsOn": ["contracts", "map_factory"],
   "consumes": ["cloud GLIM map artifact and optimized trajectory"],
   "produces": ["map-bound go2.route.v1 candidate and runtime profile"],
-  "sourceProvenance": ["V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c"]
+  "sourceProvenance": ["V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c", "candidate generation 2 raises the commissioned patrol speed limit from 0.25 to 0.40 m/s"]
 }

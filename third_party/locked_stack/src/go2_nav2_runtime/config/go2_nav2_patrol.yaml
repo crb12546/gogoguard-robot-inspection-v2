@@ -42,7 +42,10 @@ controller_server:
       vx_max: 0.45
       # Patrol routes are directional. The Go2 may sidestep around an obstacle,
       # but it must not silently turn the route into a reverse-driving plan.
-      vx_min: 0.0
+      # The commissioned Go2 only shifted its posture at a 0.10 m/s command
+      # and moved 0.064 m in 15 seconds. Keep zero as the controller stop, but
+      # make every sampled forward gait a physically effective command.
+      vx_min: 0.20
       vy_max: 0.10
       wz_max: 0.45
       prune_distance: 1.5

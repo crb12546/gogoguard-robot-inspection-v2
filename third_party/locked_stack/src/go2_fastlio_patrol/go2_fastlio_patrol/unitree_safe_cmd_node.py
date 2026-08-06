@@ -96,6 +96,7 @@ class UnitreeSafeCmdNode(Node):
         self.declare_parameter('point_skip', 2)
         self.declare_parameter('max_cloud_process_rate', 20.0)
         self.declare_parameter('min_valid_cloud_points', 50)
+        self.declare_parameter('max_future_cloud_stamp_s', 0.50)
 
         self.cmd_topic = self.get_parameter('cmd_topic').value
         self.pointcloud_topic = self.get_parameter('pointcloud_topic').value
@@ -186,6 +187,9 @@ class UnitreeSafeCmdNode(Node):
         self.min_valid_cloud_points = int(
             self.get_parameter('min_valid_cloud_points').value
         )
+        self.max_future_cloud_stamp_s = float(
+            self.get_parameter('max_future_cloud_stamp_s').value
+        )
         if self.publish_rate <= 0.0:
             raise RuntimeError('publish_rate must be positive')
         safety_timeouts = (
@@ -206,6 +210,8 @@ class UnitreeSafeCmdNode(Node):
             )
         if self.min_valid_cloud_points <= 0:
             raise RuntimeError('min_valid_cloud_points must be positive')
+        if not 0.05 <= self.max_future_cloud_stamp_s <= 1.0:
+            raise RuntimeError('max_future_cloud_stamp_s must be in [0.05, 1.0]')
         if self.resume_distance < self.stop_distance:
             raise RuntimeError('resume_distance must not be below stop_distance')
 
@@ -456,6 +462,19 @@ class UnitreeSafeCmdNode(Node):
             return
         self.last_cloud_process_time = now
 
+        stamp_time = (
+            float(msg.header.stamp.sec)
+            + float(msg.header.stamp.nanosec) * 1e-9
+        )
+        if stamp_time > now + self.max_future_cloud_stamp_s:
+            # A future cloud makes the odom -> map TF chain impossible. Do not
+            # refresh the receive watchdog merely because structurally valid
+            # bytes arrived; fail closed until the common sensor epoch is sane.
+            self.last_cloud_validity_reason = 'sensor_clock_future'
+            self.last_valid_cloud_point_count = 0
+            self.last_cloud_stamp_age = float('inf')
+            return
+
         offsets, layout_reason = self.get_xyz_layout(msg)
         if offsets is None:
             self.last_cloud_validity_reason = layout_reason
@@ -563,16 +582,9 @@ class UnitreeSafeCmdNode(Node):
         # messages must therefore become a cloud timeout and a zero command.
         self.last_cloud_time = now
         self.last_cloud_validity_reason = 'cloud_valid'
-        stamp_time = (
-            float(msg.header.stamp.sec)
-            + float(msg.header.stamp.nanosec) * 1e-9
-        )
         if stamp_time <= 0.0:
             stamp_time = now
-        if stamp_time > now + 0.50:
-            self.last_cloud_stamp_age = float('inf')
-        else:
-            self.last_cloud_stamp_age = max(0.0, now - stamp_time)
+        self.last_cloud_stamp_age = max(0.0, now - stamp_time)
 
         self.last_roi_count = roi_count
         self.last_stop_count = stop_count

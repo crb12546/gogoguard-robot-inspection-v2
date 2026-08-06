@@ -27,6 +27,7 @@ docker save --output "$OUTPUT_DIRECTORY/gogoguard-edge-image.tar" "$IMAGE"
 )
 
 cp "$REPOSITORY_ROOT/deployment/robot/run-edge" "$OUTPUT_DIRECTORY/run-edge"
+cp "$REPOSITORY_ROOT/deployment/robot/wait-clock-sync" "$OUTPUT_DIRECTORY/wait-clock-sync"
 cp "$REPOSITORY_ROOT/deployment/robot/gogoguard-edge.service" "$OUTPUT_DIRECTORY/gogoguard-edge.service"
 cp "$REPOSITORY_ROOT/deployment/robot/install-release" "$OUTPUT_DIRECTORY/install-release"
 cp "$REPOSITORY_ROOT/deployment/robot/runtime.env.example" "$OUTPUT_DIRECTORY/runtime.env"
