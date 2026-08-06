@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GoGoGuard 现场建图</title>
+  <title>GoGoGuard 现场交付工作台</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header><div><small>GOGOGUARD · ROBOT INSPECTION V2</small><h1>现场建图控制台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
+  <header><div><small>GOGOGUARD · FIELD WORKSTATION</small><h1>现场交付工作台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
   <main>
     <section class="status-row">
       <article><span>机器狗</span><strong id="robotState">等待数据</strong><small id="robotId">—</small></article>
@@ -25,15 +25,40 @@
         <div class="panel-title"><div><span>录制与建图</span><small>人工遥控机器狗移动</small></div></div>
         <div class="step active"><i>1</i><div><strong>确认数据</strong><small>轨迹与点云持续更新</small></div></div>
         <div class="step"><i>2</i><div><strong>录制现场</strong><small id="recordInfo">等待开始</small></div></div>
-        <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">停止录制后自动提交</small></div></div>
+        <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">狗 → Mac → 阿里云 GLIM</small></div></div>
         <div class="progress"><div id="jobProgress"></div></div>
+        <small id="transferDetail" class="transfer-detail">尚未传输</small>
         <button id="recordButton">开始录制地图</button>
         <div id="error" class="error"></div>
       </aside>
     </section>
     <section class="results">
-      <article class="panel result-panel"><div class="panel-title"><div><span>最近建图结果</span><small id="resultMeta">还没有结果</small></div></div><div id="resultEmpty" class="empty">完成一次录制后，这里会显示云端 GLIM 返回的二维概览和三维点云。当前本机演示会明确标记为模拟结果。</div><img id="overview" alt="地图概览"><canvas id="resultCloud"></canvas></article>
-      <article class="panel history"><div class="panel-title"><div><span>录制历史</span><small>本机封存证据</small></div></div><div id="sessions"></div></article>
+      <article class="panel result-panel"><div class="panel-title"><div><span>当前选中地图</span><small id="resultMeta">还没有结果</small></div><div class="layer-switches"><label><input id="showMapPoints" type="checkbox" checked>点云</label><label><input id="showMapRoute" type="checkbox" checked>GLIM 轨迹</label><button id="resetMapView" class="mini-button">重置 3D</button></div></div><div id="resultEmpty" class="empty">选择一张历史地图后，这里同时显示 2D 概览和可旋转、缩放的 3D 点云。</div><div class="map-review"><figure><figcaption>2D 俯视概览</figcaption><img id="overview" alt="地图概览"></figure><figure><figcaption>3D 点云 · 拖动旋转 · 滚轮缩放</figcaption><canvas id="resultCloud"></canvas></figure></div></article>
+      <article class="panel history"><div class="panel-title"><div><span>现场资产历史</span><small>录制、地图与路线按版本保留</small></div></div><h3>地图版本</h3><div id="maps"></div><h3>录制包</h3><div id="sessions"></div></article>
+    </section>
+    <section class="navigation-lab">
+      <article class="panel navigation-map-panel">
+        <div class="panel-title"><div><span>地图定位与巡检路线</span><small>GLIM 地图 · 固定路线 · 实时定位</small></div><b id="localizationBadge">尚未启动</b></div>
+        <canvas id="navigationMap"></canvas>
+        <div class="map-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>录制路线</span><span><i class="robot-dot"></i>机器狗</span></div>
+      </article>
+      <article class="panel navigation-control-panel">
+        <div class="panel-title"><div><span>Nav2 / MPPI 运行</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
+        <div class="nav-metrics">
+          <div><span>固定地图定位</span><strong id="localizationState">—</strong><small id="localizationDetail">等待 VGICP</small></div>
+          <div><span>路线</span><strong id="routeLength">—</strong><small id="routePoints">尚未生成</small></div>
+          <div><span>任务状态</span><strong id="patrolState">—</strong><small id="patrolReason">尚未启动</small></div>
+          <div><span>最终速度</span><strong id="finalVelocity">0.00 m/s</strong><small id="motionAuthority">运动权关闭</small></div>
+        </div>
+        <div class="nav-actions">
+          <button id="prepareNavigation">1. 使用当前地图与录制路线</button>
+          <button id="startRuntime" class="secondary">2. 启动定位与 Nav2</button>
+          <button id="resetLocalization" class="secondary">重新定位</button>
+          <button id="startPatrol">3. 开始巡检</button>
+          <button id="stopPatrol" class="stop">停止巡检</button>
+        </div>
+        <div id="navigationError" class="error"></div>
+      </article>
     </section>
   </main>
   <script src="/app.js"></script>

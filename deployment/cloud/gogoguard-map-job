@@ -60,6 +60,14 @@ run_pipeline() {
   /usr/sbin/runuser -u go2mapping -- "$PIPELINE_ENTRY" "$@"
 }
 
+progress() {
+  local percent=$1
+  local stage=$2
+  shift 2
+  echo "GOGOGUARD_PROGRESS $percent $stage $*"
+}
+
+progress 72 cloud_validation "云端校验录制包与 GLIM 配置"
 run_pipeline prepare-session \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
@@ -69,11 +77,13 @@ run_pipeline prepare-session \
   --bag "$BAG_ROOT" \
   --compute-profile cpu
 
+progress 76 glim_optimization "GLIM 轨迹优化与子图构建"
 run_pipeline run-session \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
   --session-id "$JOB_ID"
 
+progress 86 map_build "组合 GLIM 会话与版本化地图"
 run_pipeline create-build \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
@@ -81,11 +91,13 @@ run_pipeline create-build \
   --site-id "$SITE_ID" \
   --session-id "$JOB_ID"
 
+progress 90 review_artifacts "生成点云与地图评审产物"
 run_pipeline produce-review-artifacts \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
   --build-id "$BUILD_ID"
 
+progress 92 artifact_export "导出 PLY、轨迹、2D 概览和建图回执"
 install -d -o go2mapping -g go2mapping -m 0750 "$OUTPUT_STAGING"
 /usr/sbin/runuser -u go2mapping -- "$MAPPING_PYTHON" - \
   "$REVIEW_ARTIFACTS/map.ply" \
@@ -164,4 +176,5 @@ PY
 
 chmod -R a-w "$OUTPUT_STAGING"
 mv "$OUTPUT_STAGING" "$OUTPUT_ROOT"
+progress 93 cloud_complete "云端 GLIM 产物已封存"
 echo "GoGoGuard cloud GLIM job complete: $JOB_ID"

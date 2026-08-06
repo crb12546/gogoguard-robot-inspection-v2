@@ -1,0 +1,18 @@
+{
+  "name": "small_gicp",
+  "repository": "https://github.com/koide3/small_gicp.git",
+  "commit": "8a2d3734f699c042db74ae61d295b0b928163526",
+  "cmakeProjectVersion": "1.0.1",
+  "license": "MIT",
+  "buildOptions": {
+    "BUILD_HELPER": true,
+    "BUILD_TESTS": false,
+    "BUILD_EXAMPLES": false,
+    "BUILD_BENCHMARKS": false,
+    "BUILD_PYTHON_BINDINGS": false,
+    "BUILD_WITH_OPENMP": true,
+    "BUILD_WITH_TBB": false,
+    "BUILD_WITH_PCL": true,
+    "BUILD_WITH_MARCH_NATIVE": false
+  }
+}

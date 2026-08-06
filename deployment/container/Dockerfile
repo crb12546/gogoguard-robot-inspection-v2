@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1.7
+FROM gogoguard-robot-inspection:v2-dev AS mediamtx_seed
+FROM gogoguard-locked-deps:20260805 AS locked_robot_deps
+
 FROM --platform=linux/arm64 ros:humble-ros-base-jammy
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -15,6 +18,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client rsync ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
+# Unitree's frozen ROS 2 interface package emits the vendor DDS IDL alongside
+# the standard rosidl messages.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ros-humble-rosidl-generator-dds-idl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Keep native C++ builds within the memory envelope of both the local builder
 # and the 16 GB Orin NX target. Unbounded CMake/colcon parallelism can launch
 # multiple compiler trees and exhaust the host before producing an image.
@@ -23,6 +32,11 @@ ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS} MAKEFLAGS=-j${BUILD_JOBS}
 
 WORKDIR /opt/gogoguard/app
 COPY third_party/locked_stack /opt/gogoguard/app/third_party/locked_stack
+
+# The navigation slice retains the exact dependency revisions already built in
+# the commissioned Humble environment. The prefix contains commit receipts for
+# small_gicp and Unitree SDK2; the image itself is content-addressed locally.
+COPY --from=locked_robot_deps /deps /opt/gogoguard/deps
 
 # Build the exact robot capability snapshot retained from the established stack.
 # These are not fresh upstream clones: the locked snapshot includes the timing,
@@ -34,39 +48,53 @@ RUN cmake -S third_party/locked_stack/src/Livox-SDK2 -B /tmp/livox-sdk-build \
     && test -f /usr/local/lib/liblivox_lidar_sdk_shared.so \
     && rm -rf /tmp/livox-sdk-build
 
+COPY --from=locked_robot_deps /unitree_go /opt/gogoguard/ros_ws/src/unitree_go
 RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
+    && cp -a third_party/locked_stack/src/go2_map_manager /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/go2_cmd_vel_bridge /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/go2_nav2_interfaces /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/go2_nav2_runtime /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/go2_fastlio_patrol /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/go2_site_ops /opt/gogoguard/ros_ws/src/ \
+    && cp -a third_party/locked_stack/src/unitree_api /opt/gogoguard/ros_ws/src/ \
     && cp /opt/gogoguard/ros_ws/src/livox_ros_driver2/package_ROS2.xml \
       /opt/gogoguard/ros_ws/src/livox_ros_driver2/package.xml \
     && cp -a /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch_ROS2 \
       /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch \
     && source /opt/ros/humble/setup.bash \
+    && export CMAKE_PREFIX_PATH=/opt/gogoguard/deps:${CMAKE_PREFIX_PATH:-} \
     && cd /opt/gogoguard/ros_ws \
     && colcon build --executor sequential --merge-install \
-      --packages-select livox_ros_driver2 fast_lio \
+      --packages-select \
+        livox_ros_driver2 fast_lio unitree_go unitree_api go2_site_ops \
+        go2_map_manager go2_cmd_vel_bridge go2_nav2_interfaces \
+        go2_fastlio_patrol go2_nav2_runtime \
       --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 -DDISTRO_ROS=humble \
     && test -x install/lib/livox_ros_driver2/livox_ros_driver2_node \
     && test -x install/lib/fast_lio/fastlio_mapping \
+    && test -x install/lib/go2_map_manager/continuous_map_localizer \
+    && test -x install/lib/go2_cmd_vel_bridge/go2_sdk2_udp_receiver \
+    && test -x install/lib/go2_nav2_runtime/patrol_runtime_manager \
     && rm -rf build log
 
 # Pinned ARM64 MediaMTX release. The checksum is the upstream v1.20.0 release
 # checksum; the gateway only remuxes the commissioned Z1Pro H.264 RTSP stream.
-ARG MEDIAMTX_ARCHIVE_URL=https://github.com/bluenviron/mediamtx/releases/download/v1.20.0/mediamtx_v1.20.0_linux_arm64.tar.gz
-ADD --checksum=sha256:6aa3c03da7b6477f1e110c8e18e819cf9ef121e8981b52b8f8219982dae35f2f \
-    ${MEDIAMTX_ARCHIVE_URL} \
-    /tmp/mediamtx.tar.gz
-
-RUN mkdir -p /tmp/mediamtx-release /usr/share/licenses/mediamtx \
-    && tar -xzf /tmp/mediamtx.tar.gz -C /tmp/mediamtx-release \
-    && install -m 0755 /tmp/mediamtx-release/mediamtx /usr/local/bin/mediamtx \
-    && install -m 0644 /tmp/mediamtx-release/LICENSE /usr/share/licenses/mediamtx/LICENSE \
-    && rm -rf /tmp/mediamtx.tar.gz /tmp/mediamtx-release
+COPY --from=mediamtx_seed /usr/local/bin/mediamtx /tmp/mediamtx
+COPY --from=mediamtx_seed /usr/share/licenses/mediamtx/LICENSE /tmp/mediamtx.LICENSE
+RUN test "$(sha256sum /tmp/mediamtx | cut -d' ' -f1)" = \
+      "2da379972ba86627632aa7e3f779c680ba04a5ee26ef2a20dc61cefcc24f73b8" \
+    && install -d -m 0755 /usr/share/licenses/mediamtx \
+    && install -m 0755 /tmp/mediamtx /usr/local/bin/mediamtx \
+    && install -m 0644 /tmp/mediamtx.LICENSE /usr/share/licenses/mediamtx/LICENSE \
+    && rm /tmp/mediamtx /tmp/mediamtx.LICENSE
 
 # Livox SDK2 installs its shared library under /usr/local/lib. The target's
 # runtime linker cache is host-specific, so make that application-owned path
 # explicit inside the container rather than relying on a build-host cache.
-ENV LD_LIBRARY_PATH=/usr/local/lib
+ENV CMAKE_PREFIX_PATH=/opt/gogoguard/deps \
+    LD_LIBRARY_PATH=/opt/gogoguard/deps/lib:/usr/local/lib
 
 COPY pyproject.toml setup.py /opt/gogoguard/app/
 COPY modules /opt/gogoguard/app/modules
@@ -77,6 +105,9 @@ COPY deployment/container/edge-entrypoint /tmp/gogoguard-edge-entrypoint
 
 RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
     && install -m 0755 /tmp/gogoguard-edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint \
+    && install -D -m 0755 \
+      third_party/locked_stack/scripts/patrol_performance_monitor.py \
+      /home/unitree/go2_fastlio_ws/scripts/patrol_performance_monitor.py \
     && rm /tmp/gogoguard-edge-entrypoint
 
 VOLUME ["/var/lib/gogoguard"]

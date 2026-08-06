@@ -1,12 +1,22 @@
 PYTHON ?= python3
 RUNTIME_ROOT ?= runtime-data
-PYTHONPATH_V2 = modules/contracts:modules/calibration:modules/device_io:modules/data_capture:modules/evidence:services/map_factory:apps/site_console/backend
+PYTHONPATH_V2 = modules/contracts:modules/calibration:modules/device_io:modules/data_capture:modules/evidence:modules/transfer:modules/route:modules/navigation:services/map_factory:apps/site_console/backend:apps/field_workstation/backend
 
-.PHONY: demo test ui-smoke compile container-validate knowledge knowledge-check
+.PHONY: demo workstation workstation-demo workstation-container test ui-smoke compile container-validate knowledge knowledge-check
 
 demo:
 	PYTHONPATH=$(PYTHONPATH_V2) \
 	$(PYTHON) -m gogoguard_site_console --mode demo --map-worker demo --data-root $(RUNTIME_ROOT)
+
+workstation-demo:
+	PYTHONPATH=$(PYTHONPATH_V2) \
+	$(PYTHON) -m gogoguard_field_workstation --map-worker demo --data-root workstation-data
+
+workstation:
+	deployment/workstation/run-native
+
+workstation-container:
+	docker compose -f deployment/workstation/compose.yaml up --build -d
 
 test:
 	PYTHONPATH=$(PYTHONPATH_V2) \

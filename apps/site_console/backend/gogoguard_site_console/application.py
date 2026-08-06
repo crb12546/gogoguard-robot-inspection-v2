@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from gogoguard_contracts import json_ready
@@ -7,29 +8,39 @@ from gogoguard_data_capture import CaptureManager
 from gogoguard_device_io import SnapshotStore, create_camera_gateway, create_gateway
 from gogoguard_evidence import EventJournal
 from gogoguard_map_factory import MapJobManager
+from gogoguard_navigation import NavigationManager
+from gogoguard_transfer import EdgeArtifactExchange
 
 
 class InspectionApplication:
     def __init__(self, *, data_root: Path, mode: str, map_worker: str, robot_id: str, site_id: str,
-                 topics: dict[str, str], cloud: dict | None = None,
+                 topics: dict[str, str], sensor_id: str = "ARMCP1U0038561", cloud: dict | None = None,
                  camera: dict | None = None) -> None:
         data_root.mkdir(parents=True, exist_ok=True)
         self.data_root = data_root
         self.mode = mode
         self.robot_id = robot_id
         self.site_id = site_id
+        self.sensor_id = sensor_id
         self.store = SnapshotStore(robot_id, mode, data_root)
         self.journal = EventJournal(data_root / "events" / "runtime.jsonl")
         self.gateway = create_gateway(mode, self.store, robot_id, topics)
         self.camera = create_camera_gateway(mode, camera)
         self.capture = CaptureManager(data_root, self.store, self.journal, mode, topics)
-        self.maps = MapJobManager(data_root, map_worker, self.journal, cloud)
+        self.maps = None if map_worker == "none" else MapJobManager(
+            data_root, map_worker, self.journal, cloud
+        )
+        self.exchange = EdgeArtifactExchange(data_root)
+        self.navigation = NavigationManager(
+            data_root, site_id=site_id, robot_id=robot_id, sensor_id=sensor_id
+        )
 
     def start(self) -> None:
         self.gateway.start()
         self.journal.append("runtime.started", mode=self.mode, robot_id=self.robot_id)
 
     def close(self) -> None:
+        self.navigation.close()
         self.gateway.stop()
         self.journal.append("runtime.stopped", mode=self.mode, robot_id=self.robot_id)
 
@@ -54,6 +65,8 @@ class InspectionApplication:
 
     def stop_recording(self, session_id: str) -> dict:
         session = self.capture.stop(session_id)
+        if self.maps is None:
+            return {"session": json_ready(self.capture.get(session_id)), "map_job": None}
         job = self.maps.submit(session)
         self.capture.link_map_job(session_id, job.job_id)
         return {"session": json_ready(self.capture.get(session_id)), "map_job": json_ready(job)}
@@ -65,4 +78,51 @@ class InspectionApplication:
         return json_ready(self.capture.get(session_id))
 
     def map_job(self, job_id: str) -> dict:
+        if self.maps is None:
+            raise KeyError(job_id)
         return json_ready(self.maps.get(job_id))
+
+    def map_jobs(self) -> list[dict]:
+        if self.maps is None:
+            root = self.data_root / "map-jobs"
+            jobs = []
+            for path in sorted(root.glob("map-*/job.json"), reverse=True):
+                try:
+                    jobs.append(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    continue
+            return jobs
+        return [json_ready(item) for item in self.maps.list()]
+
+    def recording_export(self, session_id: str) -> dict:
+        return self.exchange.recording_descriptor(session_id)
+
+    def recording_export_file(self, session_id: str, relative_name: str) -> Path:
+        return self.exchange.recording_file(session_id, relative_name)
+
+    def receive_map_artifact(self, job_id: str, name: str, reader, length: int, sha256: str) -> dict:
+        return self.exchange.receive_map_artifact(job_id, name, reader, length, sha256)
+
+    def commit_map_import(self, job_id: str, payload: dict) -> dict:
+        return self.exchange.commit_map_import(job_id, payload)
+
+    def navigation_status(self) -> dict:
+        return self.navigation.status()
+
+    def prepare_navigation(self, job_id: str) -> dict:
+        return self.navigation.prepare(job_id)
+
+    def start_navigation_runtime(self, candidate_id: str) -> dict:
+        return self.navigation.start_runtime(candidate_id)
+
+    def stop_navigation_runtime(self) -> dict:
+        return self.navigation.stop_runtime()
+
+    def reset_localization(self) -> dict:
+        return self.navigation.reset_localization()
+
+    def start_patrol(self) -> dict:
+        return self.navigation.start_patrol()
+
+    def stop_patrol(self) -> dict:
+        return self.navigation.stop_patrol()

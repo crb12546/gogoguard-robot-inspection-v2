@@ -8,6 +8,5 @@ exec docker run --rm --name gogoguard-edge \
   --privileged \
   --env-file /etc/gogoguard/runtime.env \
   -v /var/lib/gogoguard:/var/lib/gogoguard \
-  -v /etc/gogoguard/cloud_ssh:/root/.ssh:ro \
   -v /etc/gogoguard/runtime.json:/etc/gogoguard/runtime.json:ro \
   "${GOGOGUARD_IMAGE}"

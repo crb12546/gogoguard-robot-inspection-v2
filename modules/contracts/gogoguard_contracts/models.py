@@ -98,6 +98,7 @@ class MapJob:
     session_id: str = ""
     state: MapJobState = MapJobState.QUEUED
     progress: int = 0
+    stage: str = "queued"
     message: str = "queued"
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
@@ -105,6 +106,9 @@ class MapJob:
     overview_url: str | None = None
     point_cloud_url: str | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
+    bytes_transferred: int = 0
+    bytes_total: int = 0
+    transfer_rate_bps: float = 0.0
     error: str | None = None
 
 

@@ -10,7 +10,9 @@ requires-python = ">=3.9"
 
 [project.scripts]
 gogoguard-site-console = "gogoguard_site_console.__main__:main"
+gogoguard-field-workstation = "gogoguard_field_workstation.__main__:main"
 gogoguard-mount-tf = "gogoguard_calibration.mount_tf_publisher:main"
+gogoguard-navigation-observer = "gogoguard_navigation.observer:main"
 
 [tool.setuptools.packages.find]
 where = [
@@ -19,8 +21,12 @@ where = [
   "modules/device_io",
   "modules/data_capture",
   "modules/evidence",
+  "modules/transfer",
+  "modules/route",
+  "modules/navigation",
   "services/map_factory",
   "apps/site_console/backend",
+  "apps/field_workstation/backend",
 ]
 include = ["gogoguard_*"]
 

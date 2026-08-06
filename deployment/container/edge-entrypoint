@@ -10,7 +10,7 @@ readonly APP_ROOT=/opt/gogoguard/app
 readonly LOG_ROOT=/var/lib/gogoguard/runtime-logs
 readonly ROBOT_ID=${GOGOGUARD_ROBOT_ID:-LLYJ0001}
 readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP1U0038561}
-readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-ssh}
+readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
 mkdir -p "$LOG_ROOT"
 
 declare -a CHILD_PIDS=()
@@ -73,10 +73,23 @@ setsid gogoguard-mount-tf --ros-args \
   >"$LOG_ROOT/calibration.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
+setsid ros2 run go2_map_manager calibrated_cloud_transformer --ros-args \
+  -p input_topic:=/navigation/cloud_lidar \
+  -p output_topic:=/navigation/cloud_body \
+  -p source_frame:=lidar_link \
+  -p target_frame:=base_link \
+  >"$LOG_ROOT/navigation-cloud.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
 setsid ros2 run fast_lio fastlio_mapping --ros-args \
   --params-file "$APP_ROOT/third_party/locked_stack/src/go2_mapping_capture/config/go2_mid360_capture_fastlio.yaml" \
   --params-file "$APP_ROOT/config/robot/fastlio_base_output.yaml" \
   >"$LOG_ROOT/fastlio.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+setsid gogoguard-navigation-observer \
+  --output /var/lib/gogoguard/navigation/status.json \
+  >"$LOG_ROOT/navigation-observer.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
 setsid gogoguard-site-console \
@@ -86,6 +99,7 @@ setsid gogoguard-site-console \
   --port 8080 \
   --data-root /var/lib/gogoguard \
   --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
   --config /etc/gogoguard/runtime.json \
   --static-root "$APP_ROOT/apps/site_console/frontend" \
   >"$LOG_ROOT/site-console.log" 2>&1 &

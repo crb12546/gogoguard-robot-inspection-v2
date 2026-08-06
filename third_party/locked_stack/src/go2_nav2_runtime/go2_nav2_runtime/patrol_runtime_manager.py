@@ -1,0 +1,1054 @@
+#!/usr/bin/env python3
+"""Fast, version-pinned start/stop orchestration around Nav2 FollowPath."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import time
+import uuid
+from pathlib import Path
+from typing import Optional
+
+import rclpy
+from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from go2_nav2_interfaces.srv import StartPatrol
+from nav2_msgs.action import FollowPath
+from nav_msgs.msg import Odometry, Path as NavPath
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
+from std_msgs.msg import Bool, String
+from std_srvs.srv import Trigger
+from unitree_go.msg import SportModeState
+
+from go2_site_ops.map_store import MapVersionStore
+
+from .runtime_core import (
+    FastLioHealthTracker,
+    PatrolReadiness,
+    RuntimeArtifactGuard,
+    evaluate_readiness,
+    evaluate_runtime_trace_gate,
+    evaluate_runtime_gate,
+    load_candidate_runtime_bundle,
+    load_runtime_bundle,
+    monotonic_age,
+    operator_message_for_reason,
+    requested_runtime_identity_reason,
+    sample_route,
+)
+from .start_timing import StartAttemptTimeline
+
+
+RECOVERABLE_LOCALIZATION_GATES = frozenset(
+    {
+        "LOCALIZATION_STATUS_STALE",
+        "LOCALIZATION_NOT_TRACKING",
+        "LOCALIZATION_NOT_USABLE",
+        "LOCALIZATION_POSE_MISSING",
+        "LOCALIZATION_POSE_STALE",
+    }
+)
+
+
+def _yaw_from_quaternion(quaternion) -> float:
+    siny = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
+    cosy = 1.0 - 2.0 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z)
+    return math.atan2(siny, cosy)
+
+
+def _quaternion_from_yaw(yaw: float):
+    from geometry_msgs.msg import Quaternion
+
+    result = Quaternion()
+    result.z = math.sin(yaw * 0.5)
+    result.w = math.cos(yaw * 0.5)
+    return result
+
+
+class PatrolRuntimeManager(Node):
+    """Keep expensive runtime nodes warm and make startPatrol a short gate check."""
+
+    def __init__(self):
+        super().__init__("patrol_runtime_manager")
+        self.declare_parameter("map_store_root", "")
+        self.declare_parameter("site_id", "")
+        self.declare_parameter("expected_map_version", "")
+        self.declare_parameter("runtime_source", "active")
+        self.declare_parameter("nav2_profile_hash", "")
+        self.declare_parameter("candidate.localization_map", "")
+        self.declare_parameter("candidate.route", "")
+        self.declare_parameter("candidate.runtime_profile", "")
+        self.declare_parameter("candidate.localization_map_hash", "")
+        self.declare_parameter("candidate.route_hash", "")
+        self.declare_parameter("candidate.runtime_profile_hash", "")
+        self.declare_parameter("follow_path_action", "/follow_path")
+        self.declare_parameter("localization_status_topic", "/localization/status")
+        self.declare_parameter("localization_pose_topic", "/localization/pose")
+        self.declare_parameter("localization_timeout_s", 0.20)
+        self.declare_parameter(
+            "runtime_trace_status_topic", "/go2/runtime/trace_status"
+        )
+        self.declare_parameter("runtime_trace_status_timeout_s", 0.50)
+        self.declare_parameter("pose_timeout_s", 1.0)
+        self.declare_parameter("active_map_check_period_s", 0.10)
+        self.declare_parameter("full_map_audit_period_s", 60.0)
+        self.declare_parameter("binding_shutdown_delay_s", 1.0)
+        self.declare_parameter("robot_state_topic", "/lf/sportmodestate")
+        self.declare_parameter("robot_state_timeout_s", 0.20)
+        self.declare_parameter("start_stationary_speed_mps", 0.08)
+        self.declare_parameter("start_stationary_yaw_rate_rps", 0.12)
+        self.declare_parameter("final_cmd_topic", "/cmd_vel")
+        self.declare_parameter("final_cmd_nonzero_epsilon", 0.001)
+        self.declare_parameter("fastlio_odom_topic", "/Odometry")
+        self.declare_parameter("fastlio_health.settle_window_s", 5.0)
+        self.declare_parameter(
+            "fastlio_health.max_stationary_translation_m", 0.05
+        )
+        self.declare_parameter(
+            "fastlio_health.max_stationary_rotation_deg", 1.0
+        )
+        self.declare_parameter("fastlio_health.odom_timeout_s", 0.5)
+        self.declare_parameter("fastlio_health.max_frame_gap_s", 0.5)
+        self.declare_parameter("fastlio_health.minimum_samples", 30)
+
+        self.map_store_root = str(self.get_parameter("map_store_root").value).strip()
+        self.site_id = str(self.get_parameter("site_id").value).strip()
+        expected = str(self.get_parameter("expected_map_version").value).strip()
+        source = str(self.get_parameter("runtime_source").value).strip()
+        self.runtime_source = source
+        self.nav2_profile_hash = str(
+            self.get_parameter("nav2_profile_hash").value
+        ).strip()
+        self.map_store = None
+        self.runtime_guard = None
+        if not self.site_id or not expected:
+            raise RuntimeError("site_id and expected_map_version are required")
+        if source == "active":
+            if not self.map_store_root:
+                raise RuntimeError("map_store_root is required for active runtime")
+            self.map_store = MapVersionStore(Path(self.map_store_root))
+            self.bundle = load_runtime_bundle(
+                self.map_store_root,
+                self.site_id,
+                expected,
+                store=self.map_store,
+            )
+            self.runtime_guard = RuntimeArtifactGuard.capture(
+                {
+                    "active_pointer": self.map_store.sites_root
+                    / self.site_id
+                    / "active.json",
+                    "manifest": self.map_store.versions_root
+                    / self.bundle.version_id
+                    / "manifest.json",
+                    "localization_map": self.bundle.localization_map_path,
+                    "route": self.bundle.route_path,
+                    "runtime_profile": self.bundle.runtime_profile_path,
+                    "calibration_bundle": self.bundle.calibration_bundle_path,
+                }
+            )
+        elif source == "candidate":
+            candidate_paths = {
+                "localization_map": self.get_parameter(
+                    "candidate.localization_map"
+                ).value,
+                "route": self.get_parameter("candidate.route").value,
+                "runtime_profile": self.get_parameter(
+                    "candidate.runtime_profile"
+                ).value,
+            }
+            self.bundle = load_candidate_runtime_bundle(
+                site_id=self.site_id,
+                version_id=expected,
+                localization_map_path=candidate_paths["localization_map"],
+                route_path=candidate_paths["route"],
+                runtime_profile_path=candidate_paths["runtime_profile"],
+                localization_map_hash=self.get_parameter(
+                    "candidate.localization_map_hash"
+                ).value,
+                route_hash=self.get_parameter("candidate.route_hash").value,
+                runtime_profile_hash=self.get_parameter(
+                    "candidate.runtime_profile_hash"
+                ).value,
+            )
+            self.runtime_guard = RuntimeArtifactGuard.capture(
+                {
+                    "localization_map": self.bundle.localization_map_path,
+                    "route": self.bundle.route_path,
+                    "runtime_profile": self.bundle.runtime_profile_path,
+                }
+            )
+        else:
+            raise RuntimeError("runtime_source must be active or candidate")
+        self.runtime_profile_hash = hashlib.sha256(
+            self.bundle.runtime_profile_path.read_bytes()
+        ).hexdigest()
+        if len(self.nav2_profile_hash) != 64:
+            raise RuntimeError("nav2_profile_hash is required")
+        self.localization_timeout_s = float(
+            self.get_parameter("localization_timeout_s").value
+        )
+        self.runtime_trace_status_timeout_s = float(
+            self.get_parameter("runtime_trace_status_timeout_s").value
+        )
+        self.pose_timeout_s = float(self.get_parameter("pose_timeout_s").value)
+        self.active_map_check_period_s = float(
+            self.get_parameter("active_map_check_period_s").value
+        )
+        self.full_map_audit_period_s = float(
+            self.get_parameter("full_map_audit_period_s").value
+        )
+        self.binding_shutdown_delay_s = float(
+            self.get_parameter("binding_shutdown_delay_s").value
+        )
+        self.robot_state_timeout_s = float(
+            self.get_parameter("robot_state_timeout_s").value
+        )
+        self.start_stationary_speed_mps = float(
+            self.get_parameter("start_stationary_speed_mps").value
+        )
+        self.start_stationary_yaw_rate_rps = float(
+            self.get_parameter("start_stationary_yaw_rate_rps").value
+        )
+        self.final_cmd_nonzero_epsilon = float(
+            self.get_parameter("final_cmd_nonzero_epsilon").value
+        )
+        self.require_robot_state = source == "active"
+        self.require_fastlio_health = source == "active"
+        if not 0.05 <= self.localization_timeout_s <= 0.20:
+            raise RuntimeError(
+                "localization_timeout_s must be between 0.05 and 0.20 seconds"
+            )
+        if not 0.30 <= self.runtime_trace_status_timeout_s <= 2.0:
+            raise RuntimeError(
+                "runtime_trace_status_timeout_s must be between 0.30 and 2.0 seconds"
+            )
+        if not 0.05 <= self.active_map_check_period_s <= 0.10:
+            raise RuntimeError(
+                "active_map_check_period_s must be between 0.05 and 0.10 seconds"
+            )
+        if self.full_map_audit_period_s < self.active_map_check_period_s:
+            raise RuntimeError(
+                "full_map_audit_period_s must not be shorter than the runtime binding check"
+            )
+        if not 0.5 <= self.binding_shutdown_delay_s <= 10.0:
+            raise RuntimeError("binding_shutdown_delay_s must be between 0.5 and 10 seconds")
+        if not 0.1 <= self.robot_state_timeout_s <= 0.20:
+            raise RuntimeError(
+                "robot_state_timeout_s must be between 0.1 and 0.20 seconds"
+            )
+        if not 0.0 < self.start_stationary_speed_mps <= 0.25:
+            raise RuntimeError("start_stationary_speed_mps is invalid")
+        if not 0.0 < self.start_stationary_yaw_rate_rps <= 0.5:
+            raise RuntimeError("start_stationary_yaw_rate_rps is invalid")
+        if not 0.0 < self.final_cmd_nonzero_epsilon <= 0.05:
+            raise RuntimeError("final_cmd_nonzero_epsilon is invalid")
+        self.fastlio_health = FastLioHealthTracker(
+            settle_window_s=float(
+                self.get_parameter("fastlio_health.settle_window_s").value
+            ),
+            maximum_translation_excursion_m=float(
+                self.get_parameter(
+                    "fastlio_health.max_stationary_translation_m"
+                ).value
+            ),
+            maximum_rotation_excursion_deg=float(
+                self.get_parameter(
+                    "fastlio_health.max_stationary_rotation_deg"
+                ).value
+            ),
+            odom_timeout_s=float(
+                self.get_parameter("fastlio_health.odom_timeout_s").value
+            ),
+            maximum_frame_gap_s=float(
+                self.get_parameter("fastlio_health.max_frame_gap_s").value
+            ),
+            minimum_samples=int(
+                self.get_parameter("fastlio_health.minimum_samples").value
+            ),
+        )
+
+        latched = QoSProfile(depth=1)
+        latched.reliability = ReliabilityPolicy.RELIABLE
+        latched.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.status_publisher = self.create_publisher(
+            String, "/go2/runtime/status", latched
+        )
+        self.authorization_publisher = self.create_publisher(
+            Bool, "/go2/runtime/motion_authorized", latched
+        )
+        self.route_publisher = self.create_publisher(
+            NavPath, "/go2/runtime/route", latched
+        )
+
+        self.localization_status = None
+        self.localization_received_at = 0.0
+        self.runtime_trace_status = None
+        self.runtime_trace_received_at = 0.0
+        self.pose = None
+        self.pose_frame = ""
+        self.pose_received_at = 0.0
+        self.robot_motion_status = None
+        self.robot_motion_received_at = 0.0
+        self.last_runtime_binding_check = 0.0
+        self.last_full_map_audit = time.monotonic()
+        self.runtime_binding_valid = True
+        self.runtime_binding_reason = "OK"
+        self.runtime_binding_fault_at = None
+        self.shutdown_requested = False
+        self.exit_code = 0
+        self.runtime_instance_id = uuid.uuid4().hex
+        self.status_sequence = 0
+        self.active_start_attempt = None
+        self.last_start_attempt = None
+        self.current_motion_authorized = False
+        self.goal_handle = None
+        self.goal_request_pending = False
+        self.stop_requested = False
+        self.gate_cancel_reason = ""
+        self.resume_pending = False
+        self.resume_count = 0
+        self.runtime_state = "BOOTING"
+        self.runtime_reason = "WAITING_FOR_LOCALIZATION"
+        self.last_feedback_distance = None
+        self.path = self._make_path()
+
+        self.action_client = ActionClient(
+            self,
+            FollowPath,
+            str(self.get_parameter("follow_path_action").value),
+        )
+        self.create_subscription(
+            String,
+            str(self.get_parameter("localization_status_topic").value),
+            self._localization_callback,
+            10,
+        )
+        self.create_subscription(
+            String,
+            str(self.get_parameter("runtime_trace_status_topic").value),
+            self._runtime_trace_callback,
+            10,
+        )
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            str(self.get_parameter("localization_pose_topic").value),
+            self._pose_callback,
+            10,
+        )
+        if self.require_robot_state:
+            self.create_subscription(
+                SportModeState,
+                str(self.get_parameter("robot_state_topic").value),
+                self._robot_state_callback,
+                qos_profile_sensor_data,
+            )
+        if self.require_fastlio_health:
+            self.create_subscription(
+                Odometry,
+                str(self.get_parameter("fastlio_odom_topic").value),
+                self._fastlio_odom_callback,
+                qos_profile_sensor_data,
+            )
+        self.create_subscription(
+            Twist,
+            str(self.get_parameter("final_cmd_topic").value),
+            self._final_cmd_callback,
+            10,
+        )
+        self.create_service(StartPatrol, "/go2/patrol/start", self._start_callback)
+        self.create_service(Trigger, "/go2/patrol/stop", self._stop_callback)
+        self.create_timer(0.1, self._tick)
+
+        self.route_publisher.publish(self.path)
+        self._publish_status(False)
+        self.get_logger().info(
+            "runtime pinned: site=%s map=%s route_sha256=%s length=%.1fm"
+            % (
+                self.bundle.site_id,
+                self.bundle.version_id,
+                self.bundle.route.source_hash,
+                self.bundle.route.length_m,
+            )
+        )
+
+    def _make_path(self) -> NavPath:
+        result = NavPath()
+        result.header.frame_id = "map"
+        for waypoint in sample_route(
+            self.bundle.route, self.bundle.patrol.path_sample_spacing_m
+        ):
+            pose = PoseStamped()
+            pose.header.frame_id = "map"
+            pose.pose.position.x = waypoint.x
+            pose.pose.position.y = waypoint.y
+            pose.pose.orientation = _quaternion_from_yaw(waypoint.yaw)
+            result.poses.append(pose)
+        return result
+
+    def _localization_callback(self, message: String) -> None:
+        received = time.monotonic()
+        try:
+            payload = json.loads(message.data)
+        except (TypeError, ValueError):
+            payload = None
+        self.localization_status = payload
+        self.localization_received_at = received
+
+    def _runtime_trace_callback(self, message: String) -> None:
+        received = time.monotonic()
+        try:
+            payload = json.loads(message.data)
+        except (TypeError, ValueError):
+            payload = None
+        self.runtime_trace_status = payload
+        self.runtime_trace_received_at = received
+
+    def _pose_callback(self, message: PoseWithCovarianceStamped) -> None:
+        self.pose = (
+            float(message.pose.pose.position.x),
+            float(message.pose.pose.position.y),
+            _yaw_from_quaternion(message.pose.pose.orientation),
+        )
+        self.pose_frame = message.header.frame_id
+        self.pose_received_at = time.monotonic()
+
+    def _robot_state_callback(self, message: SportModeState) -> None:
+        received = time.monotonic()
+        try:
+            self.robot_motion_status = {
+                "errorCode": int(message.error_code),
+                "mode": int(message.mode),
+                "progress": float(message.progress),
+                "vx": float(message.velocity[0]),
+                "vy": float(message.velocity[1]),
+                "yawSpeed": float(message.yaw_speed),
+            }
+        except (AttributeError, IndexError, TypeError, ValueError):
+            self.robot_motion_status = None
+        self.robot_motion_received_at = received
+        status = self.robot_motion_status
+        stationary = bool(
+            isinstance(status, dict)
+            and status.get("errorCode") in {0, 1001}
+            and status.get("mode") in {0, 1, 3}
+            and status.get("progress", 1.0) <= 0.01
+            and math.hypot(status.get("vx", 1.0), status.get("vy", 1.0))
+            <= self.start_stationary_speed_mps
+            and abs(status.get("yawSpeed", 1.0))
+            <= self.start_stationary_yaw_rate_rps
+        )
+        self.fastlio_health.set_stationary(stationary)
+
+    def _fastlio_odom_callback(self, message: Odometry) -> None:
+        pose = message.pose.pose
+        stamp = message.header.stamp
+        self.fastlio_health.update_odom(
+            received_at=time.monotonic(),
+            sensor_stamp_s=float(stamp.sec) + float(stamp.nanosec) * 1.0e-9,
+            position=(pose.position.x, pose.position.y, pose.position.z),
+            quaternion_xyzw=(
+                pose.orientation.x,
+                pose.orientation.y,
+                pose.orientation.z,
+                pose.orientation.w,
+            ),
+        )
+
+    def _final_cmd_callback(self, message: Twist) -> None:
+        """Observe, but never influence, the final safety-filtered command."""
+        attempt = self.active_start_attempt
+        if attempt is None or not self.current_motion_authorized:
+            return
+        values = (
+            float(message.linear.x),
+            float(message.linear.y),
+            float(message.linear.z),
+            float(message.angular.x),
+            float(message.angular.y),
+            float(message.angular.z),
+        )
+        if any(abs(value) > self.final_cmd_nonzero_epsilon for value in values):
+            try:
+                attempt.mark_first_final_nonzero()
+            except RuntimeError as exc:
+                self.get_logger().error(
+                    "invalid start timing transition: %s" % exc
+                )
+
+    def _new_start_attempt(self, request) -> StartAttemptTimeline:
+        return StartAttemptTimeline.create(
+            requested_map_version=request.expected_map_version,
+            requested_route_id=request.expected_route_id,
+            attempt_id="%s-%s" % (
+                self.runtime_instance_id[:12],
+                uuid.uuid4().hex,
+            ),
+        )
+
+    def _reject_start(self, attempt, response, reason, readiness=None):
+        attempt.mark_service_response(success=False, reason=reason)
+        self.last_start_attempt = attempt
+        response.success = False
+        response.message = self._response_json(reason, readiness, attempt=attempt)
+        return response
+
+    def _finish_active_start_attempt(self, outcome: str, reason: str) -> None:
+        attempt = self.active_start_attempt
+        if attempt is None:
+            return
+        attempt.finish(outcome=outcome, reason=reason)
+        self.last_start_attempt = attempt
+        self.active_start_attempt = None
+
+    def _runtime_gate(self) -> PatrolReadiness:
+        if not self.runtime_binding_valid:
+            return PatrolReadiness(False, "FAULT", self.runtime_binding_reason)
+        trace = self._runtime_trace_gate()
+        if not trace.ready:
+            return trace
+        if self.require_fastlio_health:
+            fastlio = self.fastlio_health.assess()
+            if not fastlio.ready:
+                return PatrolReadiness(False, "DEGRADED", fastlio.reason)
+        return evaluate_runtime_gate(
+            expected_version=self.bundle.version_id,
+            localization_status=self.localization_status,
+            localization_age_s=monotonic_age(self.localization_received_at),
+            localization_timeout_s=self.localization_timeout_s,
+            pose_xy_yaw=self.pose,
+            pose_frame=self.pose_frame,
+            pose_age_s=monotonic_age(self.pose_received_at),
+            pose_timeout_s=self.pose_timeout_s,
+            action_server_ready=self.action_client.server_is_ready(),
+            require_robot_state=self.require_robot_state,
+            robot_motion_status=self.robot_motion_status,
+            robot_motion_age_s=monotonic_age(self.robot_motion_received_at),
+            robot_motion_timeout_s=self.robot_state_timeout_s,
+        )
+
+    def _start_readiness(self) -> PatrolReadiness:
+        if not self.runtime_binding_valid:
+            return PatrolReadiness(False, "FAULT", self.runtime_binding_reason)
+        trace = self._runtime_trace_gate()
+        if not trace.ready:
+            return trace
+        if self.require_fastlio_health:
+            fastlio = self.fastlio_health.assess()
+            if not fastlio.ready:
+                return PatrolReadiness(False, "POSITIONING", fastlio.reason)
+        settings = self.bundle.patrol
+        return evaluate_readiness(
+            expected_version=self.bundle.version_id,
+            localization_status=self.localization_status,
+            localization_age_s=monotonic_age(self.localization_received_at),
+            localization_timeout_s=self.localization_timeout_s,
+            pose_xy_yaw=self.pose,
+            pose_frame=self.pose_frame,
+            pose_age_s=monotonic_age(self.pose_received_at),
+            pose_timeout_s=self.pose_timeout_s,
+            route=self.bundle.route,
+            start_max_distance_m=settings.start_max_distance_m,
+            start_max_yaw_deg=settings.start_max_yaw_deg,
+            action_server_ready=self.action_client.server_is_ready(),
+            require_robot_state=self.require_robot_state,
+            robot_motion_status=self.robot_motion_status,
+            robot_motion_age_s=monotonic_age(self.robot_motion_received_at),
+            robot_motion_timeout_s=self.robot_state_timeout_s,
+            maximum_stationary_speed_mps=self.start_stationary_speed_mps,
+            maximum_stationary_yaw_rate_rps=(
+                self.start_stationary_yaw_rate_rps
+            ),
+        )
+
+    def _runtime_trace_gate(self) -> PatrolReadiness:
+        return evaluate_runtime_trace_gate(
+            self.runtime_trace_status,
+            receive_age_s=monotonic_age(self.runtime_trace_received_at),
+            timeout_s=self.runtime_trace_status_timeout_s,
+            expected_map_version=self.bundle.version_id,
+            expected_manifest_hash=self.bundle.manifest_hash,
+        )
+
+    def _start_callback(self, request, response):
+        attempt = self._new_start_attempt(request)
+        identity_reason = requested_runtime_identity_reason(
+            request.expected_map_version,
+            request.expected_route_id,
+            self.bundle.version_id,
+            self.bundle.route.route_id,
+        )
+        if identity_reason != "OK":
+            return self._reject_start(attempt, response, identity_reason)
+        if self.goal_handle is not None or self.goal_request_pending:
+            return self._reject_start(
+                attempt,
+                response,
+                "ALREADY_PATROLLING",
+            )
+        readiness = self._start_readiness()
+        if not readiness.ready:
+            return self._reject_start(
+                attempt,
+                response,
+                readiness.reason,
+                readiness,
+            )
+
+        now = self.get_clock().now().to_msg()
+        self.path.header.stamp = now
+        for pose in self.path.poses:
+            pose.header.stamp = now
+        goal = FollowPath.Goal()
+        goal.path = self.path
+        goal.controller_id = "FollowPath"
+        goal.goal_checker_id = "route_goal_checker"
+        attempt.mark_goal_requested()
+        self.active_start_attempt = attempt
+        self.last_start_attempt = attempt
+        self.goal_request_pending = True
+        self.stop_requested = False
+        self.runtime_state = "STARTING"
+        self.runtime_reason = "NAV2_GOAL_REQUESTED"
+        try:
+            future = self.action_client.send_goal_async(
+                goal,
+                feedback_callback=self._feedback_callback,
+            )
+        except Exception as exc:
+            self.goal_request_pending = False
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "NAV2_GOAL_TRANSPORT: %s" % exc
+            attempt.mark_goal_decision(False, reason=self.runtime_reason)
+            attempt.mark_service_response(
+                success=False,
+                reason=self.runtime_reason,
+            )
+            self.last_start_attempt = attempt
+            self.active_start_attempt = None
+            response.success = False
+            response.message = self._response_json(
+                self.runtime_reason,
+                readiness,
+                attempt=attempt,
+            )
+            return response
+        future.add_done_callback(
+            lambda completed, attempt_id=attempt.attempt_id: (
+                self._goal_response_callback(completed, attempt_id)
+            )
+        )
+        attempt.mark_service_response(
+            success=True,
+            reason="NAV2_GOAL_REQUESTED",
+        )
+        response.success = True
+        response.message = self._response_json(
+            "NAV2_GOAL_REQUESTED",
+            readiness,
+            attempt=attempt,
+        )
+        return response
+
+    def _goal_response_callback(self, future, attempt_id: str) -> None:
+        self.goal_request_pending = False
+        attempt = self.active_start_attempt
+        if attempt is None or attempt.attempt_id != attempt_id:
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "START_ATTEMPT_ID_MISMATCH"
+            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            return
+        try:
+            goal_handle = future.result()
+        except Exception as exc:  # ROS action transport failure
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "NAV2_GOAL_TRANSPORT: %s" % exc
+            attempt.mark_goal_decision(False, reason=self.runtime_reason)
+            self.last_start_attempt = attempt
+            self.active_start_attempt = None
+            return
+        if not goal_handle.accepted:
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "NAV2_GOAL_REJECTED"
+            attempt.mark_goal_decision(False, reason=self.runtime_reason)
+            self.last_start_attempt = attempt
+            self.active_start_attempt = None
+            return
+        attempt.mark_goal_decision(True, reason="OK")
+        self.goal_handle = goal_handle
+        if self.stop_requested:
+            self.runtime_state = "STOPPING"
+            self.runtime_reason = "STOP_REQUESTED"
+            goal_handle.cancel_goal_async()
+            result_future = goal_handle.get_result_async()
+            result_future.add_done_callback(self._result_callback)
+            return
+        self.runtime_state = "PATROLLING"
+        self.runtime_reason = "OK"
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(self._result_callback)
+
+    def _feedback_callback(self, feedback) -> None:
+        self.last_feedback_distance = float(feedback.feedback.distance_to_goal)
+
+    def _result_callback(self, future) -> None:
+        try:
+            wrapped = future.result()
+            status = wrapped.status
+        except Exception as exc:
+            status = None
+            self.runtime_reason = "NAV2_RESULT_TRANSPORT: %s" % exc
+        self.goal_handle = None
+        self.goal_request_pending = False
+        if self.gate_cancel_reason:
+            self.runtime_state = "DEGRADED"
+            self.runtime_reason = self.gate_cancel_reason
+            self.gate_cancel_reason = ""
+            if self.resume_pending:
+                # The final safety chain is already at zero. Keep the same
+                # patrol attempt alive and wait for map localization to become
+                # usable; the fixed route will then be resent and Nav2 will
+                # continue from the closest route point, never from the start.
+                return
+            attempt_outcome = "FAILED"
+        elif self.stop_requested or status == GoalStatus.STATUS_CANCELED:
+            self.runtime_state = "READY"
+            self.runtime_reason = "STOPPED"
+            attempt_outcome = "STOPPED"
+        elif status == GoalStatus.STATUS_SUCCEEDED:
+            self.runtime_state = "COMPLETED"
+            self.runtime_reason = "ROUTE_COMPLETE"
+            attempt_outcome = "COMPLETED"
+        else:
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "NAV2_FOLLOW_PATH_FAILED_%s" % status
+            attempt_outcome = "FAILED"
+        self._finish_active_start_attempt(
+            attempt_outcome,
+            self.runtime_reason,
+        )
+
+    def _stop_callback(self, request, response):
+        del request
+        self.stop_requested = True
+        self.resume_pending = False
+        self.runtime_state = "STOPPING"
+        self.runtime_reason = "STOP_REQUESTED"
+        if self.goal_handle is not None:
+            self.goal_handle.cancel_goal_async()
+        elif not self.goal_request_pending:
+            self._finish_active_start_attempt("STOPPED", "STOP_REQUESTED")
+        response.success = True
+        response.message = self._response_json("STOP_REQUESTED")
+        return response
+
+    def _cancel_for_gate(self, reason: str) -> None:
+        self.runtime_state = "DEGRADED"
+        self.runtime_reason = reason
+        self.gate_cancel_reason = reason
+        if self.goal_handle is not None:
+            self.resume_pending = reason in RECOVERABLE_LOCALIZATION_GATES
+        if self.goal_handle is not None:
+            self.stop_requested = False
+            self.goal_handle.cancel_goal_async()
+
+    def _request_resume(self) -> None:
+        if self.goal_handle is not None or self.goal_request_pending:
+            return
+        now = self.get_clock().now().to_msg()
+        self.path.header.stamp = now
+        for pose in self.path.poses:
+            pose.header.stamp = now
+        goal = FollowPath.Goal()
+        goal.path = self.path
+        goal.controller_id = "FollowPath"
+        goal.goal_checker_id = "route_goal_checker"
+        self.goal_request_pending = True
+        self.runtime_state = "RESUMING"
+        self.runtime_reason = "LOCALIZATION_RECOVERED_RESUMING_ROUTE"
+        try:
+            future = self.action_client.send_goal_async(
+                goal,
+                feedback_callback=self._feedback_callback,
+            )
+        except Exception as exc:
+            self.goal_request_pending = False
+            self.resume_pending = False
+            self.runtime_state = "FAULT"
+            self.runtime_reason = "NAV2_RESUME_TRANSPORT: %s" % exc
+            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            return
+        future.add_done_callback(self._resume_goal_response_callback)
+
+    def _resume_goal_response_callback(self, future) -> None:
+        self.goal_request_pending = False
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            goal_handle = None
+            self.runtime_reason = "NAV2_RESUME_TRANSPORT: %s" % exc
+        if goal_handle is None or not goal_handle.accepted:
+            self.resume_pending = False
+            self.runtime_state = "FAULT"
+            if not self.runtime_reason.startswith("NAV2_RESUME_TRANSPORT"):
+                self.runtime_reason = "NAV2_RESUME_REJECTED"
+            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            return
+        self.goal_handle = goal_handle
+        self.resume_pending = False
+        self.resume_count += 1
+        self.runtime_state = "PATROLLING"
+        self.runtime_reason = "LOCALIZATION_RECOVERED_ROUTE_RESUMED"
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(self._result_callback)
+
+    def _verify_runtime_binding(self) -> None:
+        now = time.monotonic()
+        if now - self.last_runtime_binding_check < self.active_map_check_period_s:
+            return
+        self.last_runtime_binding_check = now
+        # A changed immutable binding is a latched fault.  Restoring a file or
+        # pointer cannot silently re-authorize motion; the runtime must restart
+        # and complete the full startup verification again.
+        if not self.runtime_binding_valid:
+            return
+        try:
+            valid, reason = self.runtime_guard.verify()
+            if not valid:
+                raise RuntimeError(reason)
+            if (
+                self.runtime_source == "active"
+                and now - self.last_full_map_audit >= self.full_map_audit_period_s
+            ):
+                self.last_full_map_audit = now
+                load_runtime_bundle(
+                    self.map_store_root,
+                    self.site_id,
+                    self.bundle.version_id,
+                    store=self.map_store,
+                )
+            self.runtime_binding_valid = True
+            self.runtime_binding_reason = "OK"
+        except Exception as exc:
+            self.runtime_binding_valid = False
+            self.runtime_binding_reason = "RUNTIME_BINDING_INVALID: %s" % exc
+            self.runtime_binding_fault_at = now
+
+    def _tick(self) -> None:
+        self._verify_runtime_binding()
+        gate = self._runtime_gate()
+        accepted_goal = self.goal_handle is not None
+        motion_authorized = accepted_goal and gate.ready and self.runtime_state == "PATROLLING"
+        if (accepted_goal or self.goal_request_pending) and not gate.ready:
+            self._cancel_for_gate(gate.reason)
+            motion_authorized = False
+        elif self.resume_pending and not accepted_goal and not self.goal_request_pending:
+            if gate.ready:
+                self._request_resume()
+            elif gate.reason not in RECOVERABLE_LOCALIZATION_GATES:
+                self.resume_pending = False
+                self.runtime_state = "FAULT"
+                self.runtime_reason = gate.reason
+                self._finish_active_start_attempt("FAILED", gate.reason)
+            else:
+                self.runtime_state = gate.state
+                self.runtime_reason = gate.reason
+            motion_authorized = False
+        elif not accepted_goal and not self.goal_request_pending and self.runtime_state not in {
+            "COMPLETED",
+            "FAULT",
+            "STOPPING",
+        }:
+            readiness = self._start_readiness()
+            self.runtime_state = readiness.state
+            self.runtime_reason = readiness.reason
+        if motion_authorized and not self.current_motion_authorized:
+            attempt = self.active_start_attempt
+            if attempt is not None:
+                try:
+                    attempt.mark_motion_authorized()
+                except RuntimeError as exc:
+                    motion_authorized = False
+                    self._cancel_for_gate("START_TIMING_INVALID: %s" % exc)
+        self.current_motion_authorized = bool(motion_authorized)
+        self._publish_status(motion_authorized)
+        if (
+            not self.shutdown_requested
+            and self.runtime_binding_fault_at is not None
+            and time.monotonic() - self.runtime_binding_fault_at
+            >= self.binding_shutdown_delay_s
+        ):
+            # The launch file treats this process as the owner of the complete
+            # localization/navigation generation.  Leaving after a short
+            # zero-command drain forces the whole generation to restart and
+            # bind one coherent active release; no node may hot-swap alone.
+            self.shutdown_requested = True
+            self.exit_code = 75
+            self.get_logger().error(
+                "runtime binding changed; stopping the complete runtime generation"
+            )
+            if rclpy.ok():
+                rclpy.shutdown()
+
+    def _publish_status(self, motion_authorized: bool) -> None:
+        self.status_sequence += 1
+        fastlio_health = self.fastlio_health.assess().as_dict()
+        fastlio_health["required"] = self.require_fastlio_health
+        trace_health = self._runtime_trace_gate()
+        authorization = Bool()
+        authorization.data = bool(motion_authorized)
+        self.authorization_publisher.publish(authorization)
+        status = String()
+        status_payload = {
+            "schema": "go2.runtime_status.v1",
+            "runtimeInstanceId": self.runtime_instance_id,
+            "statusSequence": self.status_sequence,
+            "publishedAt": time.time(),
+            "siteId": self.bundle.site_id,
+            "mapVersion": self.bundle.version_id,
+            "manifestHash": self.bundle.manifest_hash,
+            "state": self.runtime_state,
+            "reason": self.runtime_reason,
+            "operatorMessage": operator_message_for_reason(self.runtime_reason),
+            "motionAuthorized": bool(motion_authorized),
+            "routeHash": self.bundle.route.source_hash,
+            "runtimeProfileHash": self.runtime_profile_hash,
+            "nav2ProfileHash": self.nav2_profile_hash,
+            "controllerProfileId": "go2-nav2-mppi-omni-v1",
+            "collisionProfileId": "go2-mid360-collision-v1",
+            "calibrationHash": self.bundle.calibration_hash,
+            "robotId": self.bundle.robot_id,
+            "sensorId": self.bundle.sensor_id,
+            "routeId": self.bundle.route.route_id,
+            "routeLengthM": self.bundle.route.length_m,
+            "routePointCount": len(self.path.poses),
+            "distanceToGoalM": self.last_feedback_distance,
+            "resumePending": self.resume_pending,
+            "resumeCount": self.resume_count,
+            "robotStateRequired": self.require_robot_state,
+            "robotMode": (
+                self.robot_motion_status.get("mode")
+                if isinstance(self.robot_motion_status, dict)
+                else None
+            ),
+            "robotErrorCode": (
+                self.robot_motion_status.get("errorCode")
+                if isinstance(self.robot_motion_status, dict)
+                else None
+            ),
+            "robotStateAgeS": (
+                monotonic_age(self.robot_motion_received_at)
+                if self.require_robot_state
+                else None
+            ),
+            "fastlioHealth": fastlio_health,
+            "runtimeTraceHealth": {
+                "ready": trace_health.ready,
+                "reason": trace_health.reason,
+                "ageS": monotonic_age(self.runtime_trace_received_at),
+                "writable": (
+                    self.runtime_trace_status.get("writable")
+                    if isinstance(self.runtime_trace_status, dict)
+                    else None
+                ),
+                "path": (
+                    self.runtime_trace_status.get("path")
+                    if isinstance(self.runtime_trace_status, dict)
+                    else None
+                ),
+                "recordsWritten": (
+                    self.runtime_trace_status.get("recordsWritten")
+                    if isinstance(self.runtime_trace_status, dict)
+                    else None
+                ),
+            },
+            "startTiming": (
+                self.active_start_attempt.snapshot()
+                if self.active_start_attempt is not None
+                else (
+                    self.last_start_attempt.snapshot()
+                    if self.last_start_attempt is not None
+                    else None
+                )
+            ),
+            "activeStartAttempt": (
+                self.active_start_attempt.snapshot()
+                if self.active_start_attempt is not None
+                else None
+            ),
+            "lastStartAttempt": (
+                self.last_start_attempt.snapshot()
+                if self.last_start_attempt is not None
+                else None
+            ),
+        }
+        status.data = json.dumps(
+            status_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        self.status_publisher.publish(status)
+
+    def _response_json(
+        self,
+        reason: str,
+        readiness: Optional[PatrolReadiness] = None,
+        attempt: Optional[StartAttemptTimeline] = None,
+    ) -> str:
+        payload = {
+            "schema": "go2.patrol_response.v1",
+            "mapVersion": self.bundle.version_id,
+            "routeId": self.bundle.route.route_id,
+            "state": self.runtime_state,
+            "reason": reason,
+            "operatorMessage": operator_message_for_reason(
+                reason,
+                start_distance_m=(
+                    readiness.start_distance_m if readiness is not None else None
+                ),
+                start_yaw_error_deg=(
+                    readiness.start_yaw_error_deg if readiness is not None else None
+                ),
+            ),
+            "stage": attempt.stage if attempt is not None else None,
+            "nav2GoalAccepted": (
+                attempt.nav2_goal_accepted if attempt is not None else None
+            ),
+            "startTiming": attempt.snapshot() if attempt is not None else None,
+        }
+        if readiness is not None:
+            payload["startDistanceM"] = readiness.start_distance_m
+            payload["startYawErrorDeg"] = readiness.start_yaw_error_deg
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = None
+    exit_code = 0
+    try:
+        node = PatrolRuntimeManager()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node is not None:
+            exit_code = node.exit_code
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    if exit_code:
+        raise SystemExit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,90 @@
+continuous_map_localizer:
+  ros__parameters:
+    # These two values are injected from the activated immutable map package.
+    map_file: ""
+    map_version: ""
+    # The immutable runtime profile selects this exact reviewed parameter set.
+    quality.profile_id: go2-vgicp-orin-v1
+    registration.type: VGICP
+
+    cloud_topic: /navigation/cloud_body
+    odom_topic: /Odometry
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_link
+
+    update_period_s: 0.4
+    # Cheap safety heartbeat only; registration remains 2.5 Hz.
+    status_publish_period_s: 0.1
+    max_odom_cloud_skew_s: 0.08
+    min_scan_z: -1.5
+    max_scan_z: 2.5
+    max_scan_range: 35.0
+    tracking_scan_leaf: 0.25
+    # Keep enough startup geometry on the commissioned MID-360 scene to meet
+    # the unchanged 250-point quality gate after a controlled reset.
+    coarse_scan_leaf: 0.65
+    tracking_map_leaf: 0.30
+    coarse_map_leaf: 0.80
+    registration_threads: 4
+    # Full maps are indexed once; registrations only see this nearby target.
+    # 45m covers the 35m scan, 6m start/recovery envelope and 3m coarse gate.
+    local_map.radius_m: 45.0
+    local_map.refresh_distance_m: 5.0
+
+    # This is a broad, map-versioned physical start zone, not a manually
+    # entered pose and not a promise that the dog was placed precisely.
+    initialization.center_x: 0.0
+    initialization.center_y: 0.0
+    initialization.center_z: 0.0
+    initialization.xy_radius: 5.0
+    initialization.xy_step: 1.0
+    initialization.yaw_center_deg: 0.0
+    initialization.yaw_radius_deg: 60.0
+    initialization.yaw_step_deg: 15.0
+    initialization.result_zone_margin_m: 0.25
+    initialization.result_yaw_margin_deg: 5.0
+    # Accumulate a short odometry-aligned local submap before global search.
+    # This gives MID-360 enough geometry without asking the operator to place
+    # the dog at an exact pose.
+    initialization.accumulation_window_s: 2.5
+    initialization.min_accumulation_duration_s: 2.0
+    initialization.accumulation_leaf: 0.18
+    initialization.min_scans: 8
+    initialization.min_accumulated_points: 500
+    initialization.max_scans: 40
+    initialization.max_correspondence_m: 3.0
+    initialization.screening_iterations: 5
+    # Screening proposes bounded seeds; only refinement/final gates require
+    # convergence.  This avoids dropping a geometrically supported near-correct
+    # seed merely because five cheap iterations ended first.
+    initialization.screening_min_inlier_ratio: 0.05
+    initialization.max_iterations: 15
+    initialization.max_refine_candidates: 8
+    initialization.ambiguity_ratio: 1.12
+    initialization.ambiguity_translation_m: 1.0
+    initialization.ambiguity_rotation_deg: 20.0
+
+    # Patrol-time LOST recovery is centered on the propagated last trusted
+    # pose. It never sends a mid-route robot back to the startup zone.
+    recovery.xy_radius: 4.0
+    recovery.yaw_radius_deg: 45.0
+
+    tracking.max_correspondence_m: 1.2
+    tracking.max_iterations: 30
+    tracking.smoothing_alpha: 0.35
+    tracking.max_translation_step_m: 0.15
+    tracking.max_rotation_step_deg: 2.0
+    tracking.usable_timeout_s: 1.0
+    tracking.lost_timeout_s: 2.5
+
+    # Exact go2-vgicp-orin-v1 values. The node rejects a matching profile ID
+    # paired with different thresholds, so map binding cannot be cosmetic.
+    quality.min_input_points: 250
+    quality.min_inlier_ratio: 0.20
+    quality.max_fitness_mse: 0.20
+    quality.min_hessian_eigenvalue: 1.0e-6
+    quality.max_hessian_condition: 1.0e8
+    quality.max_correction_translation_m: 0.75
+    quality.max_correction_rotation_deg: 15.0
+    quality.max_input_age_s: 0.35

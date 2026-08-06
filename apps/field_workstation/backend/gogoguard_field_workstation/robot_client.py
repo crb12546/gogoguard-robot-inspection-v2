@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import hashlib
+import http.client
+import json
+import os
+import time
+from pathlib import Path
+from typing import Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urljoin, urlparse
+from urllib.request import Request, urlopen
+
+
+class RobotConnectionError(RuntimeError):
+    pass
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+class RobotClient:
+    """Workstation-side client for the narrow robot Edge Agent contract."""
+
+    def __init__(self, base_url: str, *, timeout_s: float = 10.0) -> None:
+        self.base_url = base_url.rstrip("/") + "/"
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("robot base_url must be an HTTP(S) URL")
+        self.parsed = parsed
+        self.timeout_s = timeout_s
+
+    def get(self, path: str) -> dict:
+        return self._json(path, "GET")
+
+    def post(self, path: str, body: dict | None = None) -> dict:
+        return self._json(path, "POST", body)
+
+    def live(self) -> dict:
+        return self.get("api/v1/live")
+
+    def camera(self) -> dict:
+        value = self.get("api/v1/camera")
+        port = int(value.get("port") or 0)
+        stream = quote(str(value.get("stream_path") or ""), safe="")
+        if port and stream:
+            scheme = "https" if self.parsed.scheme == "https" else "http"
+            value["url"] = f"{scheme}://{self.parsed.hostname}:{port}/{stream}/?controls=false&muted=true&autoplay=true&playsInline=true"
+        return value
+
+    def sessions(self) -> list[dict]:
+        return list(self.get("api/v1/sessions").get("items") or [])
+
+    def start_recording(self) -> dict:
+        return self.post("api/v1/sessions/start")
+
+    def stop_recording(self, session_id: str) -> dict:
+        return self._json(
+            f"api/v1/sessions/{quote(session_id, safe='')}/stop",
+            "POST",
+            timeout_s=max(self.timeout_s, 30.0),
+        )
+
+    def download_recording(
+        self,
+        session_id: str,
+        destination: Path,
+        report: Callable[..., None],
+    ) -> Path:
+        descriptor = self.get(
+            f"api/v1/edge/recordings/{quote(session_id, safe='')}/export"
+        )
+        manifest = dict(descriptor["manifest"])
+        session = dict(descriptor["session"])
+        destination = Path(destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        files = list(manifest.get("files") or [])
+        total = int(descriptor.get("bytes_total") or sum(int(item["bytes"]) for item in files))
+        completed = 0
+        started = time.monotonic()
+        for item in files:
+            relative = Path(str(item["path"]))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise RobotConnectionError("robot returned an unsafe recording path")
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            expected_size = int(item["bytes"])
+            expected_sha = str(item["sha256"])
+            if target.is_file() and target.stat().st_size == expected_size and _sha256(target) == expected_sha:
+                completed += expected_size
+                continue
+            part = target.with_name(f".{target.name}.part")
+            offset = min(part.stat().st_size, expected_size) if part.exists() else 0
+            if part.exists() and part.stat().st_size > expected_size:
+                part.unlink()
+                offset = 0
+            encoded = "/".join(quote(value, safe="") for value in relative.parts)
+            request = Request(
+                urljoin(
+                    self.base_url,
+                    f"api/v1/edge/recordings/{quote(session_id, safe='')}/files/{encoded}",
+                ),
+                headers={"Range": f"bytes={offset}-"} if offset else {},
+            )
+            try:
+                response = urlopen(request, timeout=max(self.timeout_s, 60.0))
+            except (HTTPError, URLError, TimeoutError) as exc:
+                raise RobotConnectionError(f"recording download failed: {exc}") from exc
+            mode = "ab" if offset and getattr(response, "status", 200) == 206 else "wb"
+            if mode == "wb":
+                offset = 0
+            current = offset
+            with response, part.open(mode) as output:
+                while chunk := response.read(1024 * 1024):
+                    output.write(chunk)
+                    current += len(chunk)
+                    elapsed = max(time.monotonic() - started, 0.001)
+                    transferred = completed + current
+                    report(
+                        progress=1 + round(29 * transferred / max(total, 1)),
+                        message=f"机器狗 → Mac：{transferred / 1024**2:.1f} / {total / 1024**2:.1f} MiB",
+                        bytes_transferred=transferred,
+                        bytes_total=total,
+                        transfer_rate_bps=transferred / elapsed,
+                    )
+                output.flush()
+                os.fsync(output.fileno())
+            if part.stat().st_size != expected_size or _sha256(part) != expected_sha:
+                raise RobotConnectionError(f"recording file verification failed: {relative}")
+            os.replace(part, target)
+            completed += expected_size
+
+        manifest_path = destination / "recording_bundle.json"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        session["root"] = str(destination)
+        session["bundle_manifest"] = str(manifest_path)
+        (destination / "session.json").write_text(
+            json.dumps(session, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        report(
+            progress=30,
+            message="机器狗录制包已在 Mac 封存并校验",
+            bytes_transferred=total,
+            bytes_total=total,
+            transfer_rate_bps=total / max(time.monotonic() - started, 0.001),
+        )
+        return destination
+
+    def deploy_map(self, job: dict, artifact_root: Path) -> dict:
+        artifact_root = Path(artifact_root)
+        files = []
+        for path in sorted(artifact_root.iterdir()):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            item = {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
+            self._put_file(
+                f"api/v1/edge/map-imports/{job['job_id']}/artifacts/{quote(path.name, safe='')}",
+                path,
+                item["sha256"],
+            )
+            files.append(item)
+        payload = {
+            "schema": "gogoguard.workstation_map_deployment.v1",
+            "job_id": job["job_id"],
+            "session_id": job.get("session_id", ""),
+            "created_at": job.get("created_at"),
+            "updated_at": job.get("updated_at"),
+            "metrics": job.get("metrics") or {},
+            "files": files,
+        }
+        return self.post(
+            f"api/v1/edge/map-imports/{job['job_id']}/commit", payload
+        )
+
+    def _put_file(self, path: str, source: Path, digest: str) -> None:
+        connection_type = (
+            http.client.HTTPSConnection if self.parsed.scheme == "https" else http.client.HTTPConnection
+        )
+        port = self.parsed.port or (443 if self.parsed.scheme == "https" else 80)
+        connection = connection_type(self.parsed.hostname, port, timeout=max(self.timeout_s, 60.0))
+        request_path = "/" + path.lstrip("/")
+        connection.putrequest("PUT", request_path)
+        connection.putheader("Content-Length", str(source.stat().st_size))
+        connection.putheader("Content-Type", "application/octet-stream")
+        connection.putheader("X-Content-SHA256", digest)
+        connection.endheaders()
+        try:
+            with source.open("rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    connection.send(chunk)
+            response = connection.getresponse()
+            content = response.read()
+            if response.status >= 300:
+                try:
+                    message = json.loads(content.decode("utf-8")).get("error")
+                except (ValueError, UnicodeDecodeError):
+                    message = content.decode("utf-8", errors="replace")
+                raise RobotConnectionError(message or f"map upload failed: HTTP {response.status}")
+        finally:
+            connection.close()
+
+    def _json(
+        self,
+        path: str,
+        method: str,
+        body: dict | None = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> dict:
+        content = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            urljoin(self.base_url, path.lstrip("/")),
+            data=content,
+            method=method,
+            headers={"Content-Type": "application/json"} if content is not None else {},
+        )
+        try:
+            with urlopen(request, timeout=timeout_s or self.timeout_s) as response:
+                value = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("error")
+            except (ValueError, UnicodeDecodeError):
+                detail = str(exc)
+            raise RobotConnectionError(detail or str(exc)) from exc
+        except (URLError, TimeoutError, ValueError) as exc:
+            raise RobotConnectionError(f"robot edge agent unavailable: {exc}") from exc
+        if not isinstance(value, dict):
+            raise RobotConnectionError("robot returned a non-object response")
+        return value

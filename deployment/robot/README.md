@@ -3,6 +3,11 @@
 This directory defines one systemd service and one primary Humble ARM64
 container. It does not replace the three existing SaaS services.
 
+The robot container owns realtime sensing, recording, localization, navigation
+and motion only. The Mac workstation owns GitHub, image publication, historical
+catalogs and cloud GLIM orchestration. Therefore the robot release mounts no
+cloud SSH key and its map worker defaults to `none`.
+
 The 2026-08-05 native ARM64 build and image smoke test succeeded. Livox SDK2,
 Livox Driver2 and FAST-LIO are compiled in the image; Nav2 including MPPI and
 Collision Monitor is installed from the Humble ARM64 repository. Exact source

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: prepare-robot-release IMAGE OUTPUT_DIRECTORY" >&2
+  exit 2
+fi
+
+readonly IMAGE=$1
+readonly OUTPUT_DIRECTORY=$2
+readonly SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+readonly REPOSITORY_ROOT=$(cd "$SCRIPT_ROOT/../.." && pwd)
+
+if [[ -e $OUTPUT_DIRECTORY && -n $(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]]; then
+  echo "output directory must not contain an existing release: $OUTPUT_DIRECTORY" >&2
+  exit 3
+fi
+
+command -v docker >/dev/null
+docker image inspect "$IMAGE" >/dev/null
+mkdir -p "$OUTPUT_DIRECTORY"
+
+docker save --output "$OUTPUT_DIRECTORY/gogoguard-edge-image.tar" "$IMAGE"
+(
+  cd "$OUTPUT_DIRECTORY"
+  shasum -a 256 gogoguard-edge-image.tar > gogoguard-edge-image.tar.sha256
+)
+
+cp "$REPOSITORY_ROOT/deployment/robot/run-edge" "$OUTPUT_DIRECTORY/run-edge"
+cp "$REPOSITORY_ROOT/deployment/robot/gogoguard-edge.service" "$OUTPUT_DIRECTORY/gogoguard-edge.service"
+cp "$REPOSITORY_ROOT/deployment/robot/install-release" "$OUTPUT_DIRECTORY/install-release"
+cp "$REPOSITORY_ROOT/deployment/robot/runtime.env.example" "$OUTPUT_DIRECTORY/runtime.env"
+cp "$REPOSITORY_ROOT/config/default.json" "$OUTPUT_DIRECTORY/runtime.json"
+printf 'GOGOGUARD_IMAGE=%s\n' "$IMAGE" > "$OUTPUT_DIRECTORY/release.env"
+
+echo "Prepared immutable robot release: $OUTPUT_DIRECTORY"
