@@ -6,8 +6,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gogoguard_field_workstation import FieldWorkstationApplication
+from gogoguard_field_workstation.robot_client import RobotClient
 
 
 SESSION_ID = "20260806T010203Z-1234abcd"
@@ -34,6 +36,28 @@ class FakeRobot:
 
 
 class FieldWorkstationTest(unittest.TestCase):
+    def test_robot_post_accepts_an_operation_specific_timeout(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def read():
+                return b'{}'
+
+        client = RobotClient("http://127.0.0.1:9", timeout_s=0.01)
+        with patch(
+            "gogoguard_field_workstation.robot_client.urlopen",
+            return_value=Response(),
+        ) as opened:
+            self.assertEqual(
+                client.post("api/v1/slow-operation", {}, timeout_s=30.0), {}
+            )
+        self.assertEqual(opened.call_args.kwargs["timeout"], 30.0)
+
     def test_historical_robot_recording_becomes_workstation_map_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

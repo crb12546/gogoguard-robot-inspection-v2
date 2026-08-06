@@ -2,7 +2,7 @@
   "id": "field_workstation",
   "responsibility": "Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment",
   "runtime": ["workstation", "browser"],
-  "status": "deployed_real_robot_mac_cloud_roundtrip_verified",
+  "status": "deployed_roundtrip_verified_with_operation_specific_robot_timeouts",
   "codeRoots": ["apps/field_workstation", "deployment/workstation"],
   "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
   "dependsOn": ["contracts", "transfer", "map_factory", "site_console", "evidence"],

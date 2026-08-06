@@ -38,8 +38,14 @@ class RobotClient:
     def get(self, path: str) -> dict:
         return self._json(path, "GET")
 
-    def post(self, path: str, body: dict | None = None) -> dict:
-        return self._json(path, "POST", body)
+    def post(
+        self,
+        path: str,
+        body: dict | None = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> dict:
+        return self._json(path, "POST", body, timeout_s=timeout_s)
 
     def live(self) -> dict:
         return self.get("api/v1/live")
@@ -199,7 +205,9 @@ class RobotClient:
             "files": files,
         }
         return self.post(
-            f"api/v1/edge/map-imports/{job['job_id']}/commit", payload
+            f"api/v1/edge/map-imports/{job['job_id']}/commit",
+            payload,
+            timeout_s=max(self.timeout_s, 60.0),
         )
 
     def _put_file(self, path: str, source: Path, digest: str) -> None:

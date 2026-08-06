@@ -140,24 +140,42 @@ class FieldWorkstationApplication:
         if job.get("state") != "complete":
             raise RuntimeError("only a completed GLIM map can be deployed")
         self.robot.deploy_map(job, Path(str(job["artifact_root"])))
-        return self.robot.post("api/v1/navigation/prepare", {"job_id": job_id})
+        return self.robot.post(
+            "api/v1/navigation/prepare",
+            {"job_id": job_id},
+            timeout_s=max(self.robot.timeout_s, 60.0),
+        )
 
     def start_navigation_runtime(self, candidate_id: str) -> dict:
         return self.robot.post(
-            "api/v1/navigation/runtime/start", {"candidate_id": candidate_id}
+            "api/v1/navigation/runtime/start",
+            {"candidate_id": candidate_id},
+            timeout_s=max(self.robot.timeout_s, 30.0),
         )
 
     def stop_navigation_runtime(self) -> dict:
-        return self.robot.post("api/v1/navigation/runtime/stop")
+        return self.robot.post(
+            "api/v1/navigation/runtime/stop",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
 
     def reset_localization(self) -> dict:
-        return self.robot.post("api/v1/navigation/localization/reset")
+        return self.robot.post(
+            "api/v1/navigation/localization/reset",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
 
     def start_patrol(self) -> dict:
-        return self.robot.post("api/v1/navigation/patrol/start")
+        return self.robot.post(
+            "api/v1/navigation/patrol/start",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
 
     def stop_patrol(self) -> dict:
-        return self.robot.post("api/v1/navigation/patrol/stop")
+        return self.robot.post(
+            "api/v1/navigation/patrol/stop",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
 
     def _load_catalog(self) -> dict:
         try:

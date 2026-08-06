@@ -12,7 +12,7 @@ this index describes code state and never implies robot acceptance.
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
 | `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_clock_rebase_deployed` | `contracts` |
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
-| `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `deployed_real_robot_mac_cloud_roundtrip_verified` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
+| `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `deployed_roundtrip_verified_with_operation_specific_robot_timeouts` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
