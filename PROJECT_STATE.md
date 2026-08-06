@@ -200,6 +200,17 @@ Updated: 2026-08-07
   prepare operations completed without transfer or `Broken pipe`; both
   returned candidate `map-28acad0c6b0e`. Nav2 and the motion bridge remained
   stopped throughout this receipt.
+- Mac workstation commit `5f52229` separates the 3-second robot health-query
+  timeout from slow map and navigation operations. Map deployment/preparation
+  uses a 60-second bound; navigation start, stop, localization reset and patrol
+  operations use a 30-second bound. This corrects false UI `timeout` reports
+  for operations which safely continue on the robot after the HTTP client has
+  already given up.
+- GLIM job `map-e9bc37247129` completed and is the selected navigation
+  candidate: 713,497 points, an 82.966 m route and 285 generation-2 waypoints.
+  Its four immutable robot artifacts total 14,774,221 bytes. After clearing the
+  stopped old runtime, preparation through the updated Mac endpoint returned
+  HTTP 201 in 1.72 seconds; Nav2 and the motion bridge remained stopped.
 - Robot motion, continuous fixed-map localization and one complete indoor
   recorded-route patrol are now field-verified.
 
@@ -208,6 +219,11 @@ Updated: 2026-08-07
 - Collect a cold-boot receipt for the prepared Livox/NTP correction.
 - Field-test localization and patrol on outdoor map `map-28acad0c6b0e`; the
   map and route are prepared but its Nav2 runtime has not yet been started.
+- Correct startup localization ambiguity observed on `map-28acad0c6b0e`: while
+  the robot was physically near the recorded origin, two resets locked to
+  different poses roughly 4--6 m away and incorrectly reported high-confidence
+  tracking. The 1.5 m route-start gate correctly denied motion, but startup
+  candidate ranking needs a stronger route-start prior and ambiguity check.
 - Preserve the exact Nav2/TF failure detail in the navigation status contract
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
