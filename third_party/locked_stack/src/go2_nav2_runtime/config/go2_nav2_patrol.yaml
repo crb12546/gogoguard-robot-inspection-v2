@@ -203,10 +203,16 @@ collision_monitor:
       enabled: true
     SlowZone:
       type: polygon
-      points: [1.15, 0.65, 1.15, -0.65, -0.70, -0.65, -0.70, 0.65]
+      # The first field patrol proved that a +/-0.65 m rectangle latches on
+      # passable side walls.  +/-0.55 m still covers the 0.20 m body half-width
+      # plus 0.35 m clearance without treating the whole narrow passage as an
+      # indefinitely occupied slowdown zone.
+      points: [1.15, 0.55, 1.15, -0.55, -0.70, -0.55, -0.70, 0.55]
       action_type: slowdown
       max_points: 3
-      slowdown_ratio: 0.45
+      # 0.45 reduced the observed 0.341 m/s command to 0.153 m/s, below the
+      # commissioned Go2 gait deadband, and caused a 15 s progress failure.
+      slowdown_ratio: 0.70
       visualize: true
       polygon_pub_topic: /go2/collision/slow_zone
       enabled: true

@@ -174,15 +174,26 @@ Updated: 2026-08-06
   odometry. No Nav2 runtime or motion bridge was started.
 - Candidate generation 2 was regenerated for `map-648e606fb9a5`: 65 waypoints,
   18.116 m route, 0.40 m/s route limit and 0.20 m/s MPPI minimum forward
-  sample. The candidate is selected on the page, but patrol motion acceptance
-  is still pending an operator-started field run.
-- Dynamic mapping quality and robot motion remain unverified.
+  sample.
+- The first moving generation-2 patrol ran for 51.4 seconds with healthy
+  fixed-map localization and reduced the remaining route to 6.59 m. At a
+  passable narrow section, Collision Monitor held `SlowZone` continuously for
+  14.9 seconds: the average 0.341 m/s Nav2 command became 0.153 m/s at the
+  configured 45 percent ratio. The Go2 advanced only 0.074 m and Nav2 correctly
+  aborted on the 0.20 m / 15 s progress contract. StopZone did not trigger,
+  localization remained accepted, and clock skew was not involved.
+- A navigation-only correction is prepared from that trace: preserve StopZone,
+  narrow SlowZone from +/-0.65 m to +/-0.55 m (body half-width plus 0.35 m),
+  and raise slowdown from 45 to 70 percent. Deployment and the repeat patrol
+  receipt are pending.
+- Robot motion and continuous fixed-map localization are now field-verified;
+  dynamic map quality and a complete patrol remain unverified.
 
 ## Known field follow-ups
 
 - Collect a cold-boot receipt for the prepared Livox/NTP correction and a
-  controlled patrol receipt for the Go2 gait correction before either is
-  considered dynamically verified.
+  repeat patrol receipt through the observed narrow section for the SlowZone
+  correction.
 - Make workstation map deployment idempotent when an immutable copy of the
   selected artifact already exists on the robot. The current PUT path rejects
   before consuming the request body, which can surface as `Broken pipe`; the

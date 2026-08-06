@@ -6,7 +6,7 @@
   "localSnapshot": {
     "root": "third_party/locked_stack",
     "fileCount": 468,
-    "aggregateSha256": "a924b58456f1ffc33f26dd27b871567a2b520d8f625e819649da0cc2880258fd",
+    "aggregateSha256": "dd719a760cfeef8b3e8dd24125c36a899b2ad569546ddbffbdee898c051203d9",
     "digestAlgorithm": "sha256(relative_posix_path + NUL + sha256(file_bytes) + NUL) in sorted path order"
   },
   "firstRealSlice": {
@@ -55,7 +55,8 @@
       "the site navigation manager owns the Unitree SDK receiver as a separately supervised process and rejects patrol start when that bridge is unavailable",
       "startup VGICP uses a 0.65 m coarse scan leaf to preserve at least the unchanged 250-point quality evidence gate on the commissioned MID-360 scene",
       "the Livox no-sync timestamp mapper rebases one common LiDAR/IMU epoch when the host realtime clock steps after driver startup",
-      "the commissioned Go2 navigation profile samples forward gait at or above 0.20 m/s while retaining zero stop and downstream collision slowdown"
+      "the commissioned Go2 navigation profile samples forward gait at or above 0.20 m/s while retaining zero stop and downstream collision slowdown",
+      "the first moving patrol receipt narrows SlowZone to the body plus 0.35 m lateral clearance and raises slowdown to 70 percent so passable walls do not force a sub-gait command"
     ]
   }
 }

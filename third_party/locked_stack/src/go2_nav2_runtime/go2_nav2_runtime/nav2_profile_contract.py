@@ -263,6 +263,18 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError("SlowZone must fully contain StopZone")
     if slow_bounds[1] < 1.0:
         raise Nav2ProfileError("SlowZone must begin intervention before one metre")
+    slow_lateral_half_width = max(abs(slow_bounds[2]), abs(slow_bounds[3]))
+    if slow_lateral_half_width > 0.55 + 1.0e-9:
+        raise Nav2ProfileError(
+            "SlowZone lateral envelope must not latch on passable side walls"
+        )
+    slowdown_ratio = _positive(
+        slow_zone.get("slowdown_ratio"), "SlowZone.slowdown_ratio"
+    )
+    if slowdown_ratio < 0.65 or slowdown_ratio > 0.80:
+        raise Nav2ProfileError(
+            "SlowZone slowdown ratio must stay inside the commissioned gait envelope"
+        )
     prediction_distance = time_steps * model_dt * vx_max
     if prediction_distance + 1.0e-9 < slow_bounds[1]:
         raise Nav2ProfileError("MPPI prediction horizon does not reach the slowdown zone")
@@ -294,6 +306,8 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         "inflationClearanceEnvelopeM": clearance_envelope,
         "inflationCostScalingFactor": inflation_cost_scaling,
         "slowZoneFrontM": slow_bounds[1],
+        "slowZoneLateralHalfWidthM": slow_lateral_half_width,
+        "slowdownRatio": slowdown_ratio,
         "stopZoneFrontM": stop_bounds[1],
         "batchSize": batch_size,
         "iterationCount": iteration_count,

@@ -128,6 +128,14 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("vx_min: 0.20", config)
         self.assertIn("required_movement_radius: 0.20", config)
 
+    def test_slow_zone_preserves_a_passable_corridor_and_effective_gait(self) -> None:
+        config = NAV2_CONFIG.read_text(encoding="utf-8")
+        self.assertIn(
+            "points: [1.15, 0.55, 1.15, -0.55, -0.70, -0.55, -0.70, 0.55]",
+            config,
+        )
+        self.assertIn("slowdown_ratio: 0.70", config)
+
     def test_startup_search_preserves_the_250_point_quality_gate(self) -> None:
         config = LOCALIZER_CONFIG.read_text(encoding="utf-8")
         profile = (
