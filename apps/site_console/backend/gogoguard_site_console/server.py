@@ -31,6 +31,10 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.camera_status())
             if path == "/api/v1/navigation":
                 return self._json(200, self.server.application.navigation_status())
+            if path == "/api/v1/navigation/profile":
+                return self._json(200, self.server.application.navigation_profile())
+            if path == "/api/v1/navigation/diagnostics":
+                return self._json(200, self.server.application.navigation_diagnostics())
             if path == "/api/v1/map-jobs":
                 return self._json(200, {"items": self.server.application.map_jobs()})
             if path == "/api/v1/sessions":
@@ -87,12 +91,19 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.start_navigation_runtime(str(body.get("candidate_id", ""))))
             if path == "/api/v1/navigation/runtime/stop":
                 return self._json(200, self.server.application.stop_navigation_runtime())
+            if path == "/api/v1/navigation/runtime/recover":
+                return self._json(202, self.server.application.recover_navigation_runtime())
             if path == "/api/v1/navigation/localization/reset":
                 return self._json(200, self.server.application.reset_localization())
             if path == "/api/v1/navigation/patrol/start":
                 return self._json(200, self.server.application.start_patrol())
             if path == "/api/v1/navigation/patrol/stop":
                 return self._json(200, self.server.application.stop_patrol())
+            if path == "/api/v1/navigation/profile":
+                body = self._body()
+                return self._json(200, self.server.application.update_navigation_profile(dict(body.get("profile") or {})))
+            if path == "/api/v1/navigation/profile/rollback":
+                return self._json(200, self.server.application.rollback_navigation_profile())
             match = re.fullmatch(
                 r"/api/v1/edge/map-imports/(map-[A-Za-z0-9]{12})/commit", path
             )

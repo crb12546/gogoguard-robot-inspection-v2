@@ -52,6 +52,9 @@ make workstation
 
 The Mac catalog and artifacts persist under `workstation-data/`.
 
+The operator flow, button meanings, recovery path and current default
+parameters are documented in [docs/FIELD_WORKSTATION_GUIDE.md](docs/FIELD_WORKSTATION_GUIDE.md).
+
 ## Verify
 
 ```bash

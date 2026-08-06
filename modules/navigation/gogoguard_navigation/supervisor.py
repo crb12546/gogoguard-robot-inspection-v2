@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import signal
+import socketserver
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Callable
+
+from .manager import NavigationManager
+
+
+class OperationRegistry:
+    def __init__(self) -> None:
+        self._items: dict[str, dict[str, Any]] = {}
+        self._active_by_kind: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def submit(self, kind: str, action: Callable[[], Any], *, lane: str = "control") -> dict[str, Any]:
+        with self._lock:
+            active_id = self._active_by_kind.get(lane)
+            active = self._items.get(active_id or "")
+            if active and active["state"] in {"accepted", "running"}:
+                return dict(active)
+            operation_id = f"op-{uuid.uuid4().hex[:12]}"
+            item = {
+                "schema": "gogoguard.operation.v1",
+                "operationId": operation_id,
+                "kind": kind,
+                "state": "accepted",
+                "message": "请求已接收",
+                "createdAt": time.time(),
+                "updatedAt": time.time(),
+            }
+            self._items[operation_id] = item
+            self._active_by_kind[lane] = operation_id
+
+        def run() -> None:
+            self._change(operation_id, state="running", message="正在执行")
+            try:
+                result = action()
+            except Exception as exc:
+                self._change(operation_id, state="failed", message=str(exc), error=str(exc))
+            else:
+                self._change(operation_id, state="complete", message="已完成", result=result)
+
+        threading.Thread(target=run, name=operation_id, daemon=True).start()
+        return dict(item)
+
+    def _change(self, operation_id: str, **values: Any) -> None:
+        with self._lock:
+            self._items[operation_id].update(values, updatedAt=time.time())
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(item) for item in sorted(
+                self._items.values(), key=lambda value: value["createdAt"], reverse=True
+            )[:20]]
+
+
+class SupervisorService:
+    def __init__(self, manager: NavigationManager) -> None:
+        self.manager = manager
+        self.operations = OperationRegistry()
+
+    def dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        if method == "status":
+            status = self.manager.status()
+            status["supervisor"] = {"running": True, "pid": os.getpid()}
+            status["operations"] = self.operations.snapshot()
+            return status
+        if method == "prepare":
+            return self.manager.prepare(str(params.get("job_id", "")))
+        if method == "profile.get":
+            return self.manager.profile()
+        if method == "profile.update":
+            return self.manager.update_profile(dict(params.get("profile") or {}))
+        if method == "profile.rollback":
+            return self.manager.rollback_profile()
+        if method == "diagnostics":
+            return self.manager.diagnostics()
+        actions = {
+            "runtime.start": lambda: self.manager.start_runtime(str(params.get("candidate_id", ""))),
+            "runtime.stop": self.manager.stop_runtime,
+            "localization.reset": self.manager.reset_localization,
+            "patrol.start": self.manager.start_patrol,
+            "patrol.stop": self.manager.stop_patrol,
+            "runtime.recover": self._recover,
+        }
+        if method in actions:
+            lane = "stop" if method in {"runtime.stop", "patrol.stop"} else "control"
+            return self.operations.submit(method, actions[method], lane=lane)
+        raise ValueError(f"unknown supervisor method: {method}")
+
+    def _recover(self) -> dict[str, Any]:
+        candidate = self.manager.status().get("candidate")
+        if not candidate:
+            raise RuntimeError("尚未选择地图与路线")
+        self.manager.stop_runtime()
+        return self.manager.start_runtime(str(candidate["candidate_id"]))
+
+
+class _RequestHandler(socketserver.StreamRequestHandler):
+    def handle(self) -> None:
+        try:
+            request = json.loads(self.rfile.readline(1024 * 1024).decode("utf-8"))
+            result = self.server.service.dispatch(
+                str(request.get("method", "")), dict(request.get("params") or {})
+            )
+            response = {"ok": True, "result": result}
+        except Exception as exc:
+            response = {"ok": False, "error": str(exc)}
+        self.wfile.write((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+class NavigationSupervisorServer(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+
+    def __init__(self, socket_path: Path, service: SupervisorService) -> None:
+        self.socket_path = Path(socket_path)
+        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        self.socket_path.unlink(missing_ok=True)
+        self.service = service
+        super().__init__(str(self.socket_path), _RequestHandler)
+
+    def server_close(self) -> None:
+        super().server_close()
+        self.socket_path.unlink(missing_ok=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="single owner for the navigation runtime")
+    parser.add_argument("--data-root", type=Path, default=Path("/var/lib/gogoguard"))
+    parser.add_argument("--socket", type=Path, default=Path("/var/lib/gogoguard/navigation/supervisor.sock"))
+    parser.add_argument("--site-id", default="local-first-site")
+    parser.add_argument("--robot-id", required=True)
+    parser.add_argument("--sensor-id", required=True)
+    args = parser.parse_args()
+    lock_path = args.socket.with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = lock_path.open("w")
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise SystemExit("navigation supervisor is already running") from exc
+    manager = NavigationManager(
+        args.data_root, site_id=args.site_id, robot_id=args.robot_id, sensor_id=args.sensor_id
+    )
+    server = NavigationSupervisorServer(args.socket, SupervisorService(manager))
+    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        manager.close()
+
+
+if __name__ == "__main__":
+    main()

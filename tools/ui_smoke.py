@@ -6,9 +6,21 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 required = {
-    "index.html": ["trajectory", "cloud", "cameraFrame", "recordButton", "app.js"],
-    "app.js": ["/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start", "map-jobs", "map_job_id", "drawCloud"],
-    "styles.css": [".workspace", ".camera-panel", ".control-panel", "@media"],
+    "index.html": [
+        "trajectory", "cloud", "cameraFrame", "recordButton", "app.js",
+        "巡检操作向导", "参数中心", "诊断中心", "blockedDecision",
+        "发布所选地图与路线到机器狗", "自动清理并恢复",
+    ],
+    "app.js": [
+        "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
+        "map-jobs", "map_job_id", "drawCloud",
+        "/api/v1/navigation/runtime/recover",
+        "/api/v1/navigation/diagnostics", "/api/v1/navigation/profile",
+    ],
+    "styles.css": [
+        ".workspace", ".camera-panel", ".control-panel", ".action-help",
+        "[hidden]", "@media",
+    ],
 }
 for name, needles in required.items():
     path = root / name
@@ -18,4 +30,6 @@ for name, needles in required.items():
     for needle in needles:
         if needle not in content:
             raise SystemExit(f"{path}: missing {needle}")
+if "使用当前地图与录制路线" in (root / "index.html").read_text(encoding="utf-8"):
+    raise SystemExit("site console still exposes the retired ambiguous action")
 print("site console UI contract: ok")

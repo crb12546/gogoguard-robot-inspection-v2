@@ -32,6 +32,11 @@ NAV2_CONFIG = (
     / "third_party/locked_stack/src/go2_nav2_runtime/config"
     / "go2_nav2_patrol.yaml"
 )
+NAV2_LAUNCH = (
+    ROOT
+    / "third_party/locked_stack/src/go2_nav2_runtime/launch"
+    / "active_map_patrol.launch.py"
+)
 
 
 class NavigationRuntimeCompatibilityTest(unittest.TestCase):
@@ -126,15 +131,22 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
     def test_mppi_forward_samples_clear_the_commissioned_gait_deadband(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")
         self.assertIn("vx_min: 0.20", config)
-        self.assertIn("required_movement_radius: 0.20", config)
+        self.assertIn("required_movement_radius: 0.15", config)
 
     def test_slow_zone_preserves_a_passable_corridor_and_effective_gait(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")
         self.assertIn(
-            "points: [1.15, 0.55, 1.15, -0.55, -0.70, -0.55, -0.70, 0.55]",
+            "points: [1.00, 0.30, 1.00, -0.30, -0.55, -0.30, -0.55, 0.30]",
             config,
         )
-        self.assertIn("slowdown_ratio: 0.70", config)
+        self.assertIn("slowdown_ratio: 0.85", config)
+
+    def test_operator_blocked_time_controls_nav2_progress_checker(self) -> None:
+        source = NAV2_LAUNCH.read_text(encoding="utf-8")
+        self.assertIn(
+            '"progress_checker.movement_time_allowance": blocked_decision_s',
+            source,
+        )
 
     def test_startup_search_preserves_the_250_point_quality_gate(self) -> None:
         config = LOCALIZER_CONFIG.read_text(encoding="utf-8")

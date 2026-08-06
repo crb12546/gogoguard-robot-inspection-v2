@@ -8,6 +8,12 @@ and motion only. The Mac workstation owns GitHub, image publication, historical
 catalogs and cloud GLIM orchestration. Therefore the robot release mounts no
 cloud SSH key and its map worker defaults to `none`.
 
+Inside the primary container, the Site Console HTTP process is not a process
+supervisor. `gogoguard-navigation-supervisor` is the unique owner of the
+Unitree receiver and localization/Nav2 runtime. Restarting the web process does
+not stop motion orchestration or create duplicate ROS graphs; the container
+entrypoint waits for the supervisor socket before exposing the Edge Agent.
+
 The 2026-08-05 native ARM64 build and image smoke test succeeded. Livox SDK2,
 Livox Driver2 and FAST-LIO are compiled in the image; Nav2 including MPPI and
 Collision Monitor is installed from the Humble ARM64 repository. Exact source

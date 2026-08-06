@@ -58,6 +58,24 @@ def _runtime_nodes(context):
     robot_state_timeout_s = ParameterValue(
         LaunchConfiguration("robot_state_timeout_s"), value_type=float
     )
+    straight_speed = float(LaunchConfiguration("straight_speed_mps").perform(context))
+    turn_speed = float(LaunchConfiguration("turn_speed_radps").perform(context))
+    lateral_speed = float(LaunchConfiguration("lateral_speed_mps").perform(context))
+    acceleration = float(LaunchConfiguration("acceleration_mps2").perform(context))
+    stop_front = float(LaunchConfiguration("stop_zone_front_m").perform(context))
+    stop_rear = float(LaunchConfiguration("stop_zone_rear_m").perform(context))
+    stop_half_width = float(LaunchConfiguration("stop_zone_half_width_m").perform(context))
+    slow_front = float(LaunchConfiguration("slow_zone_front_m").perform(context))
+    slow_rear = float(LaunchConfiguration("slow_zone_rear_m").perform(context))
+    slow_half_width = float(LaunchConfiguration("slow_zone_half_width_m").perform(context))
+    slowdown_ratio = float(LaunchConfiguration("slowdown_ratio").perform(context))
+    blocked_decision_s = float(
+        LaunchConfiguration("blocked_decision_s").perform(context)
+    )
+    controller_frequency = float(LaunchConfiguration("controller_frequency_hz").perform(context))
+    mppi_time_steps = int(LaunchConfiguration("mppi_time_steps").perform(context))
+    mppi_batch_size = int(LaunchConfiguration("mppi_batch_size").perform(context))
+    mppi_iterations = int(LaunchConfiguration("mppi_iteration_count").perform(context))
     hardware_output = LaunchConfiguration("hardware_output_enabled").perform(context)
     hardware_output = hardware_output.strip().lower()
     if hardware_output not in {"true", "false"}:
@@ -106,7 +124,9 @@ def _runtime_nodes(context):
     localization_config = str(
         map_manager_share / "config" / "continuous_map_localizer.yaml"
     )
-    speed = bundle.patrol.speed_limit_mps
+    # The route owns geometry and start/end behavior. The active, versioned
+    # robot profile owns commissioning speed and avoidance behavior.
+    speed = straight_speed
     robot_id = LaunchConfiguration("robot_id").perform(context).strip()
     sensor_id = LaunchConfiguration("sensor_id").perform(context).strip()
     if runtime_source == "active":
@@ -195,7 +215,21 @@ def _runtime_nodes(context):
                     value_type=float,
                 ),
                 "use_sim_time": use_sim_time,
-                "localization_timeout_s": safety_stream_timeout_s,
+                "localization_timeout_s": ParameterValue(
+                    LaunchConfiguration("localization_status_timeout_s"), value_type=float
+                ),
+                "localization_dropout_grace_s": ParameterValue(
+                    LaunchConfiguration("localization_dropout_grace_s"), value_type=float
+                ),
+                "localization_recovery_stable_s": ParameterValue(
+                    LaunchConfiguration("localization_recovery_stable_s"), value_type=float
+                ),
+                "blocked_decision_s": ParameterValue(
+                    LaunchConfiguration("blocked_decision_s"), value_type=float
+                ),
+                "rejoin_lookahead_m": ParameterValue(
+                    LaunchConfiguration("rejoin_lookahead_m"), value_type=float
+                ),
                 "active_map_check_period_s": runtime_binding_check_period_s,
                 "robot_state_timeout_s": robot_state_timeout_s,
                 "fastlio_health.settle_window_s": ParameterValue(
@@ -347,7 +381,18 @@ def _runtime_nodes(context):
             respawn_delay=2.0,
             parameters=[
                 nav2_config,
-                {"FollowPath.vx_max": speed, "use_sim_time": use_sim_time},
+                {
+                    "controller_frequency": controller_frequency,
+                    "FollowPath.vx_max": speed,
+                    "FollowPath.model_dt": 1.0 / controller_frequency,
+                    "FollowPath.vy_max": lateral_speed,
+                    "FollowPath.wz_max": turn_speed,
+                    "FollowPath.time_steps": mppi_time_steps,
+                    "FollowPath.batch_size": mppi_batch_size,
+                    "FollowPath.iteration_count": mppi_iterations,
+                    "progress_checker.movement_time_allowance": blocked_decision_s,
+                    "use_sim_time": use_sim_time,
+                },
             ],
             remappings=common_tf_remaps
             + [("cmd_vel", "/nav2/raw_cmd_vel"), ("odom", "/Odometry")],
@@ -362,11 +407,12 @@ def _runtime_nodes(context):
             parameters=[
                 nav2_config,
                 {
-                    "max_velocity": [speed, 0.10, 0.45],
+                    "max_velocity": [speed, lateral_speed, turn_speed],
                     # The immutable route is directional. Keep lateral and yaw
                     # authority for an omni bypass, but never re-authorize
                     # reverse x after the sealed profile rejected it.
-                    "min_velocity": [0.0, -0.10, -0.45],
+                    "min_velocity": [0.0, -lateral_speed, -turn_speed],
+                    "max_accel": [acceleration, max(0.35, acceleration * 0.5), 0.80],
                     "use_sim_time": use_sim_time,
                 },
             ],
@@ -383,7 +429,21 @@ def _runtime_nodes(context):
             output="screen",
             respawn=True,
             respawn_delay=2.0,
-            parameters=[nav2_config, {"use_sim_time": use_sim_time}],
+            parameters=[
+                nav2_config,
+                {
+                    "StopZone.points": [
+                        stop_front, stop_half_width, stop_front, -stop_half_width,
+                        -stop_rear, -stop_half_width, -stop_rear, stop_half_width,
+                    ],
+                    "SlowZone.points": [
+                        slow_front, slow_half_width, slow_front, -slow_half_width,
+                        -slow_rear, -slow_half_width, -slow_rear, slow_half_width,
+                    ],
+                    "SlowZone.slowdown_ratio": slowdown_ratio,
+                    "use_sim_time": use_sim_time,
+                },
+            ],
             remappings=common_tf_remaps,
         ),
         Node(
@@ -419,15 +479,19 @@ def _runtime_nodes(context):
                     "pointcloud_topic": "/navigation/cloud_body",
                     "expected_cloud_frame": "base_link",
                     "expected_map_version": bundle.version_id,
-                    "require_localization": True,
+                    # Collision Monitor is the sole point-cloud obstacle owner;
+                    # the final bridge retains only authorization, watchdog,
+                    # finite/range validation and absolute hardware caps.
+                    "require_localization": False,
+                    "require_obstacle_gate": False,
                     "require_runtime_authorization": True,
                     "cmd_timeout": safety_stream_timeout_s,
                     "cloud_timeout": safety_stream_timeout_s,
                     "localization_timeout": safety_stream_timeout_s,
                     "runtime_authorization_timeout": safety_stream_timeout_s,
                     "max_vx": speed,
-                    "max_vy": 0.10,
-                    "max_yaw_rate": 0.45,
+                    "max_vy": lateral_speed,
+                    "max_yaw_rate": turn_speed,
                     "output_cmd_topic": "/cmd_vel",
                     "roi_z_min": -0.10,
                     "roi_z_max": 1.45,
@@ -450,8 +514,8 @@ def _runtime_nodes(context):
                         "target_ip": "127.0.0.1",
                         "target_port": 5005,
                         "max_vx": speed,
-                        "max_vy": 0.10,
-                        "max_vyaw": 0.45,
+                        "max_vy": lateral_speed,
+                        "max_vyaw": turn_speed,
                         "unitree_vy_sign": 1.0,
                         "use_sim_time": use_sim_time,
                     }
@@ -555,6 +619,26 @@ def generate_launch_description():
                     "GO2_SAFETY_STREAM_TIMEOUT_S", default_value="0.20"
                 ),
             ),
+            DeclareLaunchArgument("localization_status_timeout_s", default_value="0.60"),
+            DeclareLaunchArgument("straight_speed_mps", default_value="0.60"),
+            DeclareLaunchArgument("turn_speed_radps", default_value="0.40"),
+            DeclareLaunchArgument("lateral_speed_mps", default_value="0.20"),
+            DeclareLaunchArgument("acceleration_mps2", default_value="0.90"),
+            DeclareLaunchArgument("stop_zone_front_m", default_value="0.55"),
+            DeclareLaunchArgument("stop_zone_rear_m", default_value="0.38"),
+            DeclareLaunchArgument("stop_zone_half_width_m", default_value="0.27"),
+            DeclareLaunchArgument("slow_zone_front_m", default_value="1.00"),
+            DeclareLaunchArgument("slow_zone_rear_m", default_value="0.55"),
+            DeclareLaunchArgument("slow_zone_half_width_m", default_value="0.30"),
+            DeclareLaunchArgument("slowdown_ratio", default_value="0.85"),
+            DeclareLaunchArgument("blocked_decision_s", default_value="2.5"),
+            DeclareLaunchArgument("rejoin_lookahead_m", default_value="2.0"),
+            DeclareLaunchArgument("localization_dropout_grace_s", default_value="1.0"),
+            DeclareLaunchArgument("localization_recovery_stable_s", default_value="0.5"),
+            DeclareLaunchArgument("controller_frequency_hz", default_value="15.0"),
+            DeclareLaunchArgument("mppi_time_steps", default_value="56"),
+            DeclareLaunchArgument("mppi_batch_size", default_value="700"),
+            DeclareLaunchArgument("mppi_iteration_count", default_value="1"),
             DeclareLaunchArgument(
                 "runtime_binding_check_period_s",
                 default_value=EnvironmentVariable(

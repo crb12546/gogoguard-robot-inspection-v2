@@ -8,7 +8,7 @@ from gogoguard_data_capture import CaptureManager
 from gogoguard_device_io import SnapshotStore, create_camera_gateway, create_gateway
 from gogoguard_evidence import EventJournal
 from gogoguard_map_factory import MapJobManager
-from gogoguard_navigation import NavigationManager
+from gogoguard_navigation import NavigationManager, NavigationSupervisorClient
 from gogoguard_transfer import EdgeArtifactExchange
 
 
@@ -31,8 +31,12 @@ class InspectionApplication:
             data_root, map_worker, self.journal, cloud
         )
         self.exchange = EdgeArtifactExchange(data_root)
-        self.navigation = NavigationManager(
-            data_root, site_id=site_id, robot_id=robot_id, sensor_id=sensor_id
+        self.navigation = (
+            NavigationSupervisorClient(data_root / "navigation" / "supervisor.sock")
+            if mode == "robot"
+            else NavigationManager(
+                data_root, site_id=site_id, robot_id=robot_id, sensor_id=sensor_id
+            )
         )
 
     def start(self) -> None:
@@ -129,3 +133,18 @@ class InspectionApplication:
 
     def stop_patrol(self) -> dict:
         return self.navigation.stop_patrol()
+
+    def recover_navigation_runtime(self) -> dict:
+        return self.navigation.recover_runtime()
+
+    def navigation_profile(self) -> dict:
+        return self.navigation.profile()
+
+    def update_navigation_profile(self, profile: dict) -> dict:
+        return self.navigation.update_profile(profile)
+
+    def rollback_navigation_profile(self) -> dict:
+        return self.navigation.rollback_profile()
+
+    def navigation_diagnostics(self) -> dict:
+        return self.navigation.diagnostics()

@@ -43,22 +43,66 @@
         <div class="map-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>录制路线</span><span><i class="robot-dot"></i>机器狗</span></div>
       </article>
       <article class="panel navigation-control-panel">
-        <div class="panel-title"><div><span>Nav2 / MPPI 运行</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
+        <div class="panel-title"><div><span>巡检操作向导</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
+        <div class="workflow-message" id="workflowMessage">请从右上方历史中选择一张可用地图。页面会只突出当前需要的下一步。</div>
+        <div class="guided-flow">
+          <div class="guided-step" id="assetStep"><i>1</i><div><strong>地图与路线</strong><small id="assetStepHelp">选择地图后，首次使用才需发布到机器狗</small></div><b id="assetStepState">未选择</b></div>
+          <div class="guided-step" id="runtimeStep"><i>2</i><div><strong>定位与 Nav2</strong><small id="runtimeStepHelp">启动后等待“定位可用”，不用重复点击</small></div><b id="runtimeStepState">未启动</b></div>
+          <div class="guided-step" id="patrolStep"><i>3</i><div><strong>开始巡检</strong><small id="patrolStepHelp">机器狗站稳且定位可用后，按记录路线行走</small></div><b id="patrolStepState">等待</b></div>
+        </div>
         <div class="nav-metrics">
           <div><span>固定地图定位</span><strong id="localizationState">—</strong><small id="localizationDetail">等待 VGICP</small></div>
           <div><span>路线</span><strong id="routeLength">—</strong><small id="routePoints">尚未生成</small></div>
           <div><span>任务状态</span><strong id="patrolState">—</strong><small id="patrolReason">尚未启动</small></div>
           <div><span>最终速度</span><strong id="finalVelocity">0.00 m/s</strong><small id="motionAuthority">运动权关闭</small></div>
+          <div><span>路线进度</span><strong id="routeProgress">0%</strong><small id="remainingRoute">尚未开始</small></div>
+          <div><span>最近操作</span><strong id="operationState">无</strong><small id="operationMessage">点击后会在这里持续显示结果</small></div>
         </div>
         <div class="nav-actions">
-          <button id="prepareNavigation">1. 使用当前地图与录制路线</button>
-          <button id="startRuntime" class="secondary">2. 启动定位与 Nav2</button>
-          <button id="resetLocalization" class="secondary">重新定位</button>
-          <button id="startPatrol">3. 开始巡检</button>
-          <button id="stopPatrol" class="stop">停止巡检</button>
+          <button id="prepareNavigation">发布所选地图与路线到机器狗</button>
+          <small id="prepareNavigationHelp" class="action-help">只有更换地图时才需要；当前地图已发布时不会显示。</small>
+          <button id="startRuntime" class="secondary">启动定位与 Nav2</button>
+          <small id="startRuntimeHelp" class="action-help">会启动 FAST-LIO 地图定位、Nav2/MPPI 和运动桥；启动后等待定位可用。</small>
+          <button id="resetLocalization" class="secondary">机器狗位置不对：重新定位</button>
+          <button id="recoverRuntime" class="secondary">运行异常：自动清理并恢复</button>
+          <button id="startPatrol">开始巡检</button>
+          <button id="stopPatrol" class="stop">暂停巡检</button>
         </div>
         <div id="navigationError" class="error"></div>
       </article>
+    </section>
+    <section class="engineering-grid">
+      <details class="panel engineering-panel" id="parameterPanel">
+        <summary><span>参数中心</span><small>速度、避障、定位与 MPPI；保存前会校验，可回滚</small></summary>
+        <div class="parameter-note">日常只调整下面的常用参数。保存后需重启“定位与 Nav2”生效，正在巡检时不允许修改。</div>
+        <div class="parameter-grid">
+          <label>直线速度 (m/s)<input id="straightSpeed" type="number" min="0.2" max="1" step="0.05"></label>
+          <label>转弯角速度 (rad/s)<input id="turnSpeed" type="number" min="0.1" max="0.8" step="0.05"></label>
+          <label>侧向避障速度 (m/s)<input id="lateralSpeed" type="number" min="0.05" max="0.4" step="0.05"></label>
+          <label>减速区半宽 (m)<input id="slowHalfWidth" type="number" min="0.25" max="0.7" step="0.01"></label>
+          <label>减速比例<input id="slowdownRatio" type="number" min="0.5" max="1" step="0.05"></label>
+          <label>阻塞判定 (秒)<input id="blockedDecision" type="number" min="1" max="8" step="0.5"></label>
+          <label>定位断流容忍 (秒)<input id="dropoutGrace" type="number" min="0.2" max="5" step="0.1"></label>
+          <label>重入路线前视 (m)<input id="rejoinLookahead" type="number" min="0.5" max="6" step="0.25"></label>
+        </div>
+        <details class="advanced-parameters"><summary>工程参数（一般不需要改）</summary><div class="parameter-grid">
+          <label>前向停车边界 (m)<input id="stopFront" type="number" min="0.4" max="1" step="0.01"></label>
+          <label>停车区半宽 (m)<input id="stopHalfWidth" type="number" min="0.22" max="0.5" step="0.01"></label>
+          <label>减速区前缘 (m)<input id="slowFront" type="number" min="0.6" max="2" step="0.05"></label>
+          <label>定位消息超时 (秒)<input id="localizationTimeout" type="number" min="0.2" max="2" step="0.1"></label>
+          <label>定位恢复稳定 (秒)<input id="recoveryStable" type="number" min="0.2" max="3" step="0.1"></label>
+          <label>MPPI 频率 (Hz)<input id="controllerFrequency" type="number" min="10" max="30" step="1"></label>
+          <label>MPPI 时域步数<input id="mppiTimeSteps" type="number" min="20" max="80" step="1"></label>
+          <label>MPPI 样本数<input id="mppiBatchSize" type="number" min="200" max="2000" step="50"></label>
+        </div></details>
+        <div class="inline-actions"><button id="saveProfile">保存新参数</button><button id="rollbackProfile" class="secondary">回滚上一版</button><small id="profileMessage">正在读取参数</small></div>
+      </details>
+      <details class="panel engineering-panel" id="diagnosticPanel">
+        <summary><span>诊断中心</span><small>一次看清定位、Nav2、避障和运动桥是哪一层出问题</small></summary>
+        <div class="inline-actions"><button id="refreshDiagnostics" class="secondary">立即分析当前运行状态</button><small id="diagnosticSummary">尚未分析</small></div>
+        <div id="diagnosticChecks" class="diagnostic-checks"></div>
+        <details class="log-details"><summary>查看最近错误摘要</summary><pre id="diagnosticLogs">暂无</pre></details>
+      </details>
     </section>
   </main>
   <script src="/app.js"></script>

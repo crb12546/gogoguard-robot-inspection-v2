@@ -16,7 +16,8 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from go2_nav2_interfaces.srv import StartPatrol
 from nav2_msgs.action import FollowPath
-from nav_msgs.msg import Odometry, Path as NavPath
+from nav2_msgs.srv import ClearEntireCostmap
+from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import (
@@ -25,8 +26,10 @@ from rclpy.qos import (
     ReliabilityPolicy,
     qos_profile_sensor_data,
 )
+from rclpy.time import Time
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformListener
 from unitree_go.msg import SportModeState
 
 from go2_site_ops.map_store import MapVersionStore
@@ -46,6 +49,7 @@ from .runtime_core import (
     sample_route,
 )
 from .start_timing import StartAttemptTimeline
+from .local_detour import GridView, plan_detour, route_rejoin_index
 
 
 RECOVERABLE_LOCALIZATION_GATES = frozenset(
@@ -94,6 +98,10 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("localization_status_topic", "/localization/status")
         self.declare_parameter("localization_pose_topic", "/localization/pose")
         self.declare_parameter("localization_timeout_s", 0.20)
+        self.declare_parameter("localization_dropout_grace_s", 1.0)
+        self.declare_parameter("localization_recovery_stable_s", 0.5)
+        self.declare_parameter("blocked_decision_s", 2.5)
+        self.declare_parameter("rejoin_lookahead_m", 2.0)
         self.declare_parameter(
             "runtime_trace_status_topic", "/go2/runtime/trace_status"
         )
@@ -197,6 +205,18 @@ class PatrolRuntimeManager(Node):
         self.localization_timeout_s = float(
             self.get_parameter("localization_timeout_s").value
         )
+        self.localization_dropout_grace_s = float(
+            self.get_parameter("localization_dropout_grace_s").value
+        )
+        self.localization_recovery_stable_s = float(
+            self.get_parameter("localization_recovery_stable_s").value
+        )
+        self.blocked_decision_s = float(
+            self.get_parameter("blocked_decision_s").value
+        )
+        self.rejoin_lookahead_m = float(
+            self.get_parameter("rejoin_lookahead_m").value
+        )
         self.runtime_trace_status_timeout_s = float(
             self.get_parameter("runtime_trace_status_timeout_s").value
         )
@@ -224,10 +244,18 @@ class PatrolRuntimeManager(Node):
         )
         self.require_robot_state = source == "active"
         self.require_fastlio_health = source == "active"
-        if not 0.05 <= self.localization_timeout_s <= 0.20:
+        if not 0.20 <= self.localization_timeout_s <= 2.0:
             raise RuntimeError(
-                "localization_timeout_s must be between 0.05 and 0.20 seconds"
+                "localization_timeout_s must be between 0.20 and 2.0 seconds"
             )
+        if not 0.20 <= self.localization_dropout_grace_s <= 5.0:
+            raise RuntimeError("localization_dropout_grace_s is invalid")
+        if not 0.20 <= self.localization_recovery_stable_s <= 3.0:
+            raise RuntimeError("localization_recovery_stable_s is invalid")
+        if not 1.0 <= self.blocked_decision_s <= 8.0:
+            raise RuntimeError("blocked_decision_s is invalid")
+        if not 0.5 <= self.rejoin_lookahead_m <= 6.0:
+            raise RuntimeError("rejoin_lookahead_m is invalid")
         if not 0.30 <= self.runtime_trace_status_timeout_s <= 2.0:
             raise RuntimeError(
                 "runtime_trace_status_timeout_s must be between 0.30 and 2.0 seconds"
@@ -321,12 +349,27 @@ class PatrolRuntimeManager(Node):
         self.runtime_reason = "WAITING_FOR_LOCALIZATION"
         self.last_feedback_distance = None
         self.path = self._make_path()
+        self.route_progress_index = 0
+        self.localization_gate_failed_at = None
+        self.localization_recovered_at = None
+        self.patrol_started_at = None
+        self.local_costmap = None
+        self.local_costmap_frame = ""
+        self.local_costmap_received_at = 0.0
+        self.detour_attempt_count = 0
+        self.last_detour_compute_ms = None
+        self.last_rejoin_index = None
 
         self.action_client = ActionClient(
             self,
             FollowPath,
             str(self.get_parameter("follow_path_action").value),
         )
+        self.clear_costmap_client = self.create_client(
+            ClearEntireCostmap, "/local_costmap/clear_entirely_local_costmap"
+        )
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_subscription(
             String,
             str(self.get_parameter("localization_status_topic").value),
@@ -364,6 +407,9 @@ class PatrolRuntimeManager(Node):
             str(self.get_parameter("final_cmd_topic").value),
             self._final_cmd_callback,
             10,
+        )
+        self.create_subscription(
+            OccupancyGrid, "/local_costmap/costmap", self._costmap_callback, 5
         )
         self.create_service(StartPatrol, "/go2/patrol/start", self._start_callback)
         self.create_service(Trigger, "/go2/patrol/stop", self._stop_callback)
@@ -421,6 +467,160 @@ class PatrolRuntimeManager(Node):
         )
         self.pose_frame = message.header.frame_id
         self.pose_received_at = time.monotonic()
+        if self.goal_handle is not None or self.goal_request_pending or self.resume_pending:
+            self.route_progress_index = max(
+                self.route_progress_index, self._nearest_path_index(self.pose[0], self.pose[1])
+            )
+
+    def _nearest_path_index(self, x: float, y: float) -> int:
+        if not self.path.poses:
+            return 0
+        return min(
+            range(len(self.path.poses)),
+            key=lambda index: math.hypot(
+                self.path.poses[index].pose.position.x - x,
+                self.path.poses[index].pose.position.y - y,
+            ),
+        )
+
+    def _remaining_path(self) -> NavPath:
+        result = NavPath()
+        result.header.frame_id = "map"
+        # Keep two points behind the projection so MPPI sees the route tangent,
+        # but never resend the completed prefix or an empty path.
+        start = max(0, min(self.route_progress_index - 2, len(self.path.poses) - 2))
+        result.poses = list(self.path.poses[start:])
+        return result
+
+    def _clear_stale_costmap(self) -> None:
+        if self.clear_costmap_client.service_is_ready():
+            self.clear_costmap_client.call_async(ClearEntireCostmap.Request())
+
+    def _costmap_callback(self, message: OccupancyGrid) -> None:
+        orientation = message.info.origin.orientation
+        if not message.header.frame_id or abs(_yaw_from_quaternion(orientation)) > 1.0e-3:
+            self.local_costmap = None
+            self.local_costmap_frame = ""
+            self.local_costmap_received_at = time.monotonic()
+            return
+        self.local_costmap = GridView(
+            width=int(message.info.width),
+            height=int(message.info.height),
+            resolution=float(message.info.resolution),
+            origin_x=float(message.info.origin.position.x),
+            origin_y=float(message.info.origin.position.y),
+            costs=tuple(int(value) for value in message.data),
+        )
+        self.local_costmap_frame = message.header.frame_id
+        self.local_costmap_received_at = time.monotonic()
+
+    def _transform_xy(self, x: float, y: float, target: str, source: str):
+        if target == source:
+            return float(x), float(y)
+        try:
+            transform = self.tf_buffer.lookup_transform(target, source, Time())
+        except Exception:
+            return None
+        translation = transform.transform.translation
+        yaw = _yaw_from_quaternion(transform.transform.rotation)
+        return (
+            translation.x + math.cos(yaw) * x - math.sin(yaw) * y,
+            translation.y + math.sin(yaw) * x + math.cos(yaw) * y,
+        )
+
+    def _try_local_replan(self) -> bool:
+        if (
+            self.pose is None
+            or self.local_costmap is None
+            or monotonic_age(self.local_costmap_received_at) > 1.0
+            or self.detour_attempt_count >= 2
+        ):
+            return False
+        route_xy = [
+            (item.pose.position.x, item.pose.position.y) for item in self.path.poses
+        ]
+        rejoin_index = route_rejoin_index(
+            route_xy, self.route_progress_index, self.rejoin_lookahead_m
+        )
+        if rejoin_index <= self.route_progress_index or rejoin_index >= len(route_xy):
+            return False
+        start_in_grid = self._transform_xy(
+            self.pose[0], self.pose[1], self.local_costmap_frame, "map"
+        )
+        goal_in_grid = self._transform_xy(
+            route_xy[rejoin_index][0], route_xy[rejoin_index][1],
+            self.local_costmap_frame, "map"
+        )
+        if start_in_grid is None or goal_in_grid is None:
+            return False
+        started = time.monotonic()
+        detour = plan_detour(
+            self.local_costmap,
+            start_in_grid,
+            goal_in_grid,
+        )
+        self.last_detour_compute_ms = round((time.monotonic() - started) * 1000.0, 2)
+        if not detour:
+            return False
+        detour_in_map = [
+            self._transform_xy(point[0], point[1], "map", self.local_costmap_frame)
+            for point in detour
+        ]
+        if any(point is None for point in detour_in_map):
+            return False
+        path = NavPath()
+        path.header.frame_id = "map"
+        combined = list(detour_in_map[:-1]) + route_xy[rejoin_index:]
+        now = self.get_clock().now().to_msg()
+        for index, point in enumerate(combined):
+            following = combined[index + 1] if index + 1 < len(combined) else combined[index - 1]
+            pose = PoseStamped()
+            pose.header.frame_id = "map"
+            pose.header.stamp = now
+            pose.pose.position.x = float(point[0])
+            pose.pose.position.y = float(point[1])
+            pose.pose.orientation = _quaternion_from_yaw(
+                math.atan2(following[1] - point[1], following[0] - point[0])
+            )
+            path.poses.append(pose)
+        if len(path.poses) < 2:
+            return False
+        goal = FollowPath.Goal()
+        goal.path = path
+        goal.controller_id = "FollowPath"
+        goal.goal_checker_id = "route_goal_checker"
+        self.goal_request_pending = True
+        self.detour_attempt_count += 1
+        self.last_rejoin_index = rejoin_index
+        self.runtime_state = "REPLANNING"
+        self.runtime_reason = "LOCAL_DETOUR_TO_ROUTE_REJOIN"
+        try:
+            future = self.action_client.send_goal_async(
+                goal, feedback_callback=self._feedback_callback
+            )
+        except Exception:
+            self.goal_request_pending = False
+            return False
+        future.add_done_callback(self._replan_goal_response_callback)
+        return True
+
+    def _replan_goal_response_callback(self, future) -> None:
+        self.goal_request_pending = False
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            goal_handle = None
+            self.runtime_reason = "LOCAL_DETOUR_TRANSPORT: %s" % exc
+        if goal_handle is None or not goal_handle.accepted:
+            self.runtime_state = "BLOCKED"
+            if not self.runtime_reason.startswith("LOCAL_DETOUR_TRANSPORT"):
+                self.runtime_reason = "LOCAL_DETOUR_REJECTED"
+            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            return
+        self.goal_handle = goal_handle
+        self.runtime_state = "PATROLLING"
+        self.runtime_reason = "LOCAL_DETOUR_ACCEPTED"
+        goal_handle.get_result_async().add_done_callback(self._result_callback)
 
     def _robot_state_callback(self, message: SportModeState) -> None:
         received = time.monotonic()
@@ -604,6 +804,14 @@ class PatrolRuntimeManager(Node):
                 readiness,
             )
 
+        self.route_progress_index = 0
+        self.localization_gate_failed_at = None
+        self.localization_recovered_at = None
+        self._clear_stale_costmap()
+        self.detour_attempt_count = 0
+        self.last_detour_compute_ms = None
+        self.last_rejoin_index = None
+
         now = self.get_clock().now().to_msg()
         self.path.header.stamp = now
         for pose in self.path.poses:
@@ -619,6 +827,7 @@ class PatrolRuntimeManager(Node):
         self.stop_requested = False
         self.runtime_state = "STARTING"
         self.runtime_reason = "NAV2_GOAL_REQUESTED"
+        self.patrol_started_at = time.monotonic()
         try:
             future = self.action_client.send_goal_async(
                 goal,
@@ -699,6 +908,11 @@ class PatrolRuntimeManager(Node):
 
     def _feedback_callback(self, feedback) -> None:
         self.last_feedback_distance = float(feedback.feedback.distance_to_goal)
+        if self.pose is not None:
+            self.route_progress_index = max(
+                self.route_progress_index,
+                self._nearest_path_index(self.pose[0], self.pose[1]),
+            )
 
     def _result_callback(self, future) -> None:
         try:
@@ -729,8 +943,17 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason = "ROUTE_COMPLETE"
             attempt_outcome = "COMPLETED"
         else:
-            self.runtime_state = "FAULT"
-            self.runtime_reason = "NAV2_FOLLOW_PATH_FAILED_%s" % status
+            if self._try_local_replan():
+                return
+            elapsed = (
+                time.monotonic() - self.patrol_started_at
+                if self.patrol_started_at is not None else 0.0
+            )
+            self.runtime_state = "BLOCKED" if elapsed >= self.blocked_decision_s else "FAULT"
+            self.runtime_reason = (
+                "LOCAL_PATH_BLOCKED" if self.runtime_state == "BLOCKED"
+                else "NAV2_FOLLOW_PATH_FAILED_%s" % status
+            )
             attempt_outcome = "FAILED"
         self._finish_active_start_attempt(
             attempt_outcome,
@@ -752,6 +975,8 @@ class PatrolRuntimeManager(Node):
         return response
 
     def _cancel_for_gate(self, reason: str) -> None:
+        if self.gate_cancel_reason:
+            return
         self.runtime_state = "DEGRADED"
         self.runtime_reason = reason
         self.gate_cancel_reason = reason
@@ -764,12 +989,20 @@ class PatrolRuntimeManager(Node):
     def _request_resume(self) -> None:
         if self.goal_handle is not None or self.goal_request_pending:
             return
+        resume_path = self._remaining_path()
+        if len(resume_path.poses) < 2:
+            self.resume_pending = False
+            self.runtime_state = "COMPLETED"
+            self.runtime_reason = "ROUTE_COMPLETE"
+            self._finish_active_start_attempt("COMPLETED", self.runtime_reason)
+            return
+        self._clear_stale_costmap()
         now = self.get_clock().now().to_msg()
-        self.path.header.stamp = now
-        for pose in self.path.poses:
+        resume_path.header.stamp = now
+        for pose in resume_path.poses:
             pose.header.stamp = now
         goal = FollowPath.Goal()
-        goal.path = self.path
+        goal.path = resume_path
         goal.controller_id = "FollowPath"
         goal.goal_checker_id = "route_goal_checker"
         self.goal_request_pending = True
@@ -849,23 +1082,39 @@ class PatrolRuntimeManager(Node):
         accepted_goal = self.goal_handle is not None
         motion_authorized = accepted_goal and gate.ready and self.runtime_state == "PATROLLING"
         if (accepted_goal or self.goal_request_pending) and not gate.ready:
-            self._cancel_for_gate(gate.reason)
+            if gate.reason in RECOVERABLE_LOCALIZATION_GATES:
+                if self.localization_gate_failed_at is None:
+                    self.localization_gate_failed_at = time.monotonic()
+                elapsed = time.monotonic() - self.localization_gate_failed_at
+                self.runtime_state = "HOLDING"
+                self.runtime_reason = gate.reason
+                if elapsed >= self.localization_dropout_grace_s:
+                    self._cancel_for_gate(gate.reason)
+            else:
+                self._cancel_for_gate(gate.reason)
             motion_authorized = False
         elif self.resume_pending and not accepted_goal and not self.goal_request_pending:
             if gate.ready:
-                self._request_resume()
+                if self.localization_recovered_at is None:
+                    self.localization_recovered_at = time.monotonic()
+                if time.monotonic() - self.localization_recovered_at >= self.localization_recovery_stable_s:
+                    self._request_resume()
             elif gate.reason not in RECOVERABLE_LOCALIZATION_GATES:
                 self.resume_pending = False
                 self.runtime_state = "FAULT"
                 self.runtime_reason = gate.reason
                 self._finish_active_start_attempt("FAILED", gate.reason)
             else:
+                self.localization_recovered_at = None
                 self.runtime_state = gate.state
                 self.runtime_reason = gate.reason
             motion_authorized = False
-        elif not accepted_goal and not self.goal_request_pending and self.runtime_state not in {
+        else:
+            self.localization_gate_failed_at = None
+        if not accepted_goal and not self.goal_request_pending and not self.resume_pending and self.runtime_state not in {
             "COMPLETED",
             "FAULT",
+            "BLOCKED",
             "STOPPING",
         }:
             readiness = self._start_readiness()
@@ -932,6 +1181,14 @@ class PatrolRuntimeManager(Node):
             "routeLengthM": self.bundle.route.length_m,
             "routePointCount": len(self.path.poses),
             "distanceToGoalM": self.last_feedback_distance,
+            "routeProgressIndex": self.route_progress_index,
+            "routeProgressPercent": round(
+                100.0 * self.route_progress_index / max(1, len(self.path.poses) - 1), 1
+            ),
+            "remainingRoutePointCount": max(0, len(self.path.poses) - self.route_progress_index),
+            "detourAttemptCount": self.detour_attempt_count,
+            "detourComputeMs": self.last_detour_compute_ms,
+            "rejoinRouteIndex": self.last_rejoin_index,
             "resumePending": self.resume_pending,
             "resumeCount": self.resume_count,
             "robotStateRequired": self.require_robot_state,

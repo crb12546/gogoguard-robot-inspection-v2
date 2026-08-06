@@ -92,6 +92,26 @@ setsid gogoguard-navigation-observer \
   >"$LOG_ROOT/navigation-observer.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
+# The web API is only a client. This single, persistent owner prevents page or
+# API restarts from leaving duplicate Nav2/MPPI and Unitree bridge generations.
+setsid gogoguard-navigation-supervisor \
+  --data-root /var/lib/gogoguard \
+  --socket /var/lib/gogoguard/navigation/supervisor.sock \
+  --site-id local-first-site \
+  --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
+  >"$LOG_ROOT/navigation-supervisor.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+supervisor_deadline=$((SECONDS + 10))
+while [[ ! -S /var/lib/gogoguard/navigation/supervisor.sock ]]; do
+  if (( SECONDS >= supervisor_deadline )); then
+    echo "navigation supervisor did not become ready" >&2
+    exit 70
+  fi
+  sleep 0.1
+done
+
 setsid gogoguard-site-console \
   --mode robot \
   --map-worker "$MAP_WORKER" \

@@ -25,6 +25,12 @@ their narrow contracts. Compose mounts only the Mac's `id_ed25519` and
 not mount the macOS SSH config because Linux does not support `UseKeychain`.
 The robot never mounts a cloud key.
 
+The page is a guided workflow rather than a collection of independent command
+buttons. A map publication button appears only when the selected Mac map is not
+the robot's prepared candidate. Once published, the page moves directly to
+localization/Nav2 startup and then patrol. See `docs/FIELD_WORKSTATION_GUIDE.md`
+for the exact field sequence and recovery actions.
+
 Robot publication is deliberately two-phase so the dog does not wait for a
 five-gigabyte image export. Run `prepare-robot-release` while the dog is off,
 then use `stage-robot-release` only after the wired SSH endpoint is online.

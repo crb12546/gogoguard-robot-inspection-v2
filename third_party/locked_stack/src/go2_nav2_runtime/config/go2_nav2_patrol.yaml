@@ -18,8 +18,8 @@ controller_server:
 
     progress_checker:
       plugin: nav2_controller::SimpleProgressChecker
-      required_movement_radius: 0.20
-      movement_time_allowance: 15.0
+      required_movement_radius: 0.15
+      movement_time_allowance: 3.0
     route_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
@@ -39,15 +39,15 @@ controller_server:
       vx_std: 0.18
       vy_std: 0.10
       wz_std: 0.20
-      vx_max: 0.45
+      vx_max: 0.60
       # Patrol routes are directional. The Go2 may sidestep around an obstacle,
       # but it must not silently turn the route into a reverse-driving plan.
       # The commissioned Go2 only shifted its posture at a 0.10 m/s command
       # and moved 0.064 m in 15 seconds. Keep zero as the controller stop, but
       # make every sampled forward gait a physically effective command.
       vx_min: 0.20
-      vy_max: 0.10
-      wz_max: 0.45
+      vy_max: 0.20
+      wz_max: 0.40
       prune_distance: 1.5
       max_robot_pose_search_dist: 4.0
       transform_tolerance: 0.20
@@ -160,9 +160,10 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        # 0.85m covers the padded 0.487m body radius plus at least 0.35m.
-        # The gentler decay starts a smooth bypass before the stop polygon.
-        inflation_radius: 0.85
+        # Footprint remains the hard collision boundary. A 0.65 m inflation
+        # field leaves about 0.16 m preference margin without declaring an
+        # ordinary doorway impassable.
+        inflation_radius: 0.65
         cost_scaling_factor: 3.0
 
 velocity_smoother:
@@ -171,9 +172,9 @@ velocity_smoother:
     smoothing_frequency: 30.0
     scale_velocities: true
     feedback: OPEN_LOOP
-    max_velocity: [0.45, 0.10, 0.45]
-    min_velocity: [0.0, -0.10, -0.45]
-    max_accel: [0.70, 0.35, 0.80]
+    max_velocity: [0.60, 0.20, 0.40]
+    min_velocity: [0.0, -0.20, -0.40]
+    max_accel: [0.90, 0.45, 0.80]
     max_decel: [-0.90, -0.45, -1.00]
     odom_topic: /Odometry
     odom_duration: 0.10
@@ -194,7 +195,7 @@ collision_monitor:
     polygons: [StopZone, SlowZone, FootprintApproach]
     StopZone:
       type: polygon
-      points: [0.66, 0.34, 0.66, -0.34, -0.42, -0.34, -0.42, 0.34]
+      points: [0.55, 0.27, 0.55, -0.27, -0.38, -0.27, -0.38, 0.27]
       action_type: stop
       # Humble calls this max_points: 3 means four in-zone returns trigger.
       max_points: 3
@@ -207,12 +208,12 @@ collision_monitor:
       # passable side walls.  +/-0.55 m still covers the 0.20 m body half-width
       # plus 0.35 m clearance without treating the whole narrow passage as an
       # indefinitely occupied slowdown zone.
-      points: [1.15, 0.55, 1.15, -0.55, -0.70, -0.55, -0.70, 0.55]
+      points: [1.00, 0.30, 1.00, -0.30, -0.55, -0.30, -0.55, 0.30]
       action_type: slowdown
       max_points: 3
       # 0.45 reduced the observed 0.341 m/s command to 0.153 m/s, below the
       # commissioned Go2 gait deadband, and caused a 15 s progress failure.
-      slowdown_ratio: 0.70
+      slowdown_ratio: 0.85
       visualize: true
       polygon_pub_topic: /go2/collision/slow_zone
       enabled: true
@@ -220,7 +221,7 @@ collision_monitor:
       type: polygon
       action_type: approach
       footprint_topic: /local_costmap/published_footprint
-      time_before_collision: 1.2
+      time_before_collision: 0.7
       simulation_time_step: 0.10
       max_points: 3
       visualize: false

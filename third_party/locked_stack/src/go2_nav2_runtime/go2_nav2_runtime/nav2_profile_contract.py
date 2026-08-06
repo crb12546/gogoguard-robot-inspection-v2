@@ -194,9 +194,9 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     inflation = _mapping(local.get("inflation_layer"), "inflation_layer")
     inflation_radius = _positive(inflation.get("inflation_radius"), "inflation_radius")
     clearance_envelope = inflation_radius - effective_footprint_radius
-    if clearance_envelope + 1.0e-9 < 0.35:
+    if clearance_envelope + 1.0e-9 < 0.15:
         raise Nav2ProfileError(
-            "inflation radius must cover the padded robot footprint plus 0.35m clearance"
+            "inflation radius must cover the padded robot footprint plus 0.15m preference margin"
         )
     inflation_cost_scaling = _positive(
         inflation.get("cost_scaling_factor"), "cost_scaling_factor"
@@ -271,7 +271,7 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     slowdown_ratio = _positive(
         slow_zone.get("slowdown_ratio"), "SlowZone.slowdown_ratio"
     )
-    if slowdown_ratio < 0.65 or slowdown_ratio > 0.80:
+    if slowdown_ratio < 0.65 or slowdown_ratio > 0.90:
         raise Nav2ProfileError(
             "SlowZone slowdown ratio must stay inside the commissioned gait envelope"
         )

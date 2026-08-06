@@ -41,6 +41,24 @@ workstation UI -> 2D overview + interactive 3D cloud + history
 selected map -> robot import -> localization -> Nav2 route execution
 ```
 
+The browser never owns robot processes. A single on-robot navigation
+supervisor owns exactly one Unitree bridge and one localization/Nav2/MPPI
+generation. Browser actions are durable operations with an id and lifecycle;
+refreshing or restarting the UI cannot create a second runtime generation.
+
+During patrol, fixed-map localization projects the current pose onto the route
+to produce monotonic progress. A transient localization dropout first enters
+`HOLDING`; only a sustained dropout cancels the Nav2 goal. Recovery waits for a
+stable localization window, clears stale local costmap data and resends only
+the unfinished route suffix. Nav2 MPPI and Collision Monitor own local obstacle
+avoidance. If FollowPath cannot progress, a bounded A* search over Nav2's
+already footprint-inflated rolling costmap chooses a short path to a future
+route anchor; MPPI tracks that path and then the unfinished route. It makes at
+most two attempts and reports `BLOCKED` instead of waiting indefinitely. The
+final Unitree bridge only validates authorization, command
+freshness, finite values and absolute hardware limits; it is not a duplicate
+obstacle planner.
+
 Live ROS traffic stays on the robot. The camera is viewed directly over the
 LAN; sealed recordings move only after stop. Mac is not required while the dog
 is localizing or moving. If a transfer fails, the same task resumes from its

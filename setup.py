@@ -30,6 +30,7 @@ setup(
             "gogoguard-field-workstation=gogoguard_field_workstation.__main__:main",
             "gogoguard-mount-tf=gogoguard_calibration.mount_tf_publisher:main",
             "gogoguard-navigation-observer=gogoguard_navigation.observer:main",
+            "gogoguard-navigation-supervisor=gogoguard_navigation.supervisor:main",
         ]
     },
 )

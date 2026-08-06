@@ -2,11 +2,11 @@
   "id": "site_console",
   "responsibility": "Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs",
   "runtime": ["robot", "workstation", "browser"],
-  "status": "three_end_ui_and_api_deployed_real_map_review_verified",
+  "status": "guided_delivery_workflow_parameter_and_diagnostics_ui_browser_verified_robot_deploy_pending",
   "codeRoots": ["apps/site_console"],
   "entrypoints": ["gogoguard_site_console.__main__:main"],
   "dependsOn": ["contracts", "device_io", "data_capture", "transfer", "map_factory", "route", "localization", "navigation", "evidence"],
   "consumes": ["SensorSnapshot", "CameraStreamStatus", "RecordingSession", "MapJob", "navigation and localization status"],
-  "produces": ["record, prepare, localize, patrol and stop commands", "field visualization"],
-  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale", "2026-08-06 robot/workstation ownership correction"]
+  "produces": ["guided next-action workflow", "operation receipts", "field visualization", "parameter and diagnostic views"],
+  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale", "2026-08-06 robot/workstation ownership correction", "2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step"]
 }

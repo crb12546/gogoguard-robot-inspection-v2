@@ -17,9 +17,9 @@ this index describes code state and never implies robot acceptance.
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
-| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `robot_motion_verified_slow_zone_field_fix_deployed_repeat_pending` | `contracts`, `localization`, `route` |
-| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_robot_deployed_generation_2` | `contracts`, `map_factory` |
-| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `three_end_ui_and_api_deployed_real_map_review_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
+| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `delivery_runtime_supervisor_progress_recovery_profile_and_diagnostics_offline_verified_robot_deploy_pending` | `contracts`, `localization`, `route` |
+| `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_candidate_generation_3_offline_verified_robot_deploy_pending` | `contracts`, `map_factory` |
+| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `guided_delivery_workflow_parameter_and_diagnostics_ui_browser_verified_robot_deploy_pending` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_transfer_and_idempotent_map_import_field_verified` | `contracts`, `evidence` |
 
 ## Module details
@@ -118,10 +118,10 @@ this index describes code state and never implies robot acceptance.
 
 - Manifest: `architecture/modules/navigation.json`
 - Code roots: `modules/navigation`, `third_party/locked_stack/src/go2_nav2_runtime`, `third_party/locked_stack/src/go2_nav2_interfaces`, `third_party/locked_stack/src/go2_fastlio_patrol`
-- Entrypoints: `gogoguard_navigation.manager:NavigationManager`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
+- Entrypoints: `gogoguard_navigation.supervisor:main`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
-- Produces: safe velocity candidate, navigation feedback
-- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; first moving patrol receipt isolated a persistent 45 percent SlowZone reduction below the Go2 gait deadband; deployed r3 profile uses +/-0.55 m and 70 percent
+- Produces: safe velocity candidate, navigation progress and operation lifecycle, layered diagnostics
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; robot deployment pending
 
 ### `route`
 
@@ -130,7 +130,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_route.manager:RouteManager`
 - Consumes: cloud GLIM map artifact and optimized trajectory
 - Produces: map-bound go2.route.v1 candidate and runtime profile
-- Provenance: V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c; candidate generation 2 raises the commissioned patrol speed limit from 0.25 to 0.40 m/s
+- Provenance: V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c; candidate generation 3 regenerates existing candidates with the 0.60 m/s delivery profile and supplies monotonic progress/recovery metadata
 
 ### `site_console`
 
@@ -138,8 +138,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
 - Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status
-- Produces: record, prepare, localize, patrol and stop commands, field visualization
-- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction
+- Produces: guided next-action workflow, operation receipts, field visualization, parameter and diagnostic views
+- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step
 
 ### `transfer`
 

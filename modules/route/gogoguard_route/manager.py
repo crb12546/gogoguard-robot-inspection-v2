@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 2
+CANDIDATE_GENERATION = 3
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -210,7 +210,7 @@ class RouteManager:
                 },
                 "patrol": {
                     "loopMode": "once",
-                    "speedLimitMps": 0.40,
+                    "speedLimitMps": 0.60,
                     "startMaxDistanceM": 1.5,
                     "startMaxYawDeg": 45.0,
                     "pathSampleSpacingM": 0.15,

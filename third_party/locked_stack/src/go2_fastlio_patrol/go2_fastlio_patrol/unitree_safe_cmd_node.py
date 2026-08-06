@@ -59,6 +59,7 @@ class UnitreeSafeCmdNode(Node):
         self.declare_parameter('publish_rate', 40.0)
         self.declare_parameter('cmd_timeout', 0.20)
         self.declare_parameter('cloud_timeout', 0.20)
+        self.declare_parameter('require_obstacle_gate', True)
         self.declare_parameter('require_localization', True)
         self.declare_parameter('localization_status_topic', '/localization/status')
         self.declare_parameter('localization_timeout', 0.20)
@@ -119,6 +120,9 @@ class UnitreeSafeCmdNode(Node):
         self.publish_rate = float(self.get_parameter('publish_rate').value)
         self.cmd_timeout = float(self.get_parameter('cmd_timeout').value)
         self.cloud_timeout = float(self.get_parameter('cloud_timeout').value)
+        self.require_obstacle_gate = bool(
+            self.get_parameter('require_obstacle_gate').value
+        )
         self.require_localization = bool(
             self.get_parameter('require_localization').value
         )
@@ -192,19 +196,20 @@ class UnitreeSafeCmdNode(Node):
         )
         if self.publish_rate <= 0.0:
             raise RuntimeError('publish_rate must be positive')
-        safety_timeouts = (
-            self.cmd_timeout,
-            self.cloud_timeout,
-            self.localization_timeout,
-            self.runtime_authorization_timeout,
-        )
+        safety_timeouts = [self.cmd_timeout]
+        if self.require_obstacle_gate:
+            safety_timeouts.append(self.cloud_timeout)
+        if self.require_localization:
+            safety_timeouts.append(self.localization_timeout)
+        if self.require_runtime_authorization:
+            safety_timeouts.append(self.runtime_authorization_timeout)
         if min(safety_timeouts) <= 0.0 or max(safety_timeouts) > 0.20:
             raise RuntimeError(
                 'safety stream timeouts must be in (0, 0.20] seconds'
             )
         if self.max_cloud_process_rate <= 0.0:
             raise RuntimeError('max_cloud_process_rate must be positive')
-        if self.max_cloud_process_rate * self.cloud_timeout < 2.0:
+        if self.require_obstacle_gate and self.max_cloud_process_rate * self.cloud_timeout < 2.0:
             raise RuntimeError(
                 'cloud process rate must provide at least two checks per timeout'
             )
@@ -692,11 +697,11 @@ class UnitreeSafeCmdNode(Node):
             out_vx, out_vy, out_yaw_rate = (0.0, 0.0, 0.0)
             reason = 'cmd_timeout'
 
-        elif cloud_receive_age > self.cloud_timeout:
+        elif self.require_obstacle_gate and cloud_receive_age > self.cloud_timeout:
             out_vx, out_vy, out_yaw_rate = (0.0, 0.0, 0.0)
             reason = 'cloud_timeout'
 
-        elif self.obstacle_stop:
+        elif self.require_obstacle_gate and self.obstacle_stop:
             out_vx, out_vy, out_yaw_rate = (0.0, 0.0, 0.0)
             reason = 'obstacle'
 

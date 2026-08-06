@@ -177,6 +177,30 @@ class FieldWorkstationApplication:
             timeout_s=max(self.robot.timeout_s, 30.0),
         )
 
+    def recover_navigation_runtime(self) -> dict:
+        return self.robot.post(
+            "api/v1/navigation/runtime/recover",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
+
+    def navigation_profile(self) -> dict:
+        return self.robot.get("api/v1/navigation/profile")
+
+    def update_navigation_profile(self, profile: dict) -> dict:
+        return self.robot.post(
+            "api/v1/navigation/profile", {"profile": profile},
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
+
+    def rollback_navigation_profile(self) -> dict:
+        return self.robot.post(
+            "api/v1/navigation/profile/rollback",
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
+
+    def navigation_diagnostics(self) -> dict:
+        return self.robot.get("api/v1/navigation/diagnostics")
+
     def _load_catalog(self) -> dict:
         try:
             value = json.loads(self.catalog_path.read_text(encoding="utf-8"))

@@ -274,3 +274,82 @@ Record one intentional open-area mapping loop, review its GLIM artifacts on the
 Mac, select and deploy that map to the robot, then verify fixed-map localization
 before starting the Nav2 patrol experiment. Existing indoor/stationary maps are
 engineering evidence and should not be treated as the field navigation map.
+
+## 2026-08-07 delivery-closure refactor (not yet robot-deployed)
+
+- Today's field traces changed the next objective from incremental research to
+  a complete operator loop for delivery. The selected real candidate remains
+  `map-e9bc37247129` (713,497 points, 82.966 m, previously 285 source
+  waypoints). Nothing in this section is a new robot receipt until tomorrow's
+  release is installed and exercised.
+- Navigation process ownership moved out of the HTTP/UI process. One
+  `gogoguard-navigation-supervisor` now owns one Unitree receiver and one
+  localization/Nav2/MPPI generation. A filesystem lock rejects a second
+  supervisor, UI shutdown no longer stops Nav2, and long start/stop/recovery
+  actions return a durable operation id with accepted/running/complete/failed
+  state instead of leaving the operator to infer whether a timed-out click ran.
+- Candidate generation 3 forces existing map candidates to regenerate. The
+  default delivery profile is 0.60 m/s forward, 0.40 rad/s turn, 0.20 m/s
+  lateral authority, +/-0.30 m SlowZone, 85 percent slowdown, and a 2.5 second
+  blocked decision target. These values passed configuration and offline
+  runtime validation but require tomorrow's field receipt.
+- Collision Monitor is now the only point-cloud obstacle safety owner. The
+  final Unitree command gate retains explicit runtime authorization, the hard
+  command watchdog, finite/range checks and absolute hardware caps; its
+  duplicate localization and obstacle vetoes are disabled by composition.
+- Patrol runtime now reports monotonic route index/percentage/remaining points.
+  A short localization dropout enters `HOLDING` without destroying the Nav2
+  goal. A sustained dropout cancels, waits for stable recovery, clears the
+  local costmap and resumes from the unfinished route suffix rather than
+  resending the full route or an empty path. Controller aborts after the
+  blocked interval are reported as `BLOCKED` with a specific operator action.
+- When the original path cannot progress, the delivery candidate performs a
+  bounded A* search over Nav2's current footprint-inflated rolling costmap,
+  chooses a short detour to a future route anchor, and gives the combined
+  detour/unfinished suffix back to MPPI. Search is compute-bounded and limited
+  to two attempts; no path becomes `BLOCKED` instead of minutes of silent
+  waiting. Pure-grid wall/bypass/no-path tests pass; field acceptance is still
+  pending.
+- Navigation parameters are stored on the robot as validated, versioned JSON.
+  The workstation Parameter Center exposes the common speed, avoidance,
+  localization and rejoin controls, blocks half-applied changes while a runtime
+  is active, and supports one-click rollback.
+- The Diagnostics Center aggregates runtime, localization, obstacle/final
+  command chain and recent log highlights. It is intended to replace ad-hoc
+  per-incident grep as the first diagnostic step.
+- The patrol UI is now a three-step next-action guide. The old misleading
+  “使用当前地图与录制路线” button is gone: publication appears only when the
+  selected Mac map differs from the robot candidate; otherwise the next action
+  is directly “启动定位与 Nav2”. Every action includes operator guidance,
+  operation progress and an automatic clean/recover entry for `FAULT` or
+  `BLOCKED`.
+- Offline evidence: 40 Python unit/integration tests passed; a real browser
+  completed demo record/seal/map, parameter save/rollback, layered diagnostics,
+  action visibility and 390 px responsive checks without console errors or
+  horizontal overflow. The final Linux/ARM64 robot image compiled all ten ROS 2
+  packages and passed in-image checks for the supervisor, patrol runtime,
+  bounded detour module, Nav2 profile and parameter injection. It is tagged
+  `gogoguard-robot-inspection:v2-edge-20260807-delivery`, image ID
+  `sha256:74f6860705865bd6b01b0bbeb1a4f5e8911cd476ca76b1ed6d837bb577230912`
+  (1,146,800,740 bytes). The portable workstation image
+  `gogoguard-field-workstation:20260807-delivery` also built and served its UI
+  and offline robot-status contract. A checksummed 1.1 GiB robot release is
+  prepared outside Git at `release-cache/edge-20260807-delivery`; archive
+  SHA-256 is
+  `de6929abd9807d25231b549a5b807114e91986e5e89021595904b52a39d9475c`.
+  Neither image is robot-deployed yet.
+- Workspace-level `AGENTS.md` now routes new Codex tasks only to this field
+  repository. The superseded V2 worktree and original Go2 repository remain
+  present for rollback/provenance but are explicitly not current behavior or
+  deployment sources.
+
+## Next experiment (supersedes the older paragraph above)
+
+Prepare and stage the verified ARM64 release from this branch, install it after
+the robot and Livox are connected, then use the guided UI with
+`map-e9bc37247129` to
+verify in order: unique process generation, localization convergence, first
+motion latency, 0.60 m/s clear-route travel, passage through a normal corridor,
+specific `BLOCKED` behavior, pause/restart, and route-suffix recovery after one
+controlled localization interruption. Record each result before calling the
+release field-accepted.

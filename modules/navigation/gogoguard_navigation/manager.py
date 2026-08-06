@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from gogoguard_route import RouteManager
+from .profiles import DEFAULT_PROFILE, NavigationProfileStore, validate_profile
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
@@ -32,14 +33,16 @@ class NavigationManager:
         self.root = self.data_root / "navigation"
         self.log_root = self.root / "logs"
         self.status_path = self.root / "status.json"
+        self.selected_path = self.root / "selected-candidate.json"
         self.root.mkdir(parents=True, exist_ok=True)
         self.log_root.mkdir(parents=True, exist_ok=True)
         self.routes = RouteManager(self.data_root, site_id=site_id)
+        self.profiles = NavigationProfileStore(self.data_root)
         self._process: subprocess.Popen | None = None
         self._log_handle = None
         self._receiver_process: subprocess.Popen | None = None
         self._receiver_log_handle = None
-        self._candidate: dict[str, Any] | None = None
+        self._candidate: dict[str, Any] | None = self._read_json(self.selected_path)
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -49,7 +52,37 @@ class NavigationManager:
         candidate = self.routes.prepare_map_job(job_id)
         with self._lock:
             self._candidate = candidate
+            self._atomic_json(self.selected_path, candidate)
         return candidate
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any] | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, path)
+
+    def profile(self) -> dict[str, Any]:
+        return self.profiles.get()
+
+    def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+        if self._process and self._process.poll() is None:
+            raise RuntimeError("请先停止巡检并关闭定位与 Nav2，再保存参数")
+        return self.profiles.update(profile)
+
+    def rollback_profile(self) -> dict[str, Any]:
+        if self._process and self._process.poll() is None:
+            raise RuntimeError("请先停止巡检并关闭定位与 Nav2，再回滚参数")
+        return self.profiles.rollback()
 
     def _loaded_candidate(self) -> dict[str, Any] | None:
         with self._lock:
@@ -82,7 +115,12 @@ class NavigationManager:
 
     @staticmethod
     def _launch_arguments(candidate: dict[str, Any], *, site_id: str, robot_id: str,
-                          sensor_id: str, log_root: Path) -> list[str]:
+                          sensor_id: str, log_root: Path, profile: dict[str, Any] | None = None) -> list[str]:
+        profile = profile or validate_profile(DEFAULT_PROFILE)
+        motion = profile["motion"]
+        avoidance = profile["avoidance"]
+        localization = profile["localization"]
+        controller = profile["controller"]
         return [
             "ros2", "launch", "go2_nav2_runtime", "active_map_patrol.launch.py",
             "runtime_source:=candidate",
@@ -101,6 +139,26 @@ class NavigationManager:
             f"runtime_log_dir:={log_root}",
             f"robot_id:={robot_id}",
             f"sensor_id:={sensor_id}",
+            f"straight_speed_mps:={motion['straightSpeedMps']}",
+            f"turn_speed_radps:={motion['turnSpeedRadps']}",
+            f"lateral_speed_mps:={motion['lateralSpeedMps']}",
+            f"acceleration_mps2:={motion['accelerationMps2']}",
+            f"stop_zone_front_m:={avoidance['stopZoneFrontM']}",
+            f"stop_zone_rear_m:={avoidance['stopZoneRearM']}",
+            f"stop_zone_half_width_m:={avoidance['stopZoneHalfWidthM']}",
+            f"slow_zone_front_m:={avoidance['slowZoneFrontM']}",
+            f"slow_zone_rear_m:={avoidance['slowZoneRearM']}",
+            f"slow_zone_half_width_m:={avoidance['slowZoneHalfWidthM']}",
+            f"slowdown_ratio:={avoidance['slowdownRatio']}",
+            f"blocked_decision_s:={avoidance['blockedDecisionS']}",
+            f"rejoin_lookahead_m:={avoidance['rejoinLookaheadM']}",
+            f"localization_status_timeout_s:={localization['statusTimeoutS']}",
+            f"localization_dropout_grace_s:={localization['dropoutGraceS']}",
+            f"localization_recovery_stable_s:={localization['recoveryStableS']}",
+            f"controller_frequency_hz:={controller['frequencyHz']}",
+            f"mppi_time_steps:={controller['timeSteps']}",
+            f"mppi_batch_size:={controller['batchSize']}",
+            f"mppi_iteration_count:={controller['iterationCount']}",
         ]
 
     def _receiver_environment(self) -> dict[str, str]:
@@ -157,6 +215,7 @@ class NavigationManager:
                 command = self._launch_arguments(
                     candidate, site_id=self.site_id, robot_id=self.robot_id,
                     sensor_id=self.sensor_id, log_root=self.log_root,
+                    profile=self.profiles.get(),
                 )
                 self._process = subprocess.Popen(
                     command,
@@ -198,6 +257,42 @@ class NavigationManager:
             raise RuntimeError(result["output"] or "patrol start was rejected")
         return result
 
+    def diagnostics(self) -> dict[str, Any]:
+        status = self.status()
+        runtime = status.get("runtime") or {}
+        localization = status.get("localization") or {}
+        safety = status.get("safety") or {}
+        operations: list[dict[str, Any]] = []
+        for path in sorted(self.log_root.glob("*.log"), key=lambda item: item.stat().st_mtime, reverse=True)[:8]:
+            try:
+                tail = path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]
+            except OSError:
+                continue
+            interesting = [line for line in tail if any(
+                token in line.lower() for token in ("error", "fail", "fault", "timeout", "reject", "blocked")
+            )]
+            operations.append({"name": path.name, "updatedAt": path.stat().st_mtime, "highlights": interesting[-8:]})
+        checks = [
+            {"name": "唯一导航进程", "ok": bool(status["runtime_process"]["running"]),
+             "detail": "运行中" if status["runtime_process"]["running"] else "尚未启动"},
+            {"name": "Unitree 运动桥", "ok": bool(status["motion_bridge"]["running"]),
+             "detail": "运行中" if status["motion_bridge"]["running"] else "尚未启动"},
+            {"name": "固定地图定位", "ok": bool(localization.get("usable")),
+             "detail": str(localization.get("reason") or localization.get("state") or "无数据")},
+            {"name": "巡检任务", "ok": runtime.get("state") not in {"FAULT", "BLOCKED"},
+             "detail": str(runtime.get("operatorMessage") or runtime.get("reason") or "未开始")},
+            {"name": "最终运动链", "ok": safety.get("stopReason", safety.get("stop_reason", "normal")) in {None, "normal"},
+             "detail": str(safety.get("stopReason") or safety.get("stop_reason") or "normal")},
+        ]
+        return {
+            "schema": "gogoguard.navigation_diagnostics.v1",
+            "generatedAt": time.time(),
+            "summary": "可运行" if all(item["ok"] for item in checks[:2]) else "需要处理",
+            "checks": checks,
+            "logs": operations,
+            "profile": self.profile(),
+        }
+
     def stop_patrol(self) -> dict[str, Any]:
         result: dict[str, Any] = {"success": True, "output": "runtime is not active"}
         if self._process and self._process.poll() is None:
@@ -210,6 +305,13 @@ class NavigationManager:
 
     def reset_localization(self) -> dict[str, Any]:
         return self._service("/localization/reset", "std_srvs/srv/Trigger", "{}")
+
+    def recover_runtime(self) -> dict[str, Any]:
+        candidate = self._loaded_candidate()
+        if not candidate:
+            raise RuntimeError("尚未选择地图与路线")
+        self.stop_runtime()
+        return self.start_runtime(str(candidate["candidate_id"]))
 
     def stop_runtime(self) -> dict[str, Any]:
         with self._lock:

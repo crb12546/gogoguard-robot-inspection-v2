@@ -9,6 +9,7 @@ const state = {
   camera: null,
   cameraStarted: false,
   robotReachable: false,
+  navigationProfile: null,
   views: {
     live: {yaw: 0.7, pitch: 0.55, zoom: 28},
     result: {yaw: 0.7, pitch: 0.55, zoom: 18},
@@ -217,7 +218,8 @@ async function toggleRecord() {
     } else {
       state.active = await api('/api/v1/sessions/start', {method: 'POST'});
     }
-    await Promise.all([refreshSessions(), refreshMapJobs()]);
+    await refreshMapJobs();
+    await refreshSessions();
     renderRecording();
   } catch (error) {
     setFault(error);
@@ -356,9 +358,15 @@ function renderNavigation() {
   const runtime = navigation.runtime || {};
   const localization = navigation.localization || {};
   const command = navigation.commands?.final || {};
+  const runtimeRunning = Boolean(navigation.runtime_process?.running);
+  const selectedJobId = state.latestMapJob?.job_id;
+  const assetReady = Boolean(candidate && selectedJobId && candidate.map_job_id === selectedJobId);
+  const operation = (navigation.operations || [])[0];
+  const operationBusy = ['accepted', 'running'].includes(operation?.state);
+  const patrolRunning = ['STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING'].includes(runtime.state);
   $('navigationCandidate').textContent = candidate ? `${candidate.map_version} · ${candidate.route_id}` : '等待地图与路线';
-  $('runtimeBadge').textContent = navigation.runtime_process?.running ? '运行中' : '未启动';
-  $('runtimeBadge').className = navigation.runtime_process?.running ? 'online' : '';
+  $('runtimeBadge').textContent = runtimeRunning ? '运行中' : '未启动';
+  $('runtimeBadge').className = runtimeRunning ? 'online' : '';
   $('localizationState').textContent = localization.state || '—';
   $('localizationDetail').textContent = localization.reason || localization.lastReason || '等待 VGICP';
   $('localizationBadge').textContent = localization.usable ? '定位可用' : (localization.state || '尚未启动');
@@ -369,11 +377,43 @@ function renderNavigation() {
   $('patrolReason').textContent = runtime.operatorMessage || runtime.reason || '尚未启动';
   $('finalVelocity').textContent = `${Number(command.vx || 0).toFixed(2)} m/s`;
   $('motionAuthority').textContent = runtime.motionAuthorized ? '运动权已打开' : '运动权关闭';
-  $('prepareNavigation').disabled = !state.latestMapJob;
-  $('startRuntime').disabled = !candidate || navigation.runtime_process?.running;
-  $('resetLocalization').disabled = !navigation.runtime_process?.running;
-  $('startPatrol').disabled = !navigation.runtime_process?.running || !localization.usable || ['PATROLLING', 'STARTING'].includes(runtime.state);
-  $('stopPatrol').disabled = !navigation.runtime_process?.running;
+  $('routeProgress').textContent = `${Number(runtime.routeProgressPercent || 0).toFixed(0)}%`;
+  $('remainingRoute').textContent = runtime.remainingRoutePointCount == null
+    ? '尚未开始' : `剩余 ${runtime.remainingRoutePointCount} 个路径点`;
+  $('operationState').textContent = operation ? ({accepted: '已接收', running: '执行中', complete: '已完成', failed: '失败'}[operation.state] || operation.state) : '无';
+  $('operationMessage').textContent = operation?.message || '点击后会在这里持续显示结果';
+
+  $('assetStepState').textContent = assetReady ? '已发布' : (selectedJobId ? '待发布' : '未选择');
+  $('assetStep').classList.toggle('done', assetReady);
+  $('runtimeStepState').textContent = runtimeRunning ? (localization.usable ? '定位可用' : '定位中') : '未启动';
+  $('runtimeStep').classList.toggle('done', runtimeRunning && localization.usable);
+  $('patrolStepState').textContent = patrolRunning ? '巡检中' : (runtime.state === 'COMPLETED' ? '已完成' : '等待');
+  $('patrolStep').classList.toggle('done', runtime.state === 'COMPLETED');
+
+  let guidance = '请从历史中选择一张可用地图。';
+  if (selectedJobId && !assetReady) guidance = '下一步：将所选地图和当时录制的路线发布到机器狗。';
+  else if (assetReady && !runtimeRunning) guidance = '地图已在机器狗上。下一步：启动定位与 Nav2。';
+  else if (runtimeRunning && !localization.usable) guidance = '正在地图中定位，请让机器狗站稳等待；无需重复点击。';
+  else if (runtimeRunning && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
+  if (patrolRunning) guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
+  if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；可先查看下方诊断，或点击“自动清理并恢复”。`;
+  if (operationBusy) guidance = `正在${operation.kind || '执行操作'}，请等待本页面显示完成，不要重复点击。`;
+  $('workflowMessage').textContent = guidance;
+
+  $('prepareNavigation').hidden = assetReady || !selectedJobId;
+  $('prepareNavigationHelp').hidden = $('prepareNavigation').hidden;
+  $('prepareNavigation').disabled = !selectedJobId || operationBusy;
+  $('startRuntime').hidden = !assetReady || runtimeRunning;
+  $('startRuntimeHelp').hidden = $('startRuntime').hidden;
+  $('startRuntime').disabled = !candidate || operationBusy;
+  $('resetLocalization').hidden = !runtimeRunning || localization.usable || patrolRunning;
+  $('resetLocalization').disabled = operationBusy;
+  $('recoverRuntime').hidden = !runtimeRunning || !['FAULT', 'BLOCKED'].includes(runtime.state);
+  $('recoverRuntime').disabled = operationBusy;
+  $('startPatrol').hidden = !runtimeRunning || patrolRunning;
+  $('startPatrol').disabled = !localization.usable || operationBusy || ['FAULT', 'BLOCKED'].includes(runtime.state);
+  $('stopPatrol').hidden = !patrolRunning;
+  $('stopPatrol').disabled = operationBusy;
   drawNavigation();
 }
 
@@ -391,11 +431,87 @@ async function navigationAction(action) {
       await post('/api/v1/navigation/patrol/start');
     } else if (action === 'stop') {
       await post('/api/v1/navigation/patrol/stop');
+    } else if (action === 'recover') {
+      await post('/api/v1/navigation/runtime/recover');
     }
     await refreshNavigation();
   } catch (error) {
     $('navigationError').textContent = friendlyError(error);
   }
+}
+
+function fillProfile(profile) {
+  state.navigationProfile = profile;
+  $('straightSpeed').value = profile.motion.straightSpeedMps;
+  $('turnSpeed').value = profile.motion.turnSpeedRadps;
+  $('lateralSpeed').value = profile.motion.lateralSpeedMps;
+  $('slowHalfWidth').value = profile.avoidance.slowZoneHalfWidthM;
+  $('slowdownRatio').value = profile.avoidance.slowdownRatio;
+  $('blockedDecision').value = profile.avoidance.blockedDecisionS;
+  $('dropoutGrace').value = profile.localization.dropoutGraceS;
+  $('rejoinLookahead').value = profile.avoidance.rejoinLookaheadM;
+  $('stopFront').value = profile.avoidance.stopZoneFrontM;
+  $('stopHalfWidth').value = profile.avoidance.stopZoneHalfWidthM;
+  $('slowFront').value = profile.avoidance.slowZoneFrontM;
+  $('localizationTimeout').value = profile.localization.statusTimeoutS;
+  $('recoveryStable').value = profile.localization.recoveryStableS;
+  $('controllerFrequency').value = profile.controller.frequencyHz;
+  $('mppiTimeSteps').value = profile.controller.timeSteps;
+  $('mppiBatchSize').value = profile.controller.batchSize;
+  $('profileMessage').textContent = `当前第 ${profile.revision} 版`;
+}
+
+async function refreshProfile() {
+  try { fillProfile(await api('/api/v1/navigation/profile')); }
+  catch (error) { $('profileMessage').textContent = friendlyError(error); }
+}
+
+async function saveProfile() {
+  if (!state.navigationProfile) return;
+  const profile = JSON.parse(JSON.stringify(state.navigationProfile));
+  profile.motion.straightSpeedMps = Number($('straightSpeed').value);
+  profile.motion.turnSpeedRadps = Number($('turnSpeed').value);
+  profile.motion.lateralSpeedMps = Number($('lateralSpeed').value);
+  profile.avoidance.slowZoneHalfWidthM = Number($('slowHalfWidth').value);
+  profile.avoidance.slowdownRatio = Number($('slowdownRatio').value);
+  profile.avoidance.blockedDecisionS = Number($('blockedDecision').value);
+  profile.localization.dropoutGraceS = Number($('dropoutGrace').value);
+  profile.avoidance.rejoinLookaheadM = Number($('rejoinLookahead').value);
+  profile.avoidance.stopZoneFrontM = Number($('stopFront').value);
+  profile.avoidance.stopZoneHalfWidthM = Number($('stopHalfWidth').value);
+  profile.avoidance.slowZoneFrontM = Number($('slowFront').value);
+  profile.localization.statusTimeoutS = Number($('localizationTimeout').value);
+  profile.localization.recoveryStableS = Number($('recoveryStable').value);
+  profile.controller.frequencyHz = Number($('controllerFrequency').value);
+  profile.controller.timeSteps = Number($('mppiTimeSteps').value);
+  profile.controller.batchSize = Number($('mppiBatchSize').value);
+  try {
+    const result = await post('/api/v1/navigation/profile', {profile});
+    fillProfile(result.profile);
+    $('profileMessage').textContent = result.message;
+  } catch (error) { $('profileMessage').textContent = friendlyError(error); }
+}
+
+async function rollbackProfile() {
+  try {
+    const result = await post('/api/v1/navigation/profile/rollback');
+    fillProfile(result.profile);
+    $('profileMessage').textContent = result.message;
+  } catch (error) { $('profileMessage').textContent = friendlyError(error); }
+}
+
+async function refreshDiagnostics() {
+  $('diagnosticSummary').textContent = '正在分析…';
+  try {
+    const value = await api('/api/v1/navigation/diagnostics');
+    $('diagnosticSummary').textContent = value.summary;
+    $('diagnosticChecks').innerHTML = (value.checks || []).map(check =>
+      `<div class="diagnostic-check ${check.ok ? 'ok' : 'warn'}"><b>${check.ok ? '✓' : '!'} ${escapeHtml(check.name)}</b><small>${escapeHtml(check.detail)}</small></div>`
+    ).join('');
+    $('diagnosticLogs').textContent = (value.logs || []).flatMap(log =>
+      [`[${log.name}]`, ...(log.highlights || [])]
+    ).join('\n') || '暂无错误摘要';
+  } catch (error) { $('diagnosticSummary').textContent = friendlyError(error); }
 }
 
 async function refreshNavigation() {
@@ -491,7 +607,8 @@ $('sessions').addEventListener('click', async event => {
     try {
       const outcome = await api(`/api/v1/sessions/${encodeURIComponent(row.dataset.sessionId)}/map`, {method: 'POST'});
       state.job = outcome.map_job;
-      await Promise.all([refreshMapJobs(), refreshSessions()]);
+      await refreshMapJobs();
+      await refreshSessions();
       renderRecording();
     } catch (error) {
       setFault(error);
@@ -507,8 +624,12 @@ $('recordButton').addEventListener('click', toggleRecord);
 $('prepareNavigation').addEventListener('click', () => navigationAction('prepare'));
 $('startRuntime').addEventListener('click', () => navigationAction('runtime'));
 $('resetLocalization').addEventListener('click', () => navigationAction('reset'));
+$('recoverRuntime').addEventListener('click', () => navigationAction('recover'));
 $('startPatrol').addEventListener('click', () => navigationAction('start'));
 $('stopPatrol').addEventListener('click', () => navigationAction('stop'));
+$('saveProfile').addEventListener('click', saveProfile);
+$('rollbackProfile').addEventListener('click', rollbackProfile);
+$('refreshDiagnostics').addEventListener('click', refreshDiagnostics);
 addEventListener('resize', () => {
   renderLive();
   redrawResult();
@@ -525,6 +646,7 @@ async function initialize() {
   renderRecording();
   refreshCamera();
   refreshNavigation();
+  refreshProfile();
   scheduledTick();
   setInterval(refreshCamera, 2000);
   setInterval(refreshMapJobs, 3000);
