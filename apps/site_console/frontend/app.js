@@ -3,6 +3,7 @@ const state = {
   job: null,
   mapJobs: [],
   latestMapJob: null,
+  mapSelectionExplicit: false,
   mapArtifact: null,
   navigation: null,
   live: null,
@@ -254,8 +255,9 @@ function redrawResult() {
   );
 }
 
-async function showResult(job) {
+async function showResult(job, {explicit = false} = {}) {
   if (!job?.point_cloud_url) return;
+  if (explicit) state.mapSelectionExplicit = true;
   state.latestMapJob = job;
   $('resultEmpty').style.display = 'none';
   document.querySelector('.map-review').style.display = 'grid';
@@ -517,6 +519,11 @@ async function refreshDiagnostics() {
 async function refreshNavigation() {
   try {
     state.navigation = await api('/api/v1/navigation');
+    const candidateJobId = state.navigation?.candidate?.map_job_id;
+    if (candidateJobId && !state.mapSelectionExplicit && state.latestMapJob?.job_id !== candidateJobId) {
+      const candidateJob = state.mapJobs.find(job => job.job_id === candidateJobId);
+      if (candidateJob?.state === 'complete') await showResult(candidateJob);
+    }
     renderNavigation();
   } catch (error) {
     $('navigationError').textContent = friendlyError(error);
@@ -594,7 +601,7 @@ async function handleMapClick(event) {
     }
     return;
   }
-  if (job?.state === 'complete') await showResult(job);
+  if (job?.state === 'complete') await showResult(job, {explicit: true});
 }
 $('maps').addEventListener('click', handleMapClick);
 $('mapTasks').addEventListener('click', handleMapClick);
@@ -618,7 +625,7 @@ $('sessions').addEventListener('click', async event => {
   }
   if (!row.dataset.sessionJob) return;
   const job = state.mapJobs.find(item => item.job_id === row.dataset.sessionJob);
-  if (job?.state === 'complete') await showResult(job);
+  if (job?.state === 'complete') await showResult(job, {explicit: true});
 });
 $('recordButton').addEventListener('click', toggleRecord);
 $('prepareNavigation').addEventListener('click', () => navigationAction('prepare'));
