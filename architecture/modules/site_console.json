@@ -8,5 +8,5 @@
   "dependsOn": ["contracts", "device_io", "data_capture", "transfer", "map_factory", "route", "localization", "navigation", "evidence"],
   "consumes": ["SensorSnapshot", "CameraStreamStatus", "RecordingSession", "MapJob", "navigation and localization status"],
   "produces": ["guided next-action workflow", "operation receipts", "field visualization", "parameter and diagnostic views"],
-  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale", "2026-08-06 robot/workstation ownership correction", "2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step"]
+  "sourceProvenance": ["V2 implementation; old Site Console intentionally not migrated wholesale", "2026-08-06 robot/workstation ownership correction", "2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step", "asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout"]
 }

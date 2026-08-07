@@ -399,6 +399,10 @@ function renderNavigation() {
   else if (runtimeRunning && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
   if (patrolRunning) guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；可先查看下方诊断，或点击“自动清理并恢复”。`;
+  if (operation?.state === 'failed') {
+    guidance = `操作失败：${operation.message || operation.error || '未知错误'}。请不要重复点击，可查看下方诊断。`;
+    $('navigationError').textContent = operation.message || operation.error || '导航操作失败';
+  }
   if (operationBusy) guidance = `正在${operation.kind || '执行操作'}，请等待本页面显示完成，不要重复点击。`;
   $('workflowMessage').textContent = guidance;
 

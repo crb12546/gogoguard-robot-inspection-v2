@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import ast
+import io
 import os
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gogoguard_navigation import NavigationManager
-from gogoguard_navigation.manager import UNITREE_SDK_LIBRARY_PATH
+from gogoguard_navigation.manager import DEFAULT_PROFILE, UNITREE_SDK_LIBRARY_PATH
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,6 +131,142 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             '[str(SDK_RECEIVER), "eth0", "5005", "prepare-posture"]',
             source,
         )
+
+    def test_delivery_route_speed_is_accepted_by_runtime_contract(self) -> None:
+        source = ROOT / "third_party/locked_stack/src/go2_nav2_runtime"
+        overlay = (
+            ROOT
+            / "modules/navigation/overlays/go2_nav2_runtime_delivery.patch"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            shutil.copytree(source, workspace / "go2_nav2_runtime")
+            subprocess.run(
+                ["git", "-C", str(workspace), "apply", str(overlay)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            runtime_core = (
+                workspace
+                / "go2_nav2_runtime/go2_nav2_runtime/runtime_core.py"
+            ).read_text(encoding="utf-8")
+            self.assertIn(
+                "0.10 <= settings.speed_limit_mps <= 0.60",
+                runtime_core,
+            )
+
+    def test_runtime_exit_reaps_its_motion_bridge(self) -> None:
+        class Process:
+            def __init__(self, return_code, *, wait_return_code=None):
+                self.returncode = return_code
+                self.wait_return_code = (
+                    return_code if wait_return_code is None else wait_return_code
+                )
+                self.pid = 999999
+                self.waited = False
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.waited = True
+                self.returncode = self.wait_return_code
+                return self.returncode
+
+        runtime = Process(1)
+        receiver = Process(None, wait_return_code=0)
+        runtime_log = io.BytesIO()
+        receiver_log = io.BytesIO()
+        manager = NavigationManager.__new__(NavigationManager)
+        manager._lock = threading.Lock()
+        manager._process = runtime
+        manager._receiver_process = receiver
+        manager._log_handle = runtime_log
+        manager._receiver_log_handle = receiver_log
+        manager._last_runtime_exit = None
+        manager._last_receiver_exit = None
+
+        manager._reap_runtime_generation(
+            runtime, receiver, runtime_log, receiver_log
+        )
+
+        self.assertIsNone(manager._process)
+        self.assertIsNone(manager._receiver_process)
+        self.assertEqual(manager._last_runtime_exit, 1)
+        self.assertEqual(manager._last_receiver_exit, 0)
+        self.assertTrue(receiver.waited)
+        self.assertTrue(runtime_log.closed)
+        self.assertTrue(receiver_log.closed)
+
+    def test_failed_nav2_readiness_cleans_motion_bridge_before_reporting(self) -> None:
+        class Process:
+            def __init__(self, return_code, pid):
+                self.returncode = return_code
+                self.pid = pid
+                self.waited = False
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.waited = True
+                if self.returncode is None:
+                    self.returncode = -2
+                return self.returncode
+
+        receiver = Process(None, 999998)
+        runtime = Process(1, 999999)
+        candidate = {
+            "candidate_id": "map-123456789abc",
+            "map_version": "map-123456789abc",
+            "localization_map": "/tmp/map.pcd",
+            "route": "/tmp/route.json",
+            "runtime_profile": "/tmp/runtime_profile.json",
+            "localization_map_hash": "a",
+            "route_hash": "b",
+            "runtime_profile_hash": "c",
+        }
+
+        class Routes:
+            def get(self, candidate_id):
+                return candidate
+
+        class Profiles:
+            def get(self):
+                return DEFAULT_PROFILE
+
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager.__new__(NavigationManager)
+            manager.site_id = "site"
+            manager.robot_id = "robot"
+            manager.sensor_id = "sensor"
+            manager.log_root = Path(temporary)
+            manager.routes = Routes()
+            manager.profiles = Profiles()
+            manager._lock = threading.Lock()
+            manager._candidate = None
+            manager._process = None
+            manager._receiver_process = None
+            manager._log_handle = None
+            manager._receiver_log_handle = None
+            manager._last_runtime_exit = None
+            manager._last_receiver_exit = None
+
+            with mock.patch(
+                "gogoguard_navigation.manager.subprocess.Popen",
+                side_effect=[receiver, runtime],
+            ), mock.patch("gogoguard_navigation.manager.time.sleep"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Nav2 failed readiness check: exit 1"
+                ):
+                    manager.start_runtime("map-123456789abc")
+
+        self.assertTrue(receiver.waited)
+        self.assertIsNone(manager._process)
+        self.assertIsNone(manager._receiver_process)
+        self.assertEqual(manager._last_runtime_exit, 1)
+        self.assertEqual(manager._last_receiver_exit, -2)
 
     def test_mppi_forward_samples_clear_the_commissioned_gait_deadband(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")

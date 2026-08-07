@@ -42,6 +42,8 @@ class NavigationManager:
         self._log_handle = None
         self._receiver_process: subprocess.Popen | None = None
         self._receiver_log_handle = None
+        self._last_runtime_exit: int | None = None
+        self._last_receiver_exit: int | None = None
         self._candidate: dict[str, Any] | None = self._read_json(self.selected_path)
         self._lock = threading.Lock()
 
@@ -96,14 +98,18 @@ class NavigationManager:
         except (OSError, ValueError):
             pass
         process_running = bool(self._process and self._process.poll() is None)
-        process_exit = None if not self._process or process_running else self._process.returncode
+        process_exit = (
+            None if process_running
+            else self._process.returncode if self._process
+            else self._last_runtime_exit
+        )
         receiver_running = bool(
             self._receiver_process and self._receiver_process.poll() is None
         )
         receiver_exit = (
-            None
-            if not self._receiver_process or receiver_running
-            else self._receiver_process.returncode
+            None if receiver_running
+            else self._receiver_process.returncode if self._receiver_process
+            else self._last_receiver_exit
         )
         return {
             "schema": "gogoguard.navigation_status.v1",
@@ -173,11 +179,92 @@ class NavigationManager:
         )
         return receiver_env
 
+    @staticmethod
+    def _terminate_process(
+        process: subprocess.Popen | None,
+        *,
+        interrupt_timeout: float,
+        terminate_timeout: float,
+    ) -> int | None:
+        if not process:
+            return None
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=interrupt_timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=terminate_timeout)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=3)
+        return process.returncode
+
+    @staticmethod
+    def _runtime_failure_detail(log_path: Path) -> str:
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return ""
+        markers = (
+            "caught exception in launch",
+            "invalid_",
+            "process has died",
+            "traceback",
+            "fatal",
+            "error",
+        )
+        for line in reversed(lines[-200:]):
+            if any(marker in line.lower() for marker in markers):
+                return line.strip()[-600:]
+        return ""
+
+    def _reap_runtime_generation(
+        self,
+        process: subprocess.Popen,
+        receiver_process: subprocess.Popen,
+        log_handle: Any,
+        receiver_log_handle: Any,
+    ) -> None:
+        runtime_exit = process.wait()
+        with self._lock:
+            if self._process is not process:
+                return
+            # Keep the generation owned while the bridge is being terminated;
+            # otherwise a concurrent restart can race the old UDP 5005 socket.
+            receiver_exit = self._terminate_process(
+                receiver_process, interrupt_timeout=5, terminate_timeout=3
+            )
+            self._process = None
+            self._receiver_process = None
+            self._log_handle = None
+            self._receiver_log_handle = None
+            self._last_runtime_exit = runtime_exit
+            self._last_receiver_exit = receiver_exit
+        log_handle.close()
+        receiver_log_handle.close()
+
     def start_runtime(self, candidate_id: str) -> dict[str, Any]:
         if not SAFE_ID.fullmatch(candidate_id):
             raise ValueError("invalid navigation candidate id")
         candidate = self.routes.get(candidate_id)
         already_running = False
+        stale_generation = bool(
+            (self._process and self._process.poll() is not None)
+            or (self._receiver_process and self._receiver_process.poll() is None)
+        )
+        if stale_generation:
+            self.stop_runtime()
         with self._lock:
             if self._process and self._process.poll() is None:
                 if self._candidate and self._candidate.get("candidate_id") == candidate_id:
@@ -186,6 +273,8 @@ class NavigationManager:
                     raise RuntimeError("another navigation runtime is already active")
             if not already_running:
                 self._candidate = candidate
+                self._last_runtime_exit = None
+                self._last_receiver_exit = None
                 log_path = self.log_root / f"runtime-{candidate_id}.log"
                 self._log_handle = log_path.open("ab", buffering=0)
                 receiver_log_path = self.log_root / f"motion-bridge-{candidate_id}.log"
@@ -225,6 +314,38 @@ class NavigationManager:
                     start_new_session=True,
                     env=dict(os.environ),
                 )
+                process = self._process
+                receiver_process = self._receiver_process
+                log_handle = self._log_handle
+                receiver_log_handle = self._receiver_log_handle
+                # A launch process that exits immediately is not a successful
+                # runtime start. This catches contract/configuration failures
+                # before the asynchronous operation is marked complete.
+                time.sleep(1.25)
+                if process.poll() is not None:
+                    exit_code = process.returncode
+                    self._process = None
+                    self._receiver_process = None
+                    self._log_handle = None
+                    self._receiver_log_handle = None
+                    self._last_runtime_exit = exit_code
+                    receiver_exit = self._terminate_process(
+                        receiver_process, interrupt_timeout=5, terminate_timeout=3
+                    )
+                    self._last_receiver_exit = receiver_exit
+                    log_handle.close()
+                    receiver_log_handle.close()
+                    detail = self._runtime_failure_detail(log_path)
+                    suffix = f": {detail}" if detail else ""
+                    raise RuntimeError(
+                        f"Nav2 failed readiness check: exit {exit_code}{suffix}"
+                    )
+                threading.Thread(
+                    target=self._reap_runtime_generation,
+                    args=(process, receiver_process, log_handle, receiver_log_handle),
+                    name=f"navigation-reaper-{candidate_id}",
+                    daemon=True,
+                ).start()
         return self.status()
 
     def _service(self, service: str, type_name: str, request: str, timeout: int = 12) -> dict[str, Any]:
@@ -317,35 +438,28 @@ class NavigationManager:
         with self._lock:
             process = self._process
             receiver_process = self._receiver_process
-        if process and process.poll() is None:
-            try:
-                self.stop_patrol()
-            except Exception:
-                pass
-            os.killpg(process.pid, signal.SIGINT)
-            try:
-                process.wait(timeout=12)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=3)
-        if receiver_process and receiver_process.poll() is None:
-            os.killpg(receiver_process.pid, signal.SIGINT)
-            try:
-                receiver_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(receiver_process.pid, signal.SIGTERM)
-                receiver_process.wait(timeout=3)
-        with self._lock:
+            log_handle = self._log_handle
+            receiver_log_handle = self._receiver_log_handle
             self._process = None
             self._receiver_process = None
-            if self._log_handle:
-                self._log_handle.close()
-                self._log_handle = None
-            if self._receiver_log_handle:
-                self._receiver_log_handle.close()
-                self._receiver_log_handle = None
+            self._log_handle = None
+            self._receiver_log_handle = None
+        if process and process.poll() is None:
+            try:
+                self._service("/go2/patrol/stop", "std_srvs/srv/Trigger", "{}")
+            except Exception:
+                pass
+        runtime_exit = self._terminate_process(
+            process, interrupt_timeout=12, terminate_timeout=3
+        )
+        receiver_exit = self._terminate_process(
+            receiver_process, interrupt_timeout=5, terminate_timeout=3
+        )
+        with self._lock:
+            self._last_runtime_exit = runtime_exit
+            self._last_receiver_exit = receiver_exit
+        if log_handle:
+            log_handle.close()
+        if receiver_log_handle:
+            receiver_log_handle.close()
         return self.status()

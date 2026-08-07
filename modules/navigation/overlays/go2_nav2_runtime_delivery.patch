@@ -1,0 +1,12 @@
+diff --git a/go2_nav2_runtime/go2_nav2_runtime/runtime_core.py b/go2_nav2_runtime/go2_nav2_runtime/runtime_core.py
+--- a/go2_nav2_runtime/go2_nav2_runtime/runtime_core.py
++++ b/go2_nav2_runtime/go2_nav2_runtime/runtime_core.py
+@@ -643,7 +643,7 @@ def _parse_profile(
+         raise RuntimeContractError("INVALID_INITIALIZATION_YAW_TOLERANCE")
+     if settings.loop_mode != "once":
+         raise RuntimeContractError("UNSUPPORTED_PATROL_LOOP_MODE")
+-    if not 0.10 <= settings.speed_limit_mps <= 0.50:
++    if not 0.10 <= settings.speed_limit_mps <= 0.60:
+         raise RuntimeContractError("INVALID_PATROL_SPEED_LIMIT")
+     if not 0.50 <= settings.start_max_distance_m <= 5.0:
+         raise RuntimeContractError("INVALID_PATROL_START_DISTANCE")

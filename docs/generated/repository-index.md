@@ -121,7 +121,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_navigation.supervisor:main`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
 - Produces: safe velocity candidate, navigation progress and operation lifecycle, layered diagnostics
-- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; robot deployment pending
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; robot deployment pending; 2026-08-07 delivery compatibility overlay accepts the commissioned 0.60 m/s route contract without mutating the locked source snapshot; runtime readiness and background reaping own the Unitree motion bridge for the complete Nav2 process lifetime
 
 ### `route`
 
@@ -139,7 +139,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_site_console.__main__:main`
 - Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status
 - Produces: guided next-action workflow, operation receipts, field visualization, parameter and diagnostic views
-- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step
+- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout
 
 ### `transfer`
 
