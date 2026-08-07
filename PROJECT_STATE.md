@@ -123,19 +123,38 @@ Updated: 2026-08-07
 
 ## Current deployed release
 
-- Active V2 implementation commit: `7ff9cfd3ac094003aae8d557691d35a3dd1572bd`.
+- Active V2 implementation commit: `a50a3fe278a967911ae3606edb5f5dfa3f6338d3`.
 - Robot image config digest:
-  `sha256:7c431e41dadf51c37a60f282fdbcd8a9fa06fe723de4ac879197c1407be0e59d`
+  `sha256:dd5744f8f8877a170ae8dc732e8b9b7ab237f77e5c8847699e42eb88b5681799`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260807-delivery`; robot runtime no
-  longer mounts cloud SSH material and its map worker is `none`.
+- Active image: `gogoguard-robot-inspection:v2-edge-20260807-delivery-r2`; robot
+  runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The delivery release archive SHA-256 is
-  `de6929abd9807d25231b549a5b807114e91986e5e89021595904b52a39d9475c`.
+  `c36c8fc91245e92c83b0ffa6840b0706be744feb046c770274a36afda5ff26a7`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
   The final restart receipt recorded `gogoguard-edge.service: Succeeded`, then
   passed the stable-NTP gate and returned to `active` without a failure result.
+- The first delivery-runtime start for generation-3 `map-648e606fb9a5`
+  exposed an integration regression before localization or planning began:
+  its 0.60 m/s route profile was rejected by a retained 0.50 m/s runtime
+  contract. The asynchronous start was then marked complete too early and the
+  Unitree bridge retained UDP 5005, so repeated starts failed with `errno=98`
+  while the workstation reduced the incident to a generic `timeout`.
+- Release `v2-edge-20260807-delivery-r2` preserves the locked capability
+  snapshot and applies an explicit V2 compatibility overlay for the 0.60 m/s
+  route contract. Nav2 must now remain alive through a readiness window before
+  start completes; both immediate launch failure and later runtime exit reap
+  the owned Unitree bridge. The UI keeps the exact asynchronous operation
+  failure visible. Offline evidence is 43 passing tests plus compilation,
+  knowledge, container-contract, UI and in-image overlay checks.
+- The r2 archive passed SHA-256 on the robot and the managed restart returned
+  to `enabled` and `active`. The device reported 9.9 Hz LiDAR and 9.9 Hz
+  odometry with one supervisor. Nav2, the motion bridge and UDP 5005 were all
+  stopped, proving the old orphan was removed; no motion command was sent.
+  The current selected candidate remains `map-648e606fb9a5` (18.116 m, 65
+  waypoints). Runtime start and patrol are not yet field-accepted on r2.
 - 2026-08-06 boot receipt: MID-360 network passed; raw ROS rates were 10.07 Hz
   PointCloud2, about 200 Hz IMU and about 9.8 Hz `/Odometry`; Z1Pro WebRTC and
   workstation proxy status passed. No motion command was sent.
@@ -348,8 +367,8 @@ engineering evidence and should not be treated as the field navigation map.
 - The six historical Mac GLIM jobs were copied into the active repository's
   ignored runtime-data root with absolute paths rebased. The selected
   `map-e9bc37247129` artifact hashes remained unchanged and its generation-3
-  candidate was published to the robot: 713,497 points, 82.966 m and 285
-  waypoints. Localization/Nav2 has not yet been started on this release.
+  candidate was published to the robot at that time: 713,497 points, 82.966 m
+  and 285 waypoints.
 - Workspace-level `AGENTS.md` now routes new Codex tasks only to this field
   repository. The superseded V2 worktree and original Go2 repository remain
   present for rollback/provenance but are explicitly not current behavior or
@@ -357,8 +376,9 @@ engineering evidence and should not be treated as the field navigation map.
 
 ## Next experiment (supersedes the older paragraph above)
 
-Use the guided UI with `map-e9bc37247129` to verify in order: localization
-convergence, first motion latency, 0.60 m/s clear-route travel, passage through
-a normal corridor, specific `BLOCKED` behavior, pause/restart, and route-suffix
-recovery after one controlled localization interruption. Record each result
-before calling the release field-accepted.
+Use the guided UI with the currently selected `map-648e606fb9a5` to verify in
+order: one clean localization/Nav2 start without timeout or UDP conflict,
+localization convergence, first motion latency, 0.60 m/s clear-route travel,
+passage through a normal corridor, specific `BLOCKED` behavior, pause/restart,
+and route-suffix recovery after one controlled localization interruption.
+Record each result before calling the release field-accepted.
