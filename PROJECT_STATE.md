@@ -123,14 +123,14 @@ Updated: 2026-08-07
 
 ## Current deployed release
 
-- Active V2 implementation commit: `7ac9b3874fc3a5d52bbec62e1190ad8af30155d4`.
+- Active V2 implementation commit: `7ff9cfd3ac094003aae8d557691d35a3dd1572bd`.
 - Robot image config digest:
-  `sha256:38ab20106377c491b8b07740419c13755a4cc08e3deeed4b2736027245b48357`
+  `sha256:7c431e41dadf51c37a60f282fdbcd8a9fa06fe723de4ac879197c1407be0e59d`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260807-r4`; robot runtime no
+- Active image: `gogoguard-robot-inspection:v2-edge-20260807-delivery`; robot runtime no
   longer mounts cloud SSH material and its map worker is `none`.
-- The r4 release archive SHA-256 is
-  `99636f88dfc2d573a62798a74ba7302b3b7c49162fff6f9602f0f0b3ddc586cc`.
+- The delivery release archive SHA-256 is
+  `de6929abd9807d25231b549a5b807114e91986e5e89021595904b52a39d9475c`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -275,13 +275,12 @@ Mac, select and deploy that map to the robot, then verify fixed-map localization
 before starting the Nav2 patrol experiment. Existing indoor/stationary maps are
 engineering evidence and should not be treated as the field navigation map.
 
-## 2026-08-07 delivery-closure refactor (not yet robot-deployed)
+## 2026-08-07 delivery-closure refactor (deployed; dynamic acceptance pending)
 
 - Today's field traces changed the next objective from incremental research to
   a complete operator loop for delivery. The selected real candidate remains
   `map-e9bc37247129` (713,497 points, 82.966 m, previously 285 source
-  waypoints). Nothing in this section is a new robot receipt until tomorrow's
-  release is installed and exercised.
+  waypoints).
 - Navigation process ownership moved out of the HTTP/UI process. One
   `gogoguard-navigation-supervisor` now owns one Unitree receiver and one
   localization/Nav2/MPPI generation. A filesystem lock rejects a second
@@ -329,7 +328,7 @@ engineering evidence and should not be treated as the field navigation map.
   horizontal overflow. The final Linux/ARM64 robot image compiled all ten ROS 2
   packages and passed in-image checks for the supervisor, patrol runtime,
   bounded detour module, Nav2 profile and parameter injection. It is tagged
-  `gogoguard-robot-inspection:v2-edge-20260807-delivery`, image ID
+  `gogoguard-robot-inspection:v2-edge-20260807-delivery`, local manifest-list ID
   `sha256:74f6860705865bd6b01b0bbeb1a4f5e8911cd476ca76b1ed6d837bb577230912`
   (1,146,800,740 bytes). The portable workstation image
   `gogoguard-field-workstation:20260807-delivery` also built and served its UI
@@ -337,7 +336,20 @@ engineering evidence and should not be treated as the field navigation map.
   prepared outside Git at `release-cache/edge-20260807-delivery`; archive
   SHA-256 is
   `de6929abd9807d25231b549a5b807114e91986e5e89021595904b52a39d9475c`.
-  Neither image is robot-deployed yet.
+  The robot image is now deployed; the workstation image remains a portable
+  build while the commissioned Mac runs the same source natively.
+- Deployment receipt: the archive passed SHA-256 again on the robot, Docker
+  loaded config digest
+  `sha256:7c431e41dadf51c37a60f282fdbcd8a9fa06fe723de4ac879197c1407be0e59d`,
+  and the managed r4-to-delivery restart completed normally after the stable
+  NTP gate. The service is `enabled` and `active`; LiDAR was 10.9 Hz and
+  odometry 9.9 Hz. Exactly one navigation supervisor was present, while Nav2
+  and the Unitree motion bridge remained stopped, so no motion was commanded.
+- The six historical Mac GLIM jobs were copied into the active repository's
+  ignored runtime-data root with absolute paths rebased. The selected
+  `map-e9bc37247129` artifact hashes remained unchanged and its generation-3
+  candidate was published to the robot: 713,497 points, 82.966 m and 285
+  waypoints. Localization/Nav2 has not yet been started on this release.
 - Workspace-level `AGENTS.md` now routes new Codex tasks only to this field
   repository. The superseded V2 worktree and original Go2 repository remain
   present for rollback/provenance but are explicitly not current behavior or
@@ -345,11 +357,8 @@ engineering evidence and should not be treated as the field navigation map.
 
 ## Next experiment (supersedes the older paragraph above)
 
-Prepare and stage the verified ARM64 release from this branch, install it after
-the robot and Livox are connected, then use the guided UI with
-`map-e9bc37247129` to
-verify in order: unique process generation, localization convergence, first
-motion latency, 0.60 m/s clear-route travel, passage through a normal corridor,
-specific `BLOCKED` behavior, pause/restart, and route-suffix recovery after one
-controlled localization interruption. Record each result before calling the
-release field-accepted.
+Use the guided UI with `map-e9bc37247129` to verify in order: localization
+convergence, first motion latency, 0.60 m/s clear-route travel, passage through
+a normal corridor, specific `BLOCKED` behavior, pause/restart, and route-suffix
+recovery after one controlled localization interruption. Record each result
+before calling the release field-accepted.
