@@ -16,7 +16,19 @@ class NavigationProfileTest(unittest.TestCase):
         self.assertEqual(profile["motion"]["straightSpeedMps"], 0.60)
         self.assertEqual(profile["motion"]["turnSpeedRadps"], 0.40)
         self.assertEqual(profile["avoidance"]["slowZoneHalfWidthM"], 0.30)
-        self.assertEqual(profile["avoidance"]["blockedDecisionS"], 2.5)
+        self.assertEqual(profile["motion"]["detourSpeedMps"], 0.40)
+        self.assertEqual(profile["recovery"]["progressTimeoutS"], 5.0)
+        self.assertEqual(profile["recovery"]["mppiRetryLimit"], 2)
+
+    def test_v1_blocked_timeout_migrates_to_progress_watchdog(self):
+        legacy = validate_profile(DEFAULT_PROFILE)
+        legacy["schema"] = "gogoguard.navigation_profile.v1"
+        legacy.pop("recovery")
+        legacy["avoidance"]["blockedDecisionS"] = 3.5
+        migrated = validate_profile(legacy)
+        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v2")
+        self.assertEqual(migrated["recovery"]["progressTimeoutS"], 3.5)
+        self.assertNotIn("blockedDecisionS", migrated["avoidance"])
 
     def test_invalid_slow_zone_cannot_be_saved(self):
         profile = validate_profile(DEFAULT_PROFILE)

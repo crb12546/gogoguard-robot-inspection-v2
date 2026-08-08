@@ -13,10 +13,21 @@ from gogoguard_evidence import (
     new_incident_id,
     preset_profile,
 )
-from gogoguard_evidence.incident_recorder import RollingSamples, SerializedSample
+from gogoguard_evidence.incident_recorder import (
+    ACTIVE_STATES,
+    TERMINAL_STATES,
+    RollingSamples,
+    SerializedSample,
+)
 
 
 class IncidentEvidenceTest(unittest.TestCase):
+    def test_navigation_recovery_states_remain_inside_incident_capture(self) -> None:
+        self.assertTrue(
+            {"DETOURING", "REJOINING", "RETRYING"}.issubset(ACTIVE_STATES)
+        )
+        self.assertIn("COMPLETED", TERMINAL_STATES)
+
     def test_rolling_samples_are_bounded_by_time_and_bytes(self) -> None:
         values = RollingSamples()
         values.append(SerializedSample("/cloud", "type", 1_000_000_000, b"1234"), keep_s=2, byte_limit=8)

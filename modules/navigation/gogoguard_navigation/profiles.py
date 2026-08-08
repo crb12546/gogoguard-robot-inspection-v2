@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any
 
 
-PROFILE_SCHEMA = "gogoguard.navigation_profile.v1"
+PROFILE_SCHEMA = "gogoguard.navigation_profile.v2"
+LEGACY_PROFILE_SCHEMA = "gogoguard.navigation_profile.v1"
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": PROFILE_SCHEMA,
     "revision": 1,
     "motion": {
         "straightSpeedMps": 0.60,
+        "detourSpeedMps": 0.40,
         "turnSpeedRadps": 0.40,
         "lateralSpeedMps": 0.20,
         "accelerationMps2": 0.90,
@@ -27,8 +29,14 @@ DEFAULT_PROFILE: dict[str, Any] = {
         "slowZoneRearM": 0.55,
         "slowZoneHalfWidthM": 0.30,
         "slowdownRatio": 0.85,
-        "blockedDecisionS": 2.5,
         "rejoinLookaheadM": 2.0,
+        "obstructionCostThreshold": 65,
+        "obstructionMinSamples": 2,
+    },
+    "recovery": {
+        "progressTimeoutS": 5.0,
+        "mppiRetryLimit": 2,
+        "detourAttemptLimit": 2,
     },
     "localization": {
         "statusTimeoutS": 0.60,
@@ -63,13 +71,23 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
         raise ProfileError("参数配置必须是对象")
     motion = dict(value.get("motion") or {})
     avoidance = dict(value.get("avoidance") or {})
+    recovery = dict(value.get("recovery") or {})
     localization = dict(value.get("localization") or {})
     controller = dict(value.get("controller") or {})
+    schema = str(value.get("schema") or LEGACY_PROFILE_SCHEMA)
+    if schema not in {PROFILE_SCHEMA, LEGACY_PROFILE_SCHEMA}:
+        raise ProfileError("参数配置版本不支持")
+    # V1 called the Nav2 progress watchdog an obstacle decision. Preserve the
+    # saved value during migration, but give it only its real V2 meaning.
+    legacy_progress_timeout = avoidance.get("blockedDecisionS", 5.0)
     normalized = {
         "schema": PROFILE_SCHEMA,
         "revision": int(value.get("revision") or 1),
         "motion": {
             "straightSpeedMps": _finite(motion.get("straightSpeedMps"), "直线速度", 0.20, 1.00),
+            "detourSpeedMps": _finite(
+                motion.get("detourSpeedMps", 0.40), "局部绕行速度", 0.24, 0.80
+            ),
             "turnSpeedRadps": _finite(motion.get("turnSpeedRadps"), "转弯角速度", 0.10, 0.80),
             "lateralSpeedMps": _finite(motion.get("lateralSpeedMps"), "侧向速度", 0.05, 0.40),
             "accelerationMps2": _finite(motion.get("accelerationMps2"), "加速度", 0.20, 2.00),
@@ -82,8 +100,37 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
             "slowZoneRearM": _finite(avoidance.get("slowZoneRearM"), "减速区后缘", 0.30, 1.00),
             "slowZoneHalfWidthM": _finite(avoidance.get("slowZoneHalfWidthM"), "减速区半宽", 0.25, 0.70),
             "slowdownRatio": _finite(avoidance.get("slowdownRatio"), "减速比例", 0.50, 1.00),
-            "blockedDecisionS": _finite(avoidance.get("blockedDecisionS"), "阻塞判定时间", 1.00, 8.00),
             "rejoinLookaheadM": _finite(avoidance.get("rejoinLookaheadM"), "重入前视距离", 0.50, 6.00),
+            "obstructionCostThreshold": int(
+                _finite(
+                    avoidance.get("obstructionCostThreshold", 65),
+                    "路线障碍代价阈值",
+                    1,
+                    100,
+                )
+            ),
+            "obstructionMinSamples": int(
+                _finite(
+                    avoidance.get("obstructionMinSamples", 2),
+                    "路线障碍连续样本",
+                    1,
+                    10,
+                )
+            ),
+        },
+        "recovery": {
+            "progressTimeoutS": _finite(
+                recovery.get("progressTimeoutS", legacy_progress_timeout),
+                "运动进展观察时间",
+                2.0,
+                12.0,
+            ),
+            "mppiRetryLimit": int(
+                _finite(recovery.get("mppiRetryLimit", 2), "MPPI 短暂失败重试次数", 0, 3)
+            ),
+            "detourAttemptLimit": int(
+                _finite(recovery.get("detourAttemptLimit", 2), "单次巡检绕行上限", 1, 3)
+            ),
         },
         "localization": {
             "statusTimeoutS": _finite(localization.get("statusTimeoutS"), "定位消息超时", 0.20, 2.00),
@@ -101,6 +148,12 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
         raise ProfileError("减速区必须覆盖停车区")
     if normalized["avoidance"]["slowZoneFrontM"] < normalized["avoidance"]["stopZoneFrontM"]:
         raise ProfileError("减速区前缘必须早于停车区")
+    if (
+        normalized["motion"]["detourSpeedMps"]
+        * normalized["avoidance"]["slowdownRatio"]
+        < 0.20
+    ):
+        raise ProfileError("局部绕行经过减速后必须保持至少 0.20 m/s 有效步态")
     workload = (
         normalized["controller"]["frequencyHz"]
         * normalized["controller"]["timeSteps"]

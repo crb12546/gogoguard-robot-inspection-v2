@@ -26,9 +26,14 @@ from gogoguard_contracts import DiagnosticMode, IncidentBundle, IncidentState, j
 from .incidents import DiagnosticProfileStore, IncidentStore, new_incident_id
 
 
-ACTIVE_STATES = {"STARTING", "LOCALIZING", "PATROLLING", "HOLDING", "RESUMING", "REPLANNING"}
+ACTIVE_STATES = {
+    "STARTING", "LOCALIZING", "PATROLLING", "HOLDING", "RESUMING",
+    "REPLANNING", "DETOURING", "REJOINING", "RETRYING",
+}
 TRIGGER_STATES = {"BLOCKED", "FAULT"}
-TERMINAL_STATES = {"IDLE", "STOPPED", "COMPLETE", "BLOCKED", "FAULT"}
+TERMINAL_STATES = {
+    "IDLE", "STOPPED", "COMPLETE", "COMPLETED", "BLOCKED", "FAULT",
+}
 
 
 @dataclass(frozen=True)

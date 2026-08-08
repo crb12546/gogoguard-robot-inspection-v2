@@ -125,6 +125,7 @@ class NavigationManager:
         profile = profile or validate_profile(DEFAULT_PROFILE)
         motion = profile["motion"]
         avoidance = profile["avoidance"]
+        recovery = profile["recovery"]
         localization = profile["localization"]
         controller = profile["controller"]
         return [
@@ -146,6 +147,7 @@ class NavigationManager:
             f"robot_id:={robot_id}",
             f"sensor_id:={sensor_id}",
             f"straight_speed_mps:={motion['straightSpeedMps']}",
+            f"detour_speed_mps:={motion['detourSpeedMps']}",
             f"turn_speed_radps:={motion['turnSpeedRadps']}",
             f"lateral_speed_mps:={motion['lateralSpeedMps']}",
             f"acceleration_mps2:={motion['accelerationMps2']}",
@@ -156,8 +158,12 @@ class NavigationManager:
             f"slow_zone_rear_m:={avoidance['slowZoneRearM']}",
             f"slow_zone_half_width_m:={avoidance['slowZoneHalfWidthM']}",
             f"slowdown_ratio:={avoidance['slowdownRatio']}",
-            f"blocked_decision_s:={avoidance['blockedDecisionS']}",
             f"rejoin_lookahead_m:={avoidance['rejoinLookaheadM']}",
+            f"obstruction_cost_threshold:={avoidance['obstructionCostThreshold']}",
+            f"obstruction_min_samples:={avoidance['obstructionMinSamples']}",
+            f"progress_timeout_s:={recovery['progressTimeoutS']}",
+            f"mppi_retry_limit:={recovery['mppiRetryLimit']}",
+            f"detour_attempt_limit:={recovery['detourAttemptLimit']}",
             f"localization_status_timeout_s:={localization['statusTimeoutS']}",
             f"localization_dropout_grace_s:={localization['dropoutGraceS']}",
             f"localization_recovery_stable_s:={localization['recoveryStableS']}",
@@ -414,7 +420,10 @@ class NavigationManager:
             summary = "导航未启动"
         elif not localization.get("usable"):
             summary = "等待定位"
-        elif runtime_state in {"STARTING", "PATROLLING", "REPLANNING", "HOLDING", "RESUMING"}:
+        elif runtime_state in {
+            "STARTING", "PATROLLING", "REPLANNING", "DETOURING",
+            "REJOINING", "RETRYING", "HOLDING", "RESUMING",
+        }:
             summary = "巡检运行中"
         elif runtime_state == "COMPLETED":
             summary = "巡检已完成"

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "third_party/locked_stack/src/go2_nav2_runtime"))
+sys.path.insert(0, str(ROOT / "modules/navigation/ros/go2_nav2_runtime"))
 sys.path.insert(0, str(ROOT / "third_party/locked_stack/src/go2_site_ops"))
 
 from go2_nav2_runtime.local_detour import GridView, plan_detour, route_rejoin_index

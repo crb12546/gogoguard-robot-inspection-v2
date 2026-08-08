@@ -467,6 +467,54 @@ Updated: 2026-08-09
   timestamps, rename controls and an enabled patrol action only after all
   three map identities matched.
 
+## 2026-08-09 navigation orchestration correction (local; not deployed)
+
+- The latest `map-8ddcf3f8c078` evidence changes the diagnosis from a generic
+  obstacle problem to an orchestration defect. MPPI followed the route for
+  48.6 seconds before a 0.509 ms future-TF lookup aborted FollowPath. The
+  forward costmap and collision evidence were clear, but the deployed manager
+  treated every non-success as a detour request.
+- The deployed detour concatenated its local A* path with the complete
+  remaining recorded route. Although it selected rejoin index 131, RPP kept
+  ownership through route index 214. Its final 2.5 seconds still commanded
+  0.24 m/s while net movement was only 0.051 m; this is actuation/progress
+  evidence, not proof of a blocked route.
+- The local branch now classifies independent localization, route-obstruction,
+  controller and actuation evidence. A clear abort receives at most the
+  configured MPPI suffix retries. Only consecutive occupied samples on the
+  already footprint-inflated recorded route authorize A* and RPP. RPP receives
+  only current pose to rejoin anchor; success explicitly returns the unfinished
+  route suffix to MPPI. A detour failure cannot recursively create another
+  detour.
+- The misleading `blockedDecisionS` parameter is migrated to V2
+  `progressTimeoutS`. It controls only Nav2's lack-of-progress observation
+  window and defaults to 5.0 seconds. Humble's `PoseProgressChecker` now treats
+  either 0.15 m translation or 0.15 rad rotation as progress, so RPP may align
+  its heading without being killed by a translation-only watchdog. Obstruction cost/sample thresholds,
+  transient MPPI retry count, detour attempt limit and independent 0.40 m/s
+  detour speed now have explicit versioned parameters and workstation controls.
+- Product-owned ROS runtime code now lives under
+  `modules/navigation/ros/go2_nav2_runtime`; the commissioned Unitree receiver
+  source lives under `modules/device_io/ros`. The robot image no longer needs
+  build-time navigation overlays. Frozen sources remain unchanged as capability
+  provenance.
+- Navigation-focused offline tests cover the historical incident, clear-route
+  retry, verified obstruction, RPP-to-MPPI handoff, actuation stall and legacy
+  profile migration. The complete repository passes 68 tests, Python and
+  JavaScript syntax compilation, generated-knowledge consistency, UI smoke
+  and container contract checks.
+- A real ARM64 build completed as
+  `gogoguard-robot-inspection:v2-edge-20260809-orchestration-r1`, local manifest
+  and image ID
+  `sha256:de52ff77f8bac92e39877d3944214314aede0d88e55f88b0cfe0a2769c1aa111`
+  (ARM64, 1,171,223,750 bytes).
+  All ten ROS packages compiled. An in-image import and Nav2 profile check
+  reported `MPPI -> RESUME_MPPI_SUFFIX`, DetourPath 0.40 m/s, and the final
+  Unitree binary contains the 0.60/0.20 m/s contract, and the incident recorder
+  recognizes all three new recovery states. The robot is still
+  running the deployed `evidence-detour-r3` behavior above; no deployment or
+  robot motion occurred during this refactor.
+
 ## Known field follow-ups
 
 - Historical recordings, maps and navigation candidates remain truthfully
@@ -486,13 +534,13 @@ Updated: 2026-08-09
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
   `not_converged` at the same time.
-- Field-check the deployed obstacle-detour correction: pure yaw at
-  the configured turn rate, lateral response up to 0.20 m/s, one clear-route
-  patrol and one deliberately obstructed detour. Promote it only if the trace
-  shows `DetourPath`, zero-forward heading alignment, effective forward gait
-  and successful return to the original route. The next three patrols have
-  bounded development incident capture enabled; after `BLOCKED` or `FAULT`,
-  allow the 5-second post-trigger window to seal before reviewing the Mac copy.
+- Build and deploy the owned navigation-orchestration release, then run one
+  clear-route patrol and one deliberately obstructed patrol. The clear route
+  must remain on MPPI (or use only a bounded MPPI retry); the obstructed route
+  must show costmap obstruction evidence, `DetourPath`, zero-forward heading
+  alignment, effective forward gait, RPP success at the rejoin anchor and an
+  explicit return to MPPI. After `BLOCKED` or `FAULT`, allow the 5-second
+  post-trigger window to seal before reviewing the Mac copy.
 
 ## 2026-08-06 three-end architecture correction
 

@@ -51,11 +51,13 @@ to produce monotonic progress. A transient localization dropout first enters
 `HOLDING`; only a sustained dropout cancels the Nav2 goal. Recovery waits for a
 stable localization window, clears stale local costmap data and resends only
 the unfinished route suffix. Nav2 MPPI and Collision Monitor own local obstacle
-avoidance. If FollowPath cannot progress, a bounded A* search over Nav2's
-already footprint-inflated rolling costmap chooses a short path to a future
-route anchor; MPPI tracks that path and then the unfinished route. It makes at
-most two attempts and reports `BLOCKED` instead of waiting indefinitely. The
-final Unitree bridge only validates authorization, command
+avoidance. A FollowPath failure is classified before recovery: a clear route
+gets a bounded MPPI suffix retry, persistent command without measured motion
+is an actuation fault, and only consecutive occupied samples on the recorded
+route authorize a bounded A* detour. RPP owns only the short current-to-anchor
+detour; after it succeeds, MPPI receives the unfinished recorded-route suffix.
+Only verified route obstruction can report `BLOCKED`. The final Unitree bridge
+only validates authorization, command
 freshness, finite values and absolute hardware limits; it is not a duplicate
 obstacle planner.
 

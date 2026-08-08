@@ -91,6 +91,9 @@ const patrolStepStateText = runtime => {
     STARTING: '请求确认中',
     PATROLLING: runtime.reason === 'LOCAL_DETOUR_ACCEPTED' ? '绕障中' : '巡检中',
     REPLANNING: '规划绕障中',
+    DETOURING: '提交局部绕行中',
+    REJOINING: '交还 MPPI 中',
+    RETRYING: 'MPPI 自动重试中',
     HOLDING: '定位等待中',
     RESUMING: '恢复路线中',
     COMPLETED: '已完成',
@@ -437,7 +440,10 @@ function renderNavigation() {
   const selectedRuntimeReady = assetReady && runtimeMatchesCandidate;
   const operation = (navigation.operations || [])[0];
   const operationBusy = ['accepted', 'running'].includes(operation?.state);
-  const patrolRunning = ['STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING'].includes(runtime.state);
+  const patrolRunning = [
+    'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
+    'DETOURING', 'REJOINING', 'RETRYING',
+  ].includes(runtime.state);
   $('navigationCandidate').textContent = candidate ? `${candidate.map_version} · ${candidate.route_id}` : '等待地图与路线';
   $('runtimeBadge').textContent = runtimeRunning ? '运行中' : '未启动';
   $('runtimeBadge').className = runtimeRunning ? 'online' : '';
@@ -450,7 +456,8 @@ function renderNavigation() {
   $('patrolState').textContent = runtime.state || '—';
   $('patrolReason').textContent = runtime.operatorMessage || runtime.reason || '尚未启动';
   $('finalVelocity').textContent = `${Number(command.vx || 0).toFixed(2)} m/s`;
-  $('motionAuthority').textContent = runtime.motionAuthorized ? '运动权已打开' : '运动权关闭';
+  const controller = runtime.activeController || runtime.selectedController;
+  $('motionAuthority').textContent = `${runtime.motionAuthorized ? '运动权已打开' : '运动权关闭'}${controller ? ` · ${controller}` : ''}`;
   $('routeProgress').textContent = `${Number(runtime.routeProgressPercent || 0).toFixed(0)}%`;
   $('remainingRoute').textContent = runtime.remainingRoutePointCount == null
     ? '尚未开始' : `剩余 ${runtime.remainingRoutePointCount} 个路径点`;
@@ -477,6 +484,9 @@ function renderNavigation() {
   if (runtime.state === 'STARTING') guidance = '开始请求正在由 Nav2 确认；这还不代表整条路线已经完成。';
   if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
   if (runtime.state === 'REPLANNING') guidance = '原路线局部受阻，正在根据当前代价地图规划绕行并接回前方路线。';
+  if (runtime.state === 'DETOURING') guidance = '代价地图已确认原路线前方被占用，正只向 RPP 提交到重入点的局部绕行路径。';
+  if (runtime.state === 'REJOINING') guidance = 'RPP 已到达重入点，正将未完成的录制路线交还 MPPI。';
+  if (runtime.state === 'RETRYING') guidance = '原路线前方没有确认障碍，正从当前进度自动重试 MPPI，不会误入绕行。';
   if (runtime.state === 'PATROLLING' && runtime.reason === 'LOCAL_DETOUR_ACCEPTED') guidance = '已找到绕行路径：机器狗会先对准绕行方向，再以有效步态接回原路线。';
   if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
@@ -534,11 +544,12 @@ async function navigationAction(action) {
 function fillProfile(profile) {
   state.navigationProfile = profile;
   $('straightSpeed').value = profile.motion.straightSpeedMps;
+  $('detourSpeed').value = profile.motion.detourSpeedMps;
   $('turnSpeed').value = profile.motion.turnSpeedRadps;
   $('lateralSpeed').value = profile.motion.lateralSpeedMps;
   $('slowHalfWidth').value = profile.avoidance.slowZoneHalfWidthM;
   $('slowdownRatio').value = profile.avoidance.slowdownRatio;
-  $('blockedDecision').value = profile.avoidance.blockedDecisionS;
+  $('progressTimeout').value = profile.recovery.progressTimeoutS;
   $('dropoutGrace').value = profile.localization.dropoutGraceS;
   $('rejoinLookahead').value = profile.avoidance.rejoinLookaheadM;
   $('stopFront').value = profile.avoidance.stopZoneFrontM;
@@ -549,6 +560,10 @@ function fillProfile(profile) {
   $('controllerFrequency').value = profile.controller.frequencyHz;
   $('mppiTimeSteps').value = profile.controller.timeSteps;
   $('mppiBatchSize').value = profile.controller.batchSize;
+  $('mppiRetryLimit').value = profile.recovery.mppiRetryLimit;
+  $('detourAttemptLimit').value = profile.recovery.detourAttemptLimit;
+  $('obstructionCost').value = profile.avoidance.obstructionCostThreshold;
+  $('obstructionSamples').value = profile.avoidance.obstructionMinSamples;
   $('profileMessage').textContent = `当前第 ${profile.revision} 版`;
 }
 
@@ -561,11 +576,12 @@ async function saveProfile() {
   if (!state.navigationProfile) return;
   const profile = JSON.parse(JSON.stringify(state.navigationProfile));
   profile.motion.straightSpeedMps = Number($('straightSpeed').value);
+  profile.motion.detourSpeedMps = Number($('detourSpeed').value);
   profile.motion.turnSpeedRadps = Number($('turnSpeed').value);
   profile.motion.lateralSpeedMps = Number($('lateralSpeed').value);
   profile.avoidance.slowZoneHalfWidthM = Number($('slowHalfWidth').value);
   profile.avoidance.slowdownRatio = Number($('slowdownRatio').value);
-  profile.avoidance.blockedDecisionS = Number($('blockedDecision').value);
+  profile.recovery.progressTimeoutS = Number($('progressTimeout').value);
   profile.localization.dropoutGraceS = Number($('dropoutGrace').value);
   profile.avoidance.rejoinLookaheadM = Number($('rejoinLookahead').value);
   profile.avoidance.stopZoneFrontM = Number($('stopFront').value);
@@ -576,6 +592,10 @@ async function saveProfile() {
   profile.controller.frequencyHz = Number($('controllerFrequency').value);
   profile.controller.timeSteps = Number($('mppiTimeSteps').value);
   profile.controller.batchSize = Number($('mppiBatchSize').value);
+  profile.recovery.mppiRetryLimit = Number($('mppiRetryLimit').value);
+  profile.recovery.detourAttemptLimit = Number($('detourAttemptLimit').value);
+  profile.avoidance.obstructionCostThreshold = Number($('obstructionCost').value);
+  profile.avoidance.obstructionMinSamples = Number($('obstructionSamples').value);
   try {
     const result = await post('/api/v1/navigation/profile', {profile});
     fillProfile(result.profile);

@@ -8,7 +8,8 @@ root = Path(sys.argv[1])
 required = {
     "index.html": [
         "trajectory", "cloud", "cameraFrame", "recordButton", "app.js",
-        "巡检操作向导", "参数中心", "诊断中心", "blockedDecision",
+        "巡检操作向导", "参数中心", "诊断中心", "progressTimeout",
+        "detourSpeed", "mppiRetryLimit", "obstructionCost",
         "发布所选地图与路线到机器狗", "自动清理并恢复",
         "研发事故记录", "incidentTimeline", "diagnosticMode",
     ],
@@ -22,6 +23,9 @@ required = {
         "/api/v1/incidents", "/api/v1/diagnostics/profile", "drawIncidentPlan",
         "save-map-name", "fmtLocalTime", "运行旧地图",
         "profile.remaining_patrols <= 1 ? 'next1' : 'next3'",
+        "profile.recovery.progressTimeoutS",
+        "profile.avoidance.obstructionCostThreshold",
+        "DETOURING", "REJOINING", "RETRYING", "activeController",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",
