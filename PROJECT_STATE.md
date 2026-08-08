@@ -125,14 +125,14 @@ Updated: 2026-08-08
 
 ## Current deployed release
 
-- Active V2 implementation commit: `f84029b49a2aefefb4fdd46cf994bddeaf09815d`.
+- Active V2 implementation commit: `f727b68d38275383f1c5ceb8aca33dc4e8f53dbd`.
 - Robot image config digest:
-  `sha256:5bf2737b34d7bc326c97012f4284f92a3fe572d73acf369f15b0cada9c7a9e37`
+  `sha256:0553292ae9c376be999f879824e950002df3afd69741b1ad64c2dd3c9297e447`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260808-detour-r2`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260808-evidence-detour-r3`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The active release archive SHA-256 is
-  `78e7d170ccabc7ab459452aa9ca0600faa95eb6e0d7049037d080882ef11dd84`.
+  `48a91d5840b3e7591d5eb9520ec747bb2719736577035109353322cf46bebe9a`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -311,7 +311,44 @@ Updated: 2026-08-08
   command motion; physical clear-route and obstacle-detour acceptance remain
   pending.
 
-## 2026-08-08 temporary development incident replay (built, not deployed)
+## 2026-08-08 latest obstacle incident and deployed correction
+
+- The latest patrol used replacement-sensor map `map-71b045489e8a`, a
+  15.816 m generation-3 route with 57 source waypoints and 121 runtime points.
+  It ran for 42.4 seconds and reached runtime index 94/121 (78.3 percent).
+  Fixed-map localization stayed `TRACKING` at roughly 0.896 confidence.
+- MPPI failed near the placed obstacle with `Optimizer fail to compute path`.
+  The bounded A* planner found a detour in 4.28 ms and selected route index 107
+  as the rejoin anchor. Regulated Pure Pursuit started and the robot advanced
+  roughly 0.375 m during that detour window, but 29 final command samples were
+  only 0.17 m/s: the configured 0.20 m/s detour was multiplied by the 0.85
+  SlowZone ratio and fell below the field-proven effective Go2 gait floor.
+- A second independent defect was present throughout the patrol. The rolling
+  VoxelLayer observed the sensor origin at about -0.29 to -0.32 m while its
+  configured lower Z bound was only -0.15 m. Nav2 repeatedly reported that it
+  could not raytrace from the sensor origin. Obstacles could be marked but not
+  cleared normally, allowing stale local-costmap obstacles to persist. The
+  terminal outcome was `Failed to make progress`; StopZone and localization
+  loss were not the cause.
+- Commit `f727b68` raises the DetourPath input gait to 0.24 m/s so the existing
+  0.85 SlowZone produces 0.204 m/s after the full command chain. It also sets
+  the VoxelLayer vertical range to -0.60 through 1.48 m, covering both the
+  measured sensor origin and the configured 1.45 m obstacle ceiling. Contract
+  tests apply both navigation overlays and prove these bounds remain valid.
+- Release `v2-edge-20260808-evidence-detour-r3` combines that correction with
+  the bounded incident recorder. The ARM64 manifest-list digest is
+  `sha256:29e0706c65a858a26a210d969a07b35f23e1fe556f4e508b113b267a2a7edfff`;
+  the robot image config digest is
+  `sha256:0553292ae9c376be999f879824e950002df3afd69741b1ad64c2dd3c9297e447`.
+  The 1,171,185,664-byte release archive passed SHA-256 on both Mac and robot.
+- The managed restart completed after the stable-NTP gate. The service is
+  `enabled` and `active`, Livox reports about 10 Hz, the incident recorder and
+  sole navigation supervisor are alive, and Nav2 plus the Unitree motion bridge
+  remain stopped. Motion authorization is closed and the final command is
+  zero; deployment did not command motion. Physical obstacle-detour acceptance
+  remains pending.
+
+## 2026-08-08 temporary development incident replay (deployed)
 
 - The evidence gap exposed by the second obstacle test is now explicit: the
   deployed JSONL flight trace records PointCloud2 metadata but not XYZ bytes,
@@ -361,11 +398,18 @@ Updated: 2026-08-08
   In-image checks proved the recorder entry point and FFmpeg are installed,
   the production default disables heavy capture, the planner diagnostics
   overlay is present and a real `rosbag2_py` MCAP file can be written.
-- Neither image has been deployed and no robot connection or motion occurred
-  for this work. Before field use, deploy through the existing checksummed
-  Mac-to-robot release path, enable development mode for one patrol, and
+- The robot portion is deployed in release
+  `v2-edge-20260808-evidence-detour-r3`; the commissioned Mac continues to run
+  the same workstation source natively at port 8080. The API and browser now
+  expose the profile and incident history successfully. Development capture is
+  enabled for the next three patrols with the preset 15-second pre-trigger,
+  5-second post-trigger, 10 Hz point cloud, local costmap, planner detail and
+  camera window. The patrol counter automatically restores production mode.
+- Immediately after deployment, the complete edge container used about 405 MiB
+  of 15.03 GiB. That is a static receipt only; the first captured patrol must
   compare CPU, memory, disk throughput, LiDAR/odometry rate, controller cadence
-  and temperature against the production-mode baseline.
+  and temperature against the production baseline before the recorder is
+  accepted for continued development use.
 
 ## 2026-08-08 latest-map selection and stale-runtime correction
 
@@ -418,7 +462,9 @@ Updated: 2026-08-08
   the configured turn rate, lateral response up to 0.20 m/s, one clear-route
   patrol and one deliberately obstructed detour. Promote it only if the trace
   shows `DetourPath`, zero-forward heading alignment, effective forward gait
-  and successful return to the original route.
+  and successful return to the original route. The next three patrols have
+  bounded development incident capture enabled; after `BLOCKED` or `FAULT`,
+  allow the 5-second post-trigger window to seal before reviewing the Mac copy.
 
 ## 2026-08-06 three-end architecture correction
 
@@ -548,9 +594,11 @@ engineering evidence and should not be treated as the field navigation map.
 
 ## Next experiment (supersedes the older paragraph above)
 
-Use the guided UI with the currently selected `map-648e606fb9a5` to verify in
+Use the guided UI with the currently selected `map-71b045489e8a` to verify in
 order: one clean localization/Nav2 start without timeout or UDP conflict,
 localization convergence, first motion latency, 0.60 m/s clear-route travel,
 passage through a normal corridor, specific `BLOCKED` behavior, pause/restart,
-and route-suffix recovery after one controlled localization interruption.
-Record each result before calling the release field-accepted.
+and the corrected obstacle detour returning to the recorded route. If a run
+blocks or faults, wait for the evidence bundle to seal and inspect its point
+cloud, local costmap, planner search, commands and camera window before changing
+parameters. Record each result before calling the release field-accepted.
