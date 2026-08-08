@@ -614,6 +614,16 @@ const diagnosticModeLabels = {
 function fillDiagnosticProfile(profile) {
   state.diagnosticProfile = profile;
   $('diagnosticMode').value = profile.mode;
+  if (profile.mode === 'production') {
+    $('diagnosticLifetime').value = 'manual';
+  } else if (profile.remaining_patrols != null) {
+    $('diagnosticLifetime').value = profile.remaining_patrols <= 1 ? 'next1' : 'next3';
+  } else if (profile.expires_at) {
+    $('diagnosticLifetime').value = '60m';
+  } else {
+    $('diagnosticLifetime').value = 'manual';
+  }
+  $('diagnosticLifetime').disabled = profile.mode === 'production';
   $('diagnosticModeBadge').textContent = diagnosticModeLabels[profile.mode] || profile.mode;
   $('diagnosticModeBadge').className = profile.mode === 'production' ? '' : 'online';
   const expiry = profile.expires_at ? ` · ${profile.expires_at} 到期` : '';
