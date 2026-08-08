@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Verified external facts
 
@@ -8,7 +8,8 @@ Updated: 2026-08-07
 - Robot host: JetPack 5 / Ubuntu 20.04 / L4T R35.3.1; Docker was previously
   verified on the robot.
 - Target robot userspace: one Linux ARM64 Ubuntu 22.04 / ROS 2 Humble container.
-- Sensor: Livox MID-360. Camera: Z1Pro.
+- Sensor: replacement Livox MID-360S `ARMCP6B0035634` at `192.168.1.134`.
+  Camera: Z1Pro.
 - Cloud mapping: existing Alibaba Cloud Ubuntu 24.04 x86_64 / ROS 2 Jazzy GLIM
   worker. A stationary native PointCloud2 + Imu smoke dataset previously
   completed GLIM and produced 12 review artifacts. Dynamic production mapping
@@ -123,19 +124,38 @@ Updated: 2026-08-07
 
 ## Current deployed release
 
-- Active V2 implementation commit: `a50a3fe278a967911ae3606edb5f5dfa3f6338d3`.
+- Active V2 implementation commit: `431a6bfdb409fe2ea74df4ebc85dc3271d1a57f3`.
 - Robot image config digest:
-  `sha256:dd5744f8f8877a170ae8dc732e8b9b7ab237f77e5c8847699e42eb88b5681799`
+  `sha256:92ea15059ff393126b45539543a770bb5ae3253f120ea2391e194f7611042af2`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260807-delivery-r2`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260808-mid360s-r1`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
-- The delivery release archive SHA-256 is
-  `c36c8fc91245e92c83b0ffa6840b0706be744feb046c770274a36afda5ff26a7`.
+- The active release archive SHA-256 is
+  `a571a35a41ea80e263c1c5a990aa548ba51f53852071534a9e18a6236947559f`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
   The final restart receipt recorded `gogoguard-edge.service: Succeeded`, then
   passed the stable-NTP gate and returned to `active` without a failure result.
+- On 2026-08-08 the failed original MID-360 was replaced by MID-360S
+  `ARMCP6B0035634`. A non-mutating SDK identity probe found it at
+  `192.168.1.134`; a direct ROS probe measured about 10.06 Hz point cloud and
+  200 Hz IMU. The operator confirmed the rigid mount and installed angle are
+  unchanged, so the commissioned 32.242667 degree transform is retained in a
+  new sensor-bound calibration record instead of pretending the replacement
+  is the original hardware.
+- Release `v2-edge-20260808-mid360s-r1` moves the deployed Livox network config
+  out of the immutable source snapshot, binds the runtime to the new IP and
+  sensor identity, and carries the replacement calibration digest
+  `c9b5ade49f128e88df4868c95ad065fafac450217c829497066f2cf491e4a59b`.
+  The ARM64 image manifest-list digest is
+  `sha256:ee40e8b1fc54ec7331ea5b7cc6da6e8bc6e1f5d1aa04588034e175b891981f88`.
+  After checksummed installation and stable-NTP restart, the service remained
+  `enabled` and `active`; live ROS measurements were about 10.06 Hz point
+  cloud, 200 Hz IMU and 10.06 Hz FAST-LIO odometry. The device API reported
+  online, the calibration publisher reported the new serial and digest, and
+  Nav2 plus the Unitree motion bridge remained stopped. No motion command was
+  sent.
 - The first delivery-runtime start for generation-3 `map-648e606fb9a5`
   exposed an integration regression before localization or planning began:
   its 0.60 m/s route profile was rejected by a retained 0.50 m/s runtime
@@ -235,6 +255,11 @@ Updated: 2026-08-07
 
 ## Known field follow-ups
 
+- Historical recordings, maps and navigation candidates remain truthfully
+  bound to the original sensor `ARMCP1U0038561`. They are not automatically
+  authorized for the replacement sensor. Either record a new map with
+  `ARMCP6B0035634`, or implement and explicitly approve a geometry-equivalent
+  sensor-replacement re-publication contract before reusing an old map.
 - Collect a cold-boot receipt for the prepared Livox/NTP correction.
 - Field-test localization and patrol on outdoor map `map-28acad0c6b0e`; the
   map and route are prepared but its Nav2 runtime has not yet been started.
