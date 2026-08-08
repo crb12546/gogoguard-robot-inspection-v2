@@ -125,12 +125,16 @@ runtime trace:
 Historical incident replays are regression fixtures. Offline success never
 replaces the final clear-route and obstructed-route robot receipts.
 
-## Local implementation status
+## Deployment status
 
 The V2 branch now owns `go2_nav2_runtime` under `modules/navigation/ros`
 instead of reconstructing product behavior with build-time overlays. The
 Unitree receiver delivery limits are likewise an owned `device_io` source.
 The failure classifier, route-obstruction proof and controller handoff have
 offline replay tests, including the `map-8ddcf3f8c078` evidence. This code has
-not yet replaced the deployed `evidence-detour-r3` image and is not field
-accepted until the acceptance scenarios above produce robot receipts.
+replaced `evidence-detour-r3` on the robot as
+`v2-edge-20260809-orchestration-r2`. Static sensor, service and motion-bridge
+startup receipts passed. A wrong-environment localization attempt correctly
+remained unauthorized and sent no patrol goal. The navigation slice is not
+field accepted until the operator selects a matching map and the acceptance
+scenarios above produce robot receipts.

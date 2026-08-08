@@ -125,14 +125,14 @@ Updated: 2026-08-09
 
 ## Current deployed release
 
-- Active V2 implementation commit: `f727b68d38275383f1c5ceb8aca33dc4e8f53dbd`.
+- Active V2 implementation commit: `a95a3c571d8917446a22a6f1b2b0fedbc4d81d95`.
 - Robot image config digest:
-  `sha256:0553292ae9c376be999f879824e950002df3afd69741b1ad64c2dd3c9297e447`
+  `sha256:e646d5541cffdb16e9f7d2987b74f89cceacc63985437118029153ccca841260`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260808-evidence-detour-r3`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260809-orchestration-r2`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The active release archive SHA-256 is
-  `48a91d5840b3e7591d5eb9520ec747bb2719736577035109353322cf46bebe9a`.
+  `f1b6a77cfa7f6233fbb30600e563af9a752f0a307e812f3fea0859fe79493088`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -467,7 +467,7 @@ Updated: 2026-08-09
   timestamps, rename controls and an enabled patrol action only after all
   three map identities matched.
 
-## 2026-08-09 navigation orchestration correction (local; not deployed)
+## 2026-08-09 navigation orchestration correction (deployed; patrol acceptance pending)
 
 - The latest `map-8ddcf3f8c078` evidence changes the diagnosis from a generic
   obstacle problem to an orchestration defect. MPPI followed the route for
@@ -500,20 +500,33 @@ Updated: 2026-08-09
   provenance.
 - Navigation-focused offline tests cover the historical incident, clear-route
   retry, verified obstruction, RPP-to-MPPI handoff, actuation stall and legacy
-  profile migration. The complete repository passes 68 tests, Python and
+  profile migration. The complete repository passes 69 tests, Python and
   JavaScript syntax compilation, generated-knowledge consistency, UI smoke
   and container contract checks.
-- A real ARM64 build completed as
-  `gogoguard-robot-inspection:v2-edge-20260809-orchestration-r1`, local manifest
-  and image ID
-  `sha256:de52ff77f8bac92e39877d3944214314aede0d88e55f88b0cfe0a2769c1aa111`
-  (ARM64, 1,171,223,750 bytes).
+- The deployed ARM64 correction is
+  `gogoguard-robot-inspection:v2-edge-20260809-orchestration-r2`; its local OCI
+  manifest-list digest is
+  `sha256:9d693cfc3e78ebc37b22d1e16f5b176d4cfd5f9a9d5831d5bacaf505739253a1`
+  and the robot-loaded ARM64 config digest is
+  `sha256:e646d5541cffdb16e9f7d2987b74f89cceacc63985437118029153ccca841260`.
   All ten ROS packages compiled. An in-image import and Nav2 profile check
   reported `MPPI -> RESUME_MPPI_SUFFIX`, DetourPath 0.40 m/s, and the final
   Unitree binary contains the 0.60/0.20 m/s contract, and the incident recorder
-  recognizes all three new recovery states. The robot is still
-  running the deployed `evidence-detour-r3` behavior above; no deployment or
-  robot motion occurred during this refactor.
+  recognizes all three new recovery states.
+- The first `orchestration-r1` robot start exposed a lifecycle defect before
+  Nav2 launch: `StopMove` was called while the dog could still be outside Sport
+  mode and returned `-1`, so the receiver correctly failed its zero-motion
+  readiness check with exit 8. Release r2 prepares explicit StandUp and
+  BalanceStand first, then requires StopMove and UDP bind before advertising
+  readiness. A real r2 start passed; the motion bridge and Nav2 runtime stayed
+  alive while the final command remained zero.
+- Static post-deployment rates were approximately 10.06 Hz Livox point cloud,
+  200 Hz IMU and 10.07 Hz FAST-LIO odometry. The migrated navigation profile
+  was explicitly saved as V2 revision 2 with a 5.0-second progress window.
+  Localization against `map-8ddcf3f8c078` did not converge because the operator
+  confirmed the robot was not in that map's environment. No patrol goal was
+  submitted. The wrong-map runtime was then stopped; both Nav2 and the motion
+  bridge are inactive while the edge service and sensors remain online.
 
 ## Known field follow-ups
 
@@ -534,7 +547,7 @@ Updated: 2026-08-09
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
   `not_converged` at the same time.
-- Build and deploy the owned navigation-orchestration release, then run one
+- On the operator-selected matching map, run one
   clear-route patrol and one deliberately obstructed patrol. The clear route
   must remain on MPPI (or use only a bounded MPPI retry); the obstructed route
   must show costmap obstruction evidence, `DetourPath`, zero-forward heading
