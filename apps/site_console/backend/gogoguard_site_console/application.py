@@ -14,7 +14,7 @@ from gogoguard_transfer import EdgeArtifactExchange
 
 class InspectionApplication:
     def __init__(self, *, data_root: Path, mode: str, map_worker: str, robot_id: str, site_id: str,
-                 topics: dict[str, str], sensor_id: str = "ARMCP1U0038561", cloud: dict | None = None,
+                 topics: dict[str, str], sensor_id: str = "ARMCP6B0035634", cloud: dict | None = None,
                  camera: dict | None = None) -> None:
         data_root.mkdir(parents=True, exist_ok=True)
         self.data_root = data_root

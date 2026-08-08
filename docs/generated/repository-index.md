@@ -31,7 +31,7 @@ this index describes code state and never implies robot acceptance.
 - Entrypoints: `gogoguard_calibration.mount_tf_publisher:main`
 - Consumes: go2.mount_calibration.v3, go2.sensor_internal_calibration.v1
 - Produces: base_link -> lidar_link, lidar_link -> lidar_imu
-- Provenance: pure calibration subset ported from old capability commit 3a7597c; source snapshot retained for diff; LLYJ0001/ARMCP1U0038561 fixed calibration
+- Provenance: pure calibration subset ported from old capability commit 3a7597c; source snapshot retained for diff; LLYJ0001/ARMCP1U0038561 original fixed calibration; operator-confirmed unchanged rigid mounting geometry transferred to replacement MID-360S ARMCP6B0035634 on 2026-08-08
 
 ### `contracts`
 
@@ -54,11 +54,11 @@ this index describes code state and never implies robot acceptance.
 ### `device_io`
 
 - Manifest: `architecture/modules/device_io.json`
-- Code roots: `modules/device_io`, `config/robot/mediamtx.yml`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`, `third_party/locked_stack/src/go2_cmd_vel_bridge`, `third_party/locked_stack/src/unitree_api`
+- Code roots: `modules/device_io`, `config/robot/livox-mid360s.json`, `config/robot/mediamtx.yml`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`, `third_party/locked_stack/src/go2_cmd_vel_bridge`, `third_party/locked_stack/src/unitree_api`
 - Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
 - Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, safety-filtered Twist
 - Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, Unitree SDK2 Move and StopMove
-- Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release; field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP
+- Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release; field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP; commissioned replacement MID-360S ARMCP6B0035634 at 192.168.1.134; live probe verified 10 Hz point cloud and 200 Hz IMU on 2026-08-08
 
 ### `evidence`
 

@@ -8,5 +8,5 @@
   "dependsOn": ["contracts"],
   "consumes": ["go2.mount_calibration.v3", "go2.sensor_internal_calibration.v1"],
   "produces": ["base_link -> lidar_link", "lidar_link -> lidar_imu"],
-  "sourceProvenance": ["pure calibration subset ported from old capability commit 3a7597c; source snapshot retained for diff", "LLYJ0001/ARMCP1U0038561 fixed calibration"]
+  "sourceProvenance": ["pure calibration subset ported from old capability commit 3a7597c; source snapshot retained for diff", "LLYJ0001/ARMCP1U0038561 original fixed calibration", "operator-confirmed unchanged rigid mounting geometry transferred to replacement MID-360S ARMCP6B0035634 on 2026-08-08"]
 }

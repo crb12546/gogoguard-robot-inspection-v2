@@ -9,7 +9,7 @@ set -u
 readonly APP_ROOT=/opt/gogoguard/app
 readonly LOG_ROOT=/var/lib/gogoguard/runtime-logs
 readonly ROBOT_ID=${GOGOGUARD_ROBOT_ID:-LLYJ0001}
-readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP1U0038561}
+readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP6B0035634}
 readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
 mkdir -p "$LOG_ROOT"
 
@@ -62,12 +62,12 @@ setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -p output_data_type:=0 \
   -p frame_id:=lidar_link \
   -p imu_frame_id:=lidar_imu \
-  -p user_config_path:="$APP_ROOT/third_party/locked_stack/src/livox_ros_driver2/config/MID360s_config.json" \
+  -p user_config_path:="$APP_ROOT/config/robot/livox-mid360s.json" \
   >"$LOG_ROOT/livox.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
 setsid gogoguard-mount-tf --ros-args \
-  -p calibration_path:="$APP_ROOT/modules/calibration/gogoguard_calibration/config/go2-u2-mid360.json" \
+  -p calibration_path:="$APP_ROOT/modules/calibration/gogoguard_calibration/config/go2-u2-mid360s-ARMCP6B0035634.json" \
   -p robot_id:="$ROBOT_ID" \
   -p sensor_id:="$SENSOR_ID" \
   >"$LOG_ROOT/calibration.log" 2>&1 &

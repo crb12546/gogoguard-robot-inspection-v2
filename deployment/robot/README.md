@@ -21,7 +21,7 @@ revisions are recorded under `dependencies/`.
 
 The connected production target was read-only audited as Orin NX 16 GB,
 Ubuntu 20.04.5 / L4T R35.3.1 with Docker 24. The Humble userspace stays inside
-the container. MID-360 at `192.168.1.161` and its robot-side host address
+the container. MID-360S at `192.168.1.134` and its robot-side host address
 `192.168.1.5` are both present. Robot installation still requires sudo because
 the `unitree` account cannot access the Docker daemon directly.
 

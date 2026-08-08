@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--map-worker", choices=("none", "demo", "ssh"), default="demo")
     parser.add_argument("--data-root", type=Path, default=Path("runtime-data"))
     parser.add_argument("--robot-id", default="go2-100tops-01")
-    parser.add_argument("--sensor-id", default="ARMCP1U0038561")
+    parser.add_argument("--sensor-id", default="ARMCP6B0035634")
     parser.add_argument("--site-id", default="local-first-site")
     parser.add_argument("--config", type=Path, default=Path("config/default.json"))
     parser.add_argument("--static-root", type=Path, default=Path("apps/site_console/frontend"))

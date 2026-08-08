@@ -30,6 +30,27 @@ class CalibrationMigrationTest(unittest.TestCase):
         self.assertAlmostEqual(mount.raw["quality"]["pitch_estimate_deg"], 32.242667)
         self.assertEqual(mount.transform.translation_xyz_m, (0.235, 0.0, 0.125))
 
+    def test_replacement_mid360s_keeps_geometry_with_new_identity(self) -> None:
+        contract = CoordinateContract.load(CONFIG / "coordinate_contract.json")
+        original = MountCalibration.load(
+            CONFIG / "go2-u2-mid360.json", require_validated=True
+        )
+        replacement = MountCalibration.load(
+            CONFIG / "go2-u2-mid360s-ARMCP6B0035634.json",
+            require_validated=True,
+        )
+        replacement.assert_compatible(
+            contract,
+            robot_id="LLYJ0001",
+            sensor_id="ARMCP6B0035634",
+            require_validated=True,
+        )
+        self.assertEqual(replacement.transform, original.transform)
+        self.assertEqual(
+            replacement.raw["provenance"]["replacement"]["previous_sensor_id"],
+            "ARMCP1U0038561",
+        )
+
     def test_internal_imu_has_factory_translation_and_identity_rotation(self) -> None:
         internal = SensorInternalCalibration.load(
             CONFIG / "mid360_internal_calibration.json", require_validated=True
@@ -38,7 +59,10 @@ class CalibrationMigrationTest(unittest.TestCase):
         self.assertEqual(internal.transform.rotation_xyzw, (0.0, 0.0, 0.0, 1.0))
 
     def test_mount_quaternion_encodes_the_frozen_pitch_only(self) -> None:
-        mount = MountCalibration.load(CONFIG / "go2-u2-mid360.json", require_validated=True)
+        mount = MountCalibration.load(
+            CONFIG / "go2-u2-mid360s-ARMCP6B0035634.json",
+            require_validated=True,
+        )
         x, y, z, w = mount.transform.rotation_xyzw
         pitch = math.degrees(2.0 * math.atan2(y, w))
         self.assertAlmostEqual(pitch, 32.242667, places=5)
@@ -51,7 +75,10 @@ class CalibrationMigrationTest(unittest.TestCase):
             mount.assert_compatible(contract, robot_id="another-go2", sensor_id="ARMCP1U0038561")
 
     def test_fastlio_output_override_matches_composed_calibration(self) -> None:
-        mount = MountCalibration.load(CONFIG / "go2-u2-mid360.json", require_validated=True)
+        mount = MountCalibration.load(
+            CONFIG / "go2-u2-mid360s-ARMCP6B0035634.json",
+            require_validated=True,
+        )
         internal = SensorInternalCalibration.load(
             CONFIG / "mid360_internal_calibration.json", require_validated=True
         )
