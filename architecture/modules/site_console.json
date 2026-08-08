@@ -2,7 +2,7 @@
   "id": "site_console",
   "responsibility": "Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs",
   "runtime": ["robot", "workstation", "browser"],
-  "status": "guided_delivery_workflow_truthful_operation_and_detour_status_browser_verified_deploy_pending",
+  "status": "guided_delivery_workflow_truthful_operation_and_detour_status_deployed_browser_verified",
   "codeRoots": ["apps/site_console"],
   "entrypoints": ["gogoguard_site_console.__main__:main"],
   "dependsOn": ["contracts", "device_io", "data_capture", "transfer", "map_factory", "route", "localization", "navigation", "evidence"],

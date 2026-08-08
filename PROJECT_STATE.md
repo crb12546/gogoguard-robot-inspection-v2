@@ -117,21 +117,22 @@ Updated: 2026-08-08
   camera-only benchmark.
 - The camera preview is a `device_io` observation capability. Versioned patrol
   snapshots/video remain a separate future `inspection` responsibility.
-- No V2 code has controlled robot motion.
+- V2 has controlled robot motion during the recorded field patrols documented
+  below; release installation and static acceptance do not command motion.
 - First release target: live device status, 2D trajectory, 3D point-cloud
   preview, start/stop recording, sealed RecordingBundle, cloud map job, and
   visible 2D/3D result.
 
 ## Current deployed release
 
-- Active V2 implementation commit: `431a6bfdb409fe2ea74df4ebc85dc3271d1a57f3`.
+- Active V2 implementation commit: `f84029b49a2aefefb4fdd46cf994bddeaf09815d`.
 - Robot image config digest:
-  `sha256:92ea15059ff393126b45539543a770bb5ae3253f120ea2391e194f7611042af2`
+  `sha256:5bf2737b34d7bc326c97012f4284f92a3fe572d73acf369f15b0cada9c7a9e37`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260808-mid360s-r1`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260808-detour-r2`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The active release archive SHA-256 is
-  `a571a35a41ea80e263c1c5a990aa548ba51f53852071534a9e18a6236947559f`.
+  `78e7d170ccabc7ab459452aa9ca0600faa95eb6e0d7049037d080882ef11dd84`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -275,7 +276,7 @@ Updated: 2026-08-08
   `vx >= 0.20 m/s`; only a bounded A* detour selects Nav2 Regulated Pure Pursuit,
   which can rotate with `vx=0` to the detour heading and then advance at the
   effective 0.20 m/s gait before rejoining the recorded route.
-- The pending V2 overlay aligns the Unitree receiver with the commissioned
+- The deployed V2 overlay aligns the Unitree receiver with the commissioned
   0.60 m/s forward and 0.20 m/s lateral planner, smoother and final-command
   caps; both values now survive the complete command chain. The
   official SDK exposes independent `Move(vx, vy, vyaw)` components but does not
@@ -298,9 +299,17 @@ Updated: 2026-08-08
 - A real browser refresh against `http://127.0.0.1:8080/` displayed the live
   blocked candidate as `BLOCKED` / `路线受阻`, retained `定位可用`, and described
   the latest completed patrol operation as only `巡检请求已提交`; this verifies
-  that request receipt is no longer presented as route completion. These
-  changes are not deployed to the robot and this correction has not commanded
-  motion.
+  that request receipt is no longer presented as route completion.
+- Release `v2-edge-20260808-detour-r2` was checksummed on the Mac and robot,
+  loaded on the ARM64 target and activated through the managed systemd restart.
+  The service returned to `active` and `enabled` after the stable-NTP gate. The
+  running container reports the expected image/config digest, contains
+  `DetourPath` and the `0.60/0.20 m/s` Unitree receiver contract, and used about
+  351 MiB during the receipt. Both robot and workstation APIs reported the
+  replacement MID-360S and odometry at about 10 Hz, the navigation supervisor
+  running, and Nav2, the motion bridge and UDP 5005 stopped. Deployment did not
+  command motion; physical clear-route and obstacle-detour acceptance remain
+  pending.
 
 ## Known field follow-ups
 
@@ -321,7 +330,7 @@ Updated: 2026-08-08
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
   `not_converged` at the same time.
-- Deploy the built obstacle-detour correction, then field-check pure yaw at
+- Field-check the deployed obstacle-detour correction: pure yaw at
   the configured turn rate, lateral response up to 0.20 m/s, one clear-route
   patrol and one deliberately obstructed detour. Promote it only if the trace
   shows `DetourPath`, zero-forward heading alignment, effective forward gait

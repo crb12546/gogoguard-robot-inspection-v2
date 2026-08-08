@@ -10,16 +10,16 @@ this index describes code state and never implies robot acceptance.
 | `calibration` | One authoritative base-to-lidar mount and lidar-to-IMU internal transform | robot, workstation | `ported_offline_ros_runtime_pending` | `contracts` |
 | `contracts` | Stable product messages and persisted schemas shared across modules | robot, cloud, workstation | `implemented_offline` | — |
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
-| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_clock_rebase_deployed_motion_contract_overlay_pending` | `contracts` |
+| `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_motion_contract_deployed_physical_response_pending` | `contracts` |
 | `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
 | `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `deployed_roundtrip_verified_with_operation_specific_robot_timeouts` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
-| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `dual_controller_detour_recovery_arm64_image_verified_robot_deploy_pending` | `contracts`, `localization`, `route` |
+| `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `dual_controller_detour_recovery_deployed_physical_acceptance_pending` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_candidate_generation_3_offline_verified_robot_deploy_pending` | `contracts`, `map_factory` |
-| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `guided_delivery_workflow_truthful_operation_and_detour_status_browser_verified_deploy_pending` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
+| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `guided_delivery_workflow_truthful_operation_and_detour_status_deployed_browser_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_transfer_and_idempotent_map_import_field_verified` | `contracts`, `evidence` |
 
 ## Module details

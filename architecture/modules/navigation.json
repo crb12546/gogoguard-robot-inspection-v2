@@ -2,7 +2,7 @@
   "id": "navigation",
   "responsibility": "Use a released route through Nav2 FollowPath, MPPI and collision monitoring",
   "runtime": ["robot"],
-  "status": "dual_controller_detour_recovery_arm64_image_verified_robot_deploy_pending",
+  "status": "dual_controller_detour_recovery_deployed_physical_acceptance_pending",
   "codeRoots": ["modules/navigation", "third_party/locked_stack/src/go2_nav2_runtime", "third_party/locked_stack/src/go2_nav2_interfaces", "third_party/locked_stack/src/go2_fastlio_patrol"],
   "entrypoints": ["gogoguard_navigation.supervisor:main", "gogoguard_navigation.observer:main", "ros2 launch go2_nav2_runtime active_map_patrol.launch.py"],
   "dependsOn": ["contracts", "localization", "route"],
