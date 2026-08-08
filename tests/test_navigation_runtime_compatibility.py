@@ -132,15 +132,17 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             source,
         )
 
-    def test_delivery_route_speed_is_accepted_by_runtime_contract(self) -> None:
-        source = ROOT / "third_party/locked_stack/src/go2_nav2_runtime"
+    def test_delivery_overlay_keeps_effective_gait_and_adds_detour_controller(self) -> None:
+        runtime_source = ROOT / "third_party/locked_stack/src/go2_nav2_runtime"
+        bridge_source = ROOT / "third_party/locked_stack/src/go2_cmd_vel_bridge"
         overlay = (
             ROOT
             / "modules/navigation/overlays/go2_nav2_runtime_delivery.patch"
         )
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
-            shutil.copytree(source, workspace / "go2_nav2_runtime")
+            shutil.copytree(runtime_source, workspace / "go2_nav2_runtime")
+            shutil.copytree(bridge_source, workspace / "go2_cmd_vel_bridge")
             subprocess.run(
                 ["git", "-C", str(workspace), "apply", str(overlay)],
                 check=True,
@@ -155,6 +157,36 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
                 "0.10 <= settings.speed_limit_mps <= 0.60",
                 runtime_core,
             )
+            nav2_config = (
+                workspace / "go2_nav2_runtime/config/go2_nav2_patrol.yaml"
+            ).read_text(encoding="utf-8")
+            self.assertIn("controller_plugins: [FollowPath, DetourPath]", nav2_config)
+            self.assertIn("vx_min: 0.20", nav2_config)
+            self.assertIn(
+                "plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController",
+                nav2_config,
+            )
+            self.assertIn("desired_linear_vel: 0.20", nav2_config)
+            self.assertIn("use_rotate_to_heading: true", nav2_config)
+            runtime_manager = (
+                workspace
+                / "go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py"
+            ).read_text(encoding="utf-8")
+            self.assertIn('goal.controller_id = "DetourPath"', runtime_manager)
+            launch = (
+                workspace
+                / "go2_nav2_runtime/launch/active_map_patrol.launch.py"
+            ).read_text(encoding="utf-8")
+            self.assertIn(
+                '"DetourPath.rotate_to_heading_angular_vel": turn_speed',
+                launch,
+            )
+            receiver = (
+                workspace
+                / "go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp"
+            ).read_text(encoding="utf-8")
+            self.assertIn("max_vx=0.600 max_vy=0.200", receiver)
+            self.assertIn("pkt.vx, pkt.vy, pkt.vyaw, 0.60, 0.20, 0.5", receiver)
 
     def test_runtime_exit_reaps_its_motion_bridge(self) -> None:
         class Process:
@@ -280,6 +312,25 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             config,
         )
         self.assertIn("slowdown_ratio: 0.85", config)
+
+    def test_diagnostics_names_a_blocked_patrol_instead_of_runnable(self) -> None:
+        manager = NavigationManager.__new__(NavigationManager)
+        with tempfile.TemporaryDirectory() as temporary:
+            manager.log_root = Path(temporary)
+            manager.status = lambda: {
+                "runtime_process": {"running": True},
+                "motion_bridge": {"running": True},
+                "runtime": {
+                    "state": "BLOCKED",
+                    "reason": "LOCAL_PATH_BLOCKED",
+                    "operatorMessage": "局部路径受阻",
+                },
+                "localization": {"usable": True, "reason": "accepted"},
+                "safety": {"stopReason": "authorization_off"},
+            }
+            manager.profile = lambda: DEFAULT_PROFILE
+            result = manager.diagnostics()
+        self.assertEqual(result["summary"], "巡检受阻")
 
     def test_operator_blocked_time_controls_nav2_progress_checker(self) -> None:
         source = NAV2_LAUNCH.read_text(encoding="utf-8")

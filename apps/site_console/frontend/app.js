@@ -41,6 +41,51 @@ const friendlyError = error => {
 };
 const setFault = error => { $('error').textContent = friendlyError(error); };
 
+const operationKindLabels = {
+  'runtime.start': '启动定位与 Nav2',
+  'runtime.stop': '停止定位与 Nav2',
+  'runtime.recover': '清理并恢复导航',
+  'localization.reset': '重新定位',
+  'patrol.start': '提交巡检',
+  'patrol.stop': '停止巡检',
+};
+const operationStateText = operation => {
+  if (!operation) return '无';
+  if (operation.state === 'accepted') return '请求已接收';
+  if (operation.state === 'running') return '请求处理中';
+  if (operation.state === 'failed') return '请求失败';
+  if (operation.state === 'complete') {
+    if (operation.kind === 'patrol.start') return '巡检请求已提交';
+    if (operation.kind === 'runtime.start') return '启动请求已完成';
+    return '请求已完成';
+  }
+  return operation.state;
+};
+const operationMessageText = operation => {
+  if (!operation) return '点击后会在这里持续显示结果';
+  if (operation.state === 'complete' && operation.kind === 'patrol.start') {
+    return 'Nav2 已接收开始请求；整条路线是否成功以下方“巡检状态”为准';
+  }
+  if (operation.state === 'complete' && operation.kind === 'runtime.start') {
+    return '运行进程已启动；是否可以巡检以“定位可用”为准';
+  }
+  return operation.message || operation.error || '等待状态更新';
+};
+const patrolStepStateText = runtime => {
+  const labels = {
+    STARTING: '请求确认中',
+    PATROLLING: runtime.reason === 'LOCAL_DETOUR_ACCEPTED' ? '绕障中' : '巡检中',
+    REPLANNING: '规划绕障中',
+    HOLDING: '定位等待中',
+    RESUMING: '恢复路线中',
+    COMPLETED: '已完成',
+    BLOCKED: '路线受阻',
+    FAULT: '运行故障',
+    STOPPING: '正在停止',
+  };
+  return labels[runtime.state] || '等待';
+};
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const value = await response.json();
@@ -382,14 +427,14 @@ function renderNavigation() {
   $('routeProgress').textContent = `${Number(runtime.routeProgressPercent || 0).toFixed(0)}%`;
   $('remainingRoute').textContent = runtime.remainingRoutePointCount == null
     ? '尚未开始' : `剩余 ${runtime.remainingRoutePointCount} 个路径点`;
-  $('operationState').textContent = operation ? ({accepted: '已接收', running: '执行中', complete: '已完成', failed: '失败'}[operation.state] || operation.state) : '无';
-  $('operationMessage').textContent = operation?.message || '点击后会在这里持续显示结果';
+  $('operationState').textContent = operationStateText(operation);
+  $('operationMessage').textContent = operationMessageText(operation);
 
   $('assetStepState').textContent = assetReady ? '已发布' : (selectedJobId ? '待发布' : '未选择');
   $('assetStep').classList.toggle('done', assetReady);
   $('runtimeStepState').textContent = runtimeRunning ? (localization.usable ? '定位可用' : '定位中') : '未启动';
   $('runtimeStep').classList.toggle('done', runtimeRunning && localization.usable);
-  $('patrolStepState').textContent = patrolRunning ? '巡检中' : (runtime.state === 'COMPLETED' ? '已完成' : '等待');
+  $('patrolStepState').textContent = patrolStepStateText(runtime);
   $('patrolStep').classList.toggle('done', runtime.state === 'COMPLETED');
 
   let guidance = '请从历史中选择一张可用地图。';
@@ -397,13 +442,18 @@ function renderNavigation() {
   else if (assetReady && !runtimeRunning) guidance = '地图已在机器狗上。下一步：启动定位与 Nav2。';
   else if (runtimeRunning && !localization.usable) guidance = '正在地图中定位，请让机器狗站稳等待；无需重复点击。';
   else if (runtimeRunning && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
-  if (patrolRunning) guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
+  if (runtime.state === 'STARTING') guidance = '开始请求正在由 Nav2 确认；这还不代表整条路线已经完成。';
+  if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
+  if (runtime.state === 'REPLANNING') guidance = '原路线局部受阻，正在根据当前代价地图规划绕行并接回前方路线。';
+  if (runtime.state === 'PATROLLING' && runtime.reason === 'LOCAL_DETOUR_ACCEPTED') guidance = '已找到绕行路径：机器狗会先对准绕行方向，再以有效步态接回原路线。';
+  if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
+  if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；可先查看下方诊断，或点击“自动清理并恢复”。`;
   if (operation?.state === 'failed') {
     guidance = `操作失败：${operation.message || operation.error || '未知错误'}。请不要重复点击，可查看下方诊断。`;
     $('navigationError').textContent = operation.message || operation.error || '导航操作失败';
   }
-  if (operationBusy) guidance = `正在${operation.kind || '执行操作'}，请等待本页面显示完成，不要重复点击。`;
+  if (operationBusy) guidance = `正在${operationKindLabels[operation.kind] || operation.kind || '执行操作'}，请等待请求结果，不要重复点击。`;
   $('workflowMessage').textContent = guidance;
 
   $('prepareNavigation').hidden = assetReady || !selectedJobId;
@@ -528,6 +578,10 @@ async function refreshNavigation() {
       const candidateJob = state.mapJobs.find(job => job.job_id === candidateJobId);
       if (candidateJob?.state === 'complete') await showResult(candidateJob);
     }
+    // A polling failure is transient unless the current durable operation or
+    // runtime state also reports failure. Clear stale timeout text before the
+    // successful snapshot is rendered; renderNavigation restores real faults.
+    $('navigationError').textContent = '';
     renderNavigation();
   } catch (error) {
     $('navigationError').textContent = friendlyError(error);

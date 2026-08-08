@@ -47,7 +47,16 @@ class OperationRegistry:
             except Exception as exc:
                 self._change(operation_id, state="failed", message=str(exc), error=str(exc))
             else:
-                self._change(operation_id, state="complete", message="已完成", result=result)
+                completion_messages = {
+                    "runtime.start": "运行进程启动请求已完成；定位是否可用以实时状态为准",
+                    "patrol.start": "Nav2 已接收巡检请求；整条路线结果以巡检状态为准",
+                }
+                self._change(
+                    operation_id,
+                    state="complete",
+                    message=completion_messages.get(kind, "请求已完成"),
+                    result=result,
+                )
 
         threading.Thread(target=run, name=operation_id, daemon=True).start()
         return dict(item)

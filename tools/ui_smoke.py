@@ -17,6 +17,7 @@ required = {
         "/api/v1/navigation/runtime/recover",
         "/api/v1/navigation/diagnostics", "/api/v1/navigation/profile",
         "mapSelectionExplicit", "candidateJobId",
+        "巡检请求已提交", "规划绕障中", "LOCAL_DETOUR_ACCEPTED",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",

@@ -405,10 +405,25 @@ class NavigationManager:
             {"name": "最终运动链", "ok": safety.get("stopReason", safety.get("stop_reason", "normal")) in {None, "normal"},
              "detail": str(safety.get("stopReason") or safety.get("stop_reason") or "normal")},
         ]
+        runtime_state = str(runtime.get("state") or "")
+        if runtime_state == "BLOCKED":
+            summary = "巡检受阻"
+        elif runtime_state == "FAULT":
+            summary = "导航故障"
+        elif not status["runtime_process"]["running"]:
+            summary = "导航未启动"
+        elif not localization.get("usable"):
+            summary = "等待定位"
+        elif runtime_state in {"STARTING", "PATROLLING", "REPLANNING", "HOLDING", "RESUMING"}:
+            summary = "巡检运行中"
+        elif runtime_state == "COMPLETED":
+            summary = "巡检已完成"
+        else:
+            summary = "可开始巡检"
         return {
             "schema": "gogoguard.navigation_diagnostics.v1",
             "generatedAt": time.time(),
-            "summary": "可运行" if all(item["ok"] for item in checks[:2]) else "需要处理",
+            "summary": summary,
             "checks": checks,
             "logs": operations,
             "profile": self.profile(),

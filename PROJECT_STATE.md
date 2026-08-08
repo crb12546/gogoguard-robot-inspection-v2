@@ -253,6 +253,55 @@ Updated: 2026-08-08
 - Robot motion, continuous fixed-map localization and one complete indoor
   recorded-route patrol are now field-verified.
 
+## 2026-08-08 obstacle-detour trace and pending correction
+
+- The replacement MID-360S recording produced new GLIM map
+  `map-6a79b7795da6` and a 9.521 m generation-3 route. At patrol start the
+  fixed-map pose was 0.057 m from the route origin with 3.53 degrees yaw error;
+  Nav2 accepted the goal, motion authorization opened, and localization stayed
+  `TRACKING` at roughly 0.90 confidence.
+- The robot advanced about 0.82 m before stopping. Collision Monitor did not
+  trigger StopZone, the final safety gate reported no obstacle stop, and sensor
+  or localization freshness was not the cause. Left/front-left costmap pressure
+  increased as the robot approached the operator-placed obstacle.
+- MPPI aborted the original FollowPath. Bounded A* found a valid local detour
+  in 56 ms and rejoined at route index 18, but MPPI then aborted execution of
+  that detour as well. This is a controller execution defect, not proof that the
+  physical corridor was impassable.
+- The 0.20 m/s minimum forward gait remains backed by field evidence: earlier
+  0.10 and 0.153 m/s commands changed posture but made only 0.064--0.074 m
+  progress in about 15 seconds. The pending correction therefore does not set
+  MPPI's global minimum to zero. Normal patrol remains MPPI Omni at
+  `vx >= 0.20 m/s`; only a bounded A* detour selects Nav2 Regulated Pure Pursuit,
+  which can rotate with `vx=0` to the detour heading and then advance at the
+  effective 0.20 m/s gait before rejoining the recorded route.
+- The pending V2 overlay aligns the Unitree receiver with the commissioned
+  0.60 m/s forward and 0.20 m/s lateral planner, smoother and final-command
+  caps; both values now survive the complete command chain. The
+  official SDK exposes independent `Move(vx, vy, vyaw)` components but does not
+  publish a numeric Go2 lateral limit; 0.20 m/s lateral and pure-yaw response
+  therefore require a short field receipt before acceptance.
+- Workstation and robot UI semantics now distinguish request receipt from
+  route outcome, clear stale transient polling errors after a successful
+  snapshot, display replanning/detour/blocked/fault separately, and no longer
+  summarize a blocked patrol as `可运行`.
+- Offline evidence is 48 passing tests, Python compilation, UI contract,
+  container contract and an apply-checked immutable-source overlay. The
+  complete ARM64 image is
+  `gogoguard-robot-inspection:v2-edge-20260808-detour-r2`; its manifest-list
+  digest is
+  `sha256:86eba1feef46b340641212eef04dba6dca89ec13f0981d0940023c7413cc7e49`
+  and ARM64 config digest is
+  `sha256:5bf2737b34d7bc326c97012f4284f92a3fe572d73acf369f15b0cada9c7a9e37`.
+  An in-image Nav2 lifecycle configure receipt created both `FollowPath`
+  (MPPI) and `DetourPath` (Regulated Pure Pursuit) without plugin-load error.
+- A real browser refresh against `http://127.0.0.1:8080/` displayed the live
+  blocked candidate as `BLOCKED` / `路线受阻`, retained `定位可用`, and described
+  the latest completed patrol operation as only `巡检请求已提交`; this verifies
+  that request receipt is no longer presented as route completion. These
+  changes are not deployed to the robot and this correction has not commanded
+  motion.
+
 ## Known field follow-ups
 
 - Historical recordings, maps and navigation candidates remain truthfully
@@ -272,6 +321,11 @@ Updated: 2026-08-08
   and display a specific sensor-clock error instead of the generic `FAULT`
   message. Correct the UI inconsistency that can display `定位可用` and
   `not_converged` at the same time.
+- Deploy the built obstacle-detour correction, then field-check pure yaw at
+  the configured turn rate, lateral response up to 0.20 m/s, one clear-route
+  patrol and one deliberately obstructed detour. Promote it only if the trace
+  shows `DetourPath`, zero-forward heading alignment, effective forward gait
+  and successful return to the original route.
 
 ## 2026-08-06 three-end architecture correction
 

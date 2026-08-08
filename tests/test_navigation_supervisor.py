@@ -52,7 +52,30 @@ class NavigationSupervisorTest(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual(operation["state"], "complete")
+            self.assertIn("定位是否可用以实时状态为准", operation["message"])
             self.assertEqual(manager.starts, 1)
+            server.shutdown()
+            server.server_close()
+
+    def test_patrol_operation_does_not_claim_the_route_completed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            socket_path = Path(temporary) / "supervisor.sock"
+            server = NavigationSupervisorServer(
+                socket_path, SupervisorService(FakeManager())
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            client = NavigationSupervisorClient(socket_path)
+            client.start_patrol()
+            deadline = time.time() + 1.0
+            operation = None
+            while time.time() < deadline:
+                operation = client.status()["operations"][0]
+                if operation["state"] == "complete":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(operation["state"], "complete")
+            self.assertIn("整条路线结果以巡检状态为准", operation["message"])
             server.shutdown()
             server.server_close()
 
