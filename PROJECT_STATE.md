@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 ## Verified external facts
 
@@ -410,6 +410,34 @@ Updated: 2026-08-08
   compare CPU, memory, disk throughput, LiDAR/odometry rate, controller cadence
   and temperature against the production baseline before the recorder is
   accepted for continued development use.
+
+## 2026-08-09 fall-induced FAST-LIO recovery
+
+- The newest completed GLIM asset is `map-8ddcf3f8c078`: 322,858 displayed
+  points, a 63.733 m generation-3 route and 222 source control points. It was
+  already selected and published to the robot when repeated attempts could not
+  reach usable localization.
+- The failure was below Nav2 and fixed-map localization. After the operator
+  reported that the robot had fallen and been stood back up, the raw Livox
+  stream remained healthy at about 10 Hz point cloud and 200 Hz IMU, but
+  FAST-LIO stopped publishing `/Odometry`. Its trace changed at 00:15:57 from
+  roughly 60,000 local-map points and hundreds of effective matches per scan to
+  zero effective matches, then reported VoxelGrid integer-index overflow. The
+  active navigation runtime consequently had no `odom` frame and stayed at
+  `LOCALIZING / FASTLIO_ODOMETRY_MISSING`; motion authorization remained closed
+  and every final command was zero.
+- Repeated UI localization reset and runtime recovery could not repair this
+  state because those operations restart the map-localization/Nav2 generation,
+  not the container-level FAST-LIO process. A managed edge-service restart at
+  00:24:40 cleared the corrupted odometry state. FAST-LIO returned to about
+  700--800 effective matches per scan with 3--4 cm mean residual, and the API
+  reported 10.0 Hz LiDAR plus 10.9 Hz odometry.
+- After recovery the service was `active`, the selected candidate remained
+  `map-8ddcf3f8c078`, the sole navigation supervisor was alive, and Nav2 plus
+  the Unitree motion bridge were stopped. The recovery did not submit a patrol
+  or command motion. One bounded development-capture patrol was enabled for the
+  next field attempt; physical mount alignment and route execution remain to be
+  checked by that attempt.
 
 ## 2026-08-08 latest-map selection and stale-runtime correction
 
