@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import io
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -40,6 +41,9 @@ NAV2_LAUNCH = (
     ROOT
     / "third_party/locked_stack/src/go2_nav2_runtime/launch"
     / "active_map_patrol.launch.py"
+)
+INCIDENT_OVERLAY = (
+    ROOT / "modules/navigation/overlays/go2_incident_diagnostics.patch"
 )
 
 
@@ -149,6 +153,12 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            subprocess.run(
+                ["git", "-C", str(workspace), "apply", str(INCIDENT_OVERLAY)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             runtime_core = (
                 workspace
                 / "go2_nav2_runtime/go2_nav2_runtime/runtime_core.py"
@@ -166,13 +176,48 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
                 "plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController",
                 nav2_config,
             )
-            self.assertIn("desired_linear_vel: 0.20", nav2_config)
+            self.assertIn("desired_linear_vel: 0.24", nav2_config)
             self.assertIn("use_rotate_to_heading: true", nav2_config)
+            detour_speed = float(
+                re.search(
+                    r"DetourPath:.*?desired_linear_vel:\s*([0-9.]+)",
+                    nav2_config,
+                    re.DOTALL,
+                ).group(1)
+            )
+            slowdown_ratio = float(
+                re.search(
+                    r"SlowZone:.*?slowdown_ratio:\s*([0-9.]+)",
+                    nav2_config,
+                    re.DOTALL,
+                ).group(1)
+            )
+            self.assertGreaterEqual(detour_speed * slowdown_ratio, 0.20)
+            voxel = re.search(
+                r"voxel_layer:.*?origin_z:\s*([-0-9.]+).*?"
+                r"z_resolution:\s*([0-9.]+).*?z_voxels:\s*([0-9]+).*?"
+                r"max_obstacle_height:\s*([0-9.]+)",
+                nav2_config,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(voxel)
+            origin_z, z_resolution, z_voxels, max_obstacle_height = (
+                float(voxel.group(1)),
+                float(voxel.group(2)),
+                int(voxel.group(3)),
+                float(voxel.group(4)),
+            )
+            self.assertLessEqual(origin_z, -0.32)
+            self.assertGreaterEqual(
+                origin_z + z_resolution * z_voxels,
+                max_obstacle_height,
+            )
             runtime_manager = (
                 workspace
                 / "go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py"
             ).read_text(encoding="utf-8")
             self.assertIn('goal.controller_id = "DetourPath"', runtime_manager)
+            self.assertIn("plan_detour_diagnostic", runtime_manager)
             launch = (
                 workspace
                 / "go2_nav2_runtime/launch/active_map_patrol.launch.py"
