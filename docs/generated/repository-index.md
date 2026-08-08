@@ -75,8 +75,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `apps/field_workstation`, `deployment/workstation`
 - Entrypoints: `gogoguard_field_workstation.__main__:main`, `deployment/workstation/run-native`, `deployment/workstation/compose.yaml`
 - Consumes: robot Edge Agent API, sealed RecordingBundle, cloud GLIM progress and artifacts, immutable robot IncidentBundle exports
-- Produces: field workflow UI, map version catalog, selected robot map deployment, robot release staging, verified incident archive and synchronized replay
-- Provenance: V2 three-end ownership correction agreed 2026-08-06; 2026-08-08 Mac-owned automatic incident synchronization and replay
+- Produces: field workflow UI, time-ordered map version catalog with local operator labels, selected robot map deployment, robot release staging, verified incident archive and synchronized replay
+- Provenance: V2 three-end ownership correction agreed 2026-08-06; 2026-08-08 Mac-owned automatic incident synchronization and replay; 2026-08-08 field correction separates immutable map IDs from mutable Mac-local operator labels and orders maps newest first
 
 ### `inspection`
 
@@ -138,8 +138,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
 - Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status, DiagnosticProfile, IncidentBundle replay
-- Produces: guided next-action workflow, operation receipts, field visualization, parameter and diagnostic views, diagnostic-mode controls, synchronized incident timeline
-- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout; 2026-08-08 operation completion is explicitly a request receipt rather than route success; successful polling clears stale transient errors and patrol, replanning, detour, blocked and fault states have distinct operator wording; 2026-08-08 live browser receipt displayed BLOCKED as route obstruction while keeping the completed patrol operation explicitly scoped to request submission; 2026-08-08 browser-tested development/acceptance/production diagnostic modes and evidence-completeness-aware incident replay
+- Produces: guided next-action workflow, operation receipts, time-ordered and operator-labeled map history, field visualization, parameter and diagnostic views, diagnostic-mode controls, synchronized incident timeline
+- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout; 2026-08-08 operation completion is explicitly a request receipt rather than route success; successful polling clears stale transient errors and patrol, replanning, detour, blocked and fault states have distinct operator wording; 2026-08-08 live browser receipt displayed BLOCKED as route obstruction while keeping the completed patrol operation explicitly scoped to request submission; 2026-08-08 browser-tested development/acceptance/production diagnostic modes and evidence-completeness-aware incident replay; 2026-08-08 field correction blocks patrol against a stale running map and guides the operator to switch Nav2 to the selected candidate
 
 ### `transfer`
 

@@ -109,6 +109,15 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/navigation/prepare":
                 body = self._body()
                 return self._json(201, self.server.application.prepare_navigation(str(body.get("job_id", ""))))
+            match = re.fullmatch(r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/label", path)
+            if match:
+                body = self._body()
+                return self._json(
+                    200,
+                    self.server.application.update_map_label(
+                        match.group(1), str(body.get("label") or "")
+                    ),
+                )
             match = re.fullmatch(r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/retry", path)
             if match:
                 return self._json(202, self.server.application.retry_map_job(match.group(1)))

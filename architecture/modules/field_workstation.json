@@ -7,6 +7,6 @@
   "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
   "dependsOn": ["contracts", "transfer", "map_factory", "site_console", "evidence"],
   "consumes": ["robot Edge Agent API", "sealed RecordingBundle", "cloud GLIM progress and artifacts", "immutable robot IncidentBundle exports"],
-  "produces": ["field workflow UI", "map version catalog", "selected robot map deployment", "robot release staging", "verified incident archive and synchronized replay"],
-  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06", "2026-08-08 Mac-owned automatic incident synchronization and replay"]
+  "produces": ["field workflow UI", "time-ordered map version catalog with local operator labels", "selected robot map deployment", "robot release staging", "verified incident archive and synchronized replay"],
+  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06", "2026-08-08 Mac-owned automatic incident synchronization and replay", "2026-08-08 field correction separates immutable map IDs from mutable Mac-local operator labels and orders maps newest first"]
 }

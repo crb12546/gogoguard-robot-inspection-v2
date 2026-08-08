@@ -65,6 +65,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .layer-switches { display: flex !important; grid-auto-flow: column; align-items: center; gap: 10px !important; color: var(--muted); font-size: 11px; }
 .layer-switches label { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
 .mini-button { width: auto; margin: 0; padding: 6px 9px; font-size: 11px; color: var(--text); background: #17304a; border: 1px solid #31506d; }
+.map-name-editor { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.map-name-editor input { min-width: 0; flex: 1; }
+.map-name-editor .mini-button { flex: 0 0 auto; }
 .empty { height: 360px; display: grid; place-items: center; color: var(--muted); padding: 60px; text-align: center; }
 .history { min-height: 300px; }
 .history h3 { margin: 14px 16px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }

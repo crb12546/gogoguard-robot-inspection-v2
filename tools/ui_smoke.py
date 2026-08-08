@@ -20,6 +20,7 @@ required = {
         "mapSelectionExplicit", "candidateJobId",
         "巡检请求已提交", "规划绕障中", "LOCAL_DETOUR_ACCEPTED",
         "/api/v1/incidents", "/api/v1/diagnostics/profile", "drawIncidentPlan",
+        "save-map-name", "fmtLocalTime", "运行旧地图",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",

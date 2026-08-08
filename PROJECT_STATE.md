@@ -367,6 +367,34 @@ Updated: 2026-08-08
   compare CPU, memory, disk throughput, LiDAR/odometry rate, controller cadence
   and temperature against the production-mode baseline.
 
+## 2026-08-08 latest-map selection and stale-runtime correction
+
+- New recording `20260808T134839Z-53660034` completed cloud GLIM as
+  `map-5b1f56fe3772`: 6,064 displayed points, a 20.082 m generation-3 route and
+  74 control points. The immutable artifacts and candidate were already on the
+  robot, but the persistent Nav2 process was still running previous
+  `map-6a79b7795da6`.
+- The UI treated “candidate files are published” as “the running Nav2 process
+  uses this candidate” and exposed Start Patrol. The robot correctly rejected
+  the request with `REQUESTED_MAP_VERSION_IS_NOT_ACTIVE`; this was a workflow
+  state defect, not a GLIM, localization or path-planning failure.
+- A live non-motion recovery stopped the old runtime and started the selected
+  candidate. The receipt then showed candidate, runtime and localization all
+  on `map-5b1f56fe3772`, `READY`, `TRACKING`, localization usable, zero final
+  velocity and motion authorization closed. No patrol command was submitted by
+  Codex.
+- The Mac catalog now returns maps by `created_at` descending, displays local
+  time, marks the newest map and stores an optional operator label separately
+  from the immutable `map-*` identity. The browser provides inline rename,
+  save and cancel controls.
+- The patrol guide now compares the selected candidate with the map actually
+  reported by the running runtime/localizer. On a mismatch it displays
+  `运行旧地图`, hides Start Patrol and exposes `切换到所选地图并重启 Nav2`.
+  Offline evidence is 55 passing tests, Python and JavaScript compilation, UI
+  contract checks, and a live browser receipt for newest-first order, local
+  timestamps, rename controls and an enabled patrol action only after all
+  three map identities matched.
+
 ## Known field follow-ups
 
 - Historical recordings, maps and navigation candidates remain truthfully

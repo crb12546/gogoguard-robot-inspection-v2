@@ -4,6 +4,7 @@ const state = {
   mapJobs: [],
   latestMapJob: null,
   mapSelectionExplicit: false,
+  editingMapId: null,
   mapArtifact: null,
   navigation: null,
   live: null,
@@ -28,6 +29,15 @@ const escapeHtml = value => String(value ?? '').replace(
   character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]),
 );
 const fmtDisk = bytes => `${(Number(bytes || 0) / 1024 ** 3).toFixed(1)} GB 可用`;
+const fmtLocalTime = value => {
+  if (!value) return '时间未知';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  }).format(date);
+};
 const fmtTransfer = job => {
   const total = Number(job?.bytes_total || 0);
   const done = Number(job?.bytes_transferred || 0);
@@ -313,7 +323,8 @@ async function showResult(job, {explicit = false} = {}) {
   document.querySelector('.map-review').style.display = 'grid';
   $('overview').src = job.overview_url;
   state.mapArtifact = await api(job.point_cloud_url);
-  $('resultMeta').textContent = `${job.job_id} · ${job.metrics?.point_count || state.mapArtifact.points.length} 点 · ${job.metrics?.worker || 'cloud-glim'}`;
+  const mapName = job.label ? `${job.label} · ${job.job_id}` : job.job_id;
+  $('resultMeta').textContent = `${mapName} · ${job.metrics?.point_count || state.mapArtifact.points.length} 点 · ${job.metrics?.worker || 'cloud-glim'}`;
   redrawResult();
   renderMapHistory();
   drawNavigation();
@@ -324,7 +335,13 @@ function renderMapHistory() {
   const tasks = state.mapJobs.filter(job => job.state !== 'complete');
   $('maps').innerHTML = completed.map(job => {
     const selected = state.latestMapJob?.job_id === job.job_id ? ' selected' : '';
-    return `<div class="session selectable${selected}" data-map-job="${escapeHtml(job.job_id)}"><div><strong>${escapeHtml(job.job_id)}</strong><small>${escapeHtml(job.message || job.stage)} · ${escapeHtml(job.session_id)}</small></div><b>可用</b></div>`;
+    const editing = state.editingMapId === job.job_id;
+    const title = job.label || job.job_id;
+    const identity = job.label ? `${job.job_id} · ${fmtLocalTime(job.created_at)}` : fmtLocalTime(job.created_at);
+    const editor = editing
+      ? `<div class="map-name-editor"><input class="map-name-input" maxlength="80" value="${escapeHtml(job.label || '')}" placeholder="例如：一楼大厅巡检"><button class="mini-button save-map-name" type="button">保存</button><button class="mini-button cancel-map-name" type="button">取消</button></div>`
+      : '<button class="mini-button rename-map" type="button">重命名</button>';
+    return `<div class="session selectable${selected}" data-map-job="${escapeHtml(job.job_id)}"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(identity)} · ${escapeHtml(job.message || job.stage)}</small>${editor}</div><b>${job === completed[0] ? '最新' : '可用'}</b></div>`;
   }).join('') || '<div class="asset-empty">暂无可用地图</div>';
   $('mapTasks').innerHTML = tasks.map(job => {
     const failed = job.state === 'failed';
@@ -413,6 +430,11 @@ function renderNavigation() {
   const runtimeRunning = Boolean(navigation.runtime_process?.running);
   const selectedJobId = state.latestMapJob?.job_id;
   const assetReady = Boolean(candidate && selectedJobId && candidate.map_job_id === selectedJobId);
+  const runtimeMapId = runtime.mapVersion || localization.mapVersion;
+  const runtimeMatchesCandidate = Boolean(
+    runtimeRunning && candidate && runtimeMapId && runtimeMapId === candidate.map_version
+  );
+  const selectedRuntimeReady = assetReady && runtimeMatchesCandidate;
   const operation = (navigation.operations || [])[0];
   const operationBusy = ['accepted', 'running'].includes(operation?.state);
   const patrolRunning = ['STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING'].includes(runtime.state);
@@ -435,18 +457,23 @@ function renderNavigation() {
   $('operationState').textContent = operationStateText(operation);
   $('operationMessage').textContent = operationMessageText(operation);
 
-  $('assetStepState').textContent = assetReady ? '已发布' : (selectedJobId ? '待发布' : '未选择');
+  $('assetStepState').textContent = assetReady
+    ? (runtimeRunning && !runtimeMatchesCandidate ? '已发布，待切换' : '已发布')
+    : (selectedJobId ? '待发布' : '未选择');
   $('assetStep').classList.toggle('done', assetReady);
-  $('runtimeStepState').textContent = runtimeRunning ? (localization.usable ? '定位可用' : '定位中') : '未启动';
-  $('runtimeStep').classList.toggle('done', runtimeRunning && localization.usable);
+  $('runtimeStepState').textContent = runtimeRunning
+    ? (!runtimeMatchesCandidate ? '运行旧地图' : (localization.usable ? '定位可用' : '定位中'))
+    : '未启动';
+  $('runtimeStep').classList.toggle('done', selectedRuntimeReady && localization.usable);
   $('patrolStepState').textContent = patrolStepStateText(runtime);
   $('patrolStep').classList.toggle('done', runtime.state === 'COMPLETED');
 
   let guidance = '请从历史中选择一张可用地图。';
   if (selectedJobId && !assetReady) guidance = '下一步：将所选地图和当时录制的路线发布到机器狗。';
   else if (assetReady && !runtimeRunning) guidance = '地图已在机器狗上。下一步：启动定位与 Nav2。';
+  else if (assetReady && runtimeRunning && !runtimeMatchesCandidate) guidance = `新地图已经发布，但 Nav2 仍运行 ${runtimeMapId || '上一张地图'}。下一步：切换到所选地图并重启 Nav2。`;
   else if (runtimeRunning && !localization.usable) guidance = '正在地图中定位，请让机器狗站稳等待；无需重复点击。';
-  else if (runtimeRunning && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
+  else if (selectedRuntimeReady && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
   if (runtime.state === 'STARTING') guidance = '开始请求正在由 Nav2 确认；这还不代表整条路线已经完成。';
   if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
   if (runtime.state === 'REPLANNING') guidance = '原路线局部受阻，正在根据当前代价地图规划绕行并接回前方路线。';
@@ -469,9 +496,12 @@ function renderNavigation() {
   $('startRuntime').disabled = !candidate || operationBusy;
   $('resetLocalization').hidden = !runtimeRunning || localization.usable || patrolRunning;
   $('resetLocalization').disabled = operationBusy;
-  $('recoverRuntime').hidden = !runtimeRunning || !['FAULT', 'BLOCKED'].includes(runtime.state);
+  $('recoverRuntime').hidden = !runtimeRunning || (runtimeMatchesCandidate && !['FAULT', 'BLOCKED'].includes(runtime.state));
+  $('recoverRuntime').textContent = runtimeRunning && !runtimeMatchesCandidate
+    ? '切换到所选地图并重启 Nav2'
+    : '运行异常：自动清理并恢复';
   $('recoverRuntime').disabled = operationBusy;
-  $('startPatrol').hidden = !runtimeRunning || patrolRunning;
+  $('startPatrol').hidden = !selectedRuntimeReady || patrolRunning;
   $('startPatrol').disabled = !localization.usable || operationBusy || ['FAULT', 'BLOCKED'].includes(runtime.state);
   $('stopPatrol').hidden = !patrolRunning;
   $('stopPatrol').disabled = operationBusy;
@@ -814,6 +844,40 @@ async function handleMapClick(event) {
   const row = event.target.closest('[data-map-job]');
   if (!row) return;
   const job = state.mapJobs.find(item => item.job_id === row.dataset.mapJob);
+  const renameButton = event.target.closest('.rename-map');
+  const cancelButton = event.target.closest('.cancel-map-name');
+  const saveButton = event.target.closest('.save-map-name');
+  if (renameButton) {
+    state.editingMapId = job?.job_id || null;
+    renderMapHistory();
+    const input = $('maps').querySelector(`[data-map-job="${job.job_id}"] .map-name-input`);
+    input?.focus();
+    return;
+  }
+  if (cancelButton) {
+    state.editingMapId = null;
+    renderMapHistory();
+    return;
+  }
+  if (saveButton && job) {
+    const input = row.querySelector('.map-name-input');
+    saveButton.disabled = true;
+    try {
+      const updated = await post(`/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/label`, {label: input?.value || ''});
+      state.mapJobs = state.mapJobs.map(item => item.job_id === updated.job_id ? updated : item);
+      if (state.latestMapJob?.job_id === updated.job_id) state.latestMapJob = updated;
+      state.editingMapId = null;
+      renderMapHistory();
+      if (state.latestMapJob?.job_id === updated.job_id) {
+        const mapName = updated.label ? `${updated.label} · ${updated.job_id}` : updated.job_id;
+        $('resultMeta').textContent = `${mapName} · ${updated.metrics?.point_count || state.mapArtifact?.points?.length || 0} 点 · ${updated.metrics?.worker || 'cloud-glim'}`;
+      }
+    } catch (error) {
+      setFault(error);
+      saveButton.disabled = false;
+    }
+    return;
+  }
   const retryButton = event.target.closest('.retry-map');
   if (retryButton && job?.state === 'failed') {
     retryButton.disabled = true;

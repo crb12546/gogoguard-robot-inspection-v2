@@ -37,6 +37,39 @@ class FakeRobot:
 
 
 class FieldWorkstationTest(unittest.TestCase):
+    def test_map_jobs_are_newest_first_and_labels_are_local_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = FieldWorkstationApplication(
+                data_root=Path(temporary),
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            jobs = [
+                {"job_id": "map-aaaaaaaaaaaa", "created_at": "2026-08-08T01:00:00+00:00"},
+                {"job_id": "map-bbbbbbbbbbbb", "created_at": "2026-08-08T02:00:00+00:00"},
+            ]
+            app.maps.list = lambda: jobs
+            app.maps.get = lambda job_id: next(
+                item for item in jobs if item["job_id"] == job_id
+            )
+            self.assertEqual(
+                [item["job_id"] for item in app.map_jobs()],
+                ["map-bbbbbbbbbbbb", "map-aaaaaaaaaaaa"],
+            )
+            updated = app.update_map_label("map-bbbbbbbbbbbb", "一楼大厅")
+            self.assertEqual(updated["label"], "一楼大厅")
+            reloaded = FieldWorkstationApplication(
+                data_root=Path(temporary),
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            reloaded.maps.get = app.maps.get
+            self.assertEqual(
+                reloaded.map_job("map-bbbbbbbbbbbb")["label"], "一楼大厅"
+            )
+
     def test_incident_download_resumes_and_verifies_hash(self) -> None:
         content = b"abcdefgh"
         digest = hashlib.sha256(content).hexdigest()

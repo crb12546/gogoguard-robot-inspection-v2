@@ -129,10 +129,32 @@ class FieldWorkstationApplication:
         raise KeyError(session_id)
 
     def map_job(self, job_id: str) -> dict:
-        return json_ready(self.maps.get(job_id))
+        return self._decorate_map_job(json_ready(self.maps.get(job_id)))
 
     def map_jobs(self) -> list[dict]:
-        return [json_ready(item) for item in self.maps.list()]
+        values = [self._decorate_map_job(json_ready(item)) for item in self.maps.list()]
+        return sorted(
+            values,
+            key=lambda item: (str(item.get("created_at") or ""), str(item.get("job_id") or "")),
+            reverse=True,
+        )
+
+    def update_map_label(self, job_id: str, label: str) -> dict:
+        self.maps.get(job_id)
+        value = str(label or "").strip()
+        if len(value) > 80:
+            raise ValueError("map label must be 80 characters or fewer")
+        if any(ord(character) < 32 for character in value):
+            raise ValueError("map label contains control characters")
+        with self._catalog_lock:
+            labels = self._catalog.setdefault("map_labels", {})
+            if value:
+                labels[job_id] = value
+            else:
+                labels.pop(job_id, None)
+            self._save_catalog_locked()
+        self.journal.append("map.label_updated", job_id=job_id, label=value)
+        return self.map_job(job_id)
 
     def retry_map_job(self, job_id: str) -> dict:
         job = self.maps.get(job_id)
@@ -301,16 +323,27 @@ class FieldWorkstationApplication:
                 return value
         except (OSError, ValueError):
             pass
-        return {"schema": "gogoguard.workstation_catalog.v1", "sessions": {}}
+        return {
+            "schema": "gogoguard.workstation_catalog.v1",
+            "sessions": {},
+            "map_labels": {},
+        }
+
+    def _decorate_map_job(self, value: dict) -> dict:
+        label = str(self._catalog.get("map_labels", {}).get(value.get("job_id"), ""))
+        return dict(value) | {"label": label}
 
     def _link_session(self, session_id: str, job_id: str, session: dict) -> None:
         with self._catalog_lock:
             self._catalog.setdefault("sessions", {})[session_id] = dict(session) | {
                 "map_job_id": job_id
             }
-            temporary = self.catalog_path.with_suffix(".tmp")
-            temporary.write_text(
-                json.dumps(self._catalog, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            temporary.replace(self.catalog_path)
+            self._save_catalog_locked()
+
+    def _save_catalog_locked(self) -> None:
+        temporary = self.catalog_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(self._catalog, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.catalog_path)
