@@ -6,7 +6,7 @@ from pathlib import Path
 from gogoguard_contracts import json_ready
 from gogoguard_data_capture import CaptureManager
 from gogoguard_device_io import SnapshotStore, create_camera_gateway, create_gateway
-from gogoguard_evidence import EventJournal
+from gogoguard_evidence import DiagnosticProfileStore, EventJournal, IncidentStore
 from gogoguard_map_factory import MapJobManager
 from gogoguard_navigation import NavigationManager, NavigationSupervisorClient
 from gogoguard_transfer import EdgeArtifactExchange
@@ -24,6 +24,8 @@ class InspectionApplication:
         self.sensor_id = sensor_id
         self.store = SnapshotStore(robot_id, mode, data_root)
         self.journal = EventJournal(data_root / "events" / "runtime.jsonl")
+        self.diagnostic_profiles = DiagnosticProfileStore(data_root)
+        self.incident_store = IncidentStore(data_root)
         self.gateway = create_gateway(mode, self.store, robot_id, topics)
         self.camera = create_camera_gateway(mode, camera)
         self.capture = CaptureManager(data_root, self.store, self.journal, mode, topics)
@@ -148,3 +150,27 @@ class InspectionApplication:
 
     def navigation_diagnostics(self) -> dict:
         return self.navigation.diagnostics()
+
+    def diagnostic_profile(self) -> dict:
+        return json_ready(self.diagnostic_profiles.get())
+
+    def update_diagnostic_profile(self, value: dict) -> dict:
+        return {
+            "profile": json_ready(self.diagnostic_profiles.update(value)),
+            "message": "诊断档位已更新；重采集只在巡检活跃时运行",
+        }
+
+    def incidents(self) -> list[dict]:
+        return self.incident_store.list()
+
+    def incident(self, incident_id: str) -> dict:
+        return self.incident_store.get(incident_id)
+
+    def incident_export(self, incident_id: str) -> dict:
+        return self.incident_store.descriptor(incident_id)
+
+    def incident_file(self, incident_id: str, relative_name: str) -> Path:
+        return self.incident_store.file(incident_id, relative_name)
+
+    def capture_incident(self) -> dict:
+        return self.incident_store.request_capture("manual")

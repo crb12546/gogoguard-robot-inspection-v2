@@ -1,12 +1,12 @@
 {
   "id": "evidence",
-  "responsibility": "Append-only runtime events and receipts; no product decision logic",
+  "responsibility": "Append-only runtime events, bounded development incident capture and immutable receipts; no product decision logic",
   "runtime": ["robot", "cloud", "workstation"],
-  "status": "implemented_offline",
+  "status": "development_incident_bundle_offline_browser_verified_robot_pending",
   "codeRoots": ["modules/evidence"],
-  "entrypoints": ["gogoguard_evidence.journal:EventJournal"],
+  "entrypoints": ["gogoguard_evidence.journal:EventJournal", "gogoguard_evidence.incident_recorder:main"],
   "dependsOn": ["contracts"],
-  "consumes": ["module events"],
-  "produces": ["gogoguard.event.v1 JSONL"],
-  "sourceProvenance": ["V2 product infrastructure"]
+  "consumes": ["module events", "navigation diagnostic streams", "bounded ROS sensor and command windows"],
+  "produces": ["gogoguard.event.v1 JSONL", "DiagnosticProfile", "IncidentBundle", "MCAP sensor evidence", "synchronized replay preview"],
+  "sourceProvenance": ["V2 product infrastructure", "2026-08-08 temporary field-development recorder with production-mode fallback"]
 }

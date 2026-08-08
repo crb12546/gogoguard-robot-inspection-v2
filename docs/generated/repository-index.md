@@ -11,15 +11,15 @@ this index describes code state and never implies robot acceptance.
 | `contracts` | Stable product messages and persisted schemas shared across modules | robot, cloud, workstation | `implemented_offline` | — |
 | `data_capture` | Start, stop, seal and replay raw mapping evidence without owning algorithms | robot | `migrating_locked_source` | `contracts`, `device_io`, `calibration`, `localization`, `evidence` |
 | `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_verified_motion_contract_deployed_physical_response_pending` | `contracts` |
-| `evidence` | Append-only runtime events and receipts; no product decision logic | robot, cloud, workstation | `implemented_offline` | `contracts` |
-| `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `deployed_roundtrip_verified_with_operation_specific_robot_timeouts` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
+| `evidence` | Append-only runtime events, bounded development incident capture and immutable receipts; no product decision logic | robot, cloud, workstation | `development_incident_bundle_offline_browser_verified_robot_pending` | `contracts` |
+| `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `incident_auto_sync_and_replay_offline_browser_verified_robot_pending` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
 | `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `fixed_map_localization_migrated_offline_robot_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM and return versioned map artifacts | workstation, cloud | `real_workstation_to_cloud_glim_roundtrip_verified` | `contracts`, `evidence` |
 | `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
 | `navigation` | Use a released route through Nav2 FollowPath, MPPI and collision monitoring | robot | `dual_controller_detour_recovery_deployed_physical_acceptance_pending` | `contracts`, `localization`, `route` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `recorded_glim_route_candidate_generation_3_offline_verified_robot_deploy_pending` | `contracts`, `map_factory` |
-| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `guided_delivery_workflow_truthful_operation_and_detour_status_deployed_browser_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
+| `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `guided_delivery_and_incident_replay_browser_verified_robot_capture_pending` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `real_robot_transfer_and_idempotent_map_import_field_verified` | `contracts`, `evidence` |
 
 ## Module details
@@ -39,8 +39,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `modules/contracts`, `contracts`
 - Entrypoints: none yet
 - Consumes: none
-- Produces: SensorSnapshot, RecordingBundle, MapJob
-- Provenance: V2 product contract
+- Produces: SensorSnapshot, RecordingBundle, MapJob, DiagnosticProfile, IncidentBundle
+- Provenance: V2 product contract; 2026-08-08 temporary development diagnostics and immutable incident evidence contract
 
 ### `data_capture`
 
@@ -64,19 +64,19 @@ this index describes code state and never implies robot acceptance.
 
 - Manifest: `architecture/modules/evidence.json`
 - Code roots: `modules/evidence`
-- Entrypoints: `gogoguard_evidence.journal:EventJournal`
-- Consumes: module events
-- Produces: gogoguard.event.v1 JSONL
-- Provenance: V2 product infrastructure
+- Entrypoints: `gogoguard_evidence.journal:EventJournal`, `gogoguard_evidence.incident_recorder:main`
+- Consumes: module events, navigation diagnostic streams, bounded ROS sensor and command windows
+- Produces: gogoguard.event.v1 JSONL, DiagnosticProfile, IncidentBundle, MCAP sensor evidence, synchronized replay preview
+- Provenance: V2 product infrastructure; 2026-08-08 temporary field-development recorder with production-mode fallback
 
 ### `field_workstation`
 
 - Manifest: `architecture/modules/field_workstation.json`
 - Code roots: `apps/field_workstation`, `deployment/workstation`
 - Entrypoints: `gogoguard_field_workstation.__main__:main`, `deployment/workstation/run-native`, `deployment/workstation/compose.yaml`
-- Consumes: robot Edge Agent API, sealed RecordingBundle, cloud GLIM progress and artifacts
-- Produces: field workflow UI, map version catalog, selected robot map deployment, robot release staging
-- Provenance: V2 three-end ownership correction agreed 2026-08-06
+- Consumes: robot Edge Agent API, sealed RecordingBundle, cloud GLIM progress and artifacts, immutable robot IncidentBundle exports
+- Produces: field workflow UI, map version catalog, selected robot map deployment, robot release staging, verified incident archive and synchronized replay
+- Provenance: V2 three-end ownership correction agreed 2026-08-06; 2026-08-08 Mac-owned automatic incident synchronization and replay
 
 ### `inspection`
 
@@ -120,8 +120,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `modules/navigation`, `third_party/locked_stack/src/go2_nav2_runtime`, `third_party/locked_stack/src/go2_nav2_interfaces`, `third_party/locked_stack/src/go2_fastlio_patrol`
 - Entrypoints: `gogoguard_navigation.supervisor:main`, `gogoguard_navigation.observer:main`, `ros2 launch go2_nav2_runtime active_map_patrol.launch.py`
 - Consumes: released route, map pose, local obstacle cloud
-- Produces: safe velocity candidate, navigation progress and operation lifecycle, layered diagnostics
-- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; 2026-08-07 delivery compatibility overlay accepts the commissioned 0.60 m/s route contract without mutating the locked source snapshot; runtime readiness and background reaping own the Unitree motion bridge for the complete Nav2 process lifetime; 2026-08-08 field trace map-6a79b7795da6 proved A* could find a local detour while MPPI twice rejected execution; the V2 overlay now retains the 0.20 m/s MPPI patrol gait and assigns bounded detours to Nav2 Regulated Pure Pursuit for zero-forward heading alignment plus effective forward recovery; 2026-08-08 ARM64 image lifecycle configure loaded both FollowPath MPPI and DetourPath Regulated Pure Pursuit; robot deployment and physical detour receipt remain pending
+- Produces: safe velocity candidate, navigation progress and operation lifecycle, layered diagnostics, renderable A* search outcome and failure reason
+- Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; 2026-08-07 delivery compatibility overlay accepts the commissioned 0.60 m/s route contract without mutating the locked source snapshot; runtime readiness and background reaping own the Unitree motion bridge for the complete Nav2 process lifetime; 2026-08-08 field trace map-6a79b7795da6 proved A* could find a local detour while MPPI twice rejected execution; the V2 overlay now retains the 0.20 m/s MPPI patrol gait and assigns bounded detours to Nav2 Regulated Pure Pursuit for zero-forward heading alignment plus effective forward recovery; 2026-08-08 ARM64 image lifecycle configure loaded both FollowPath MPPI and DetourPath Regulated Pure Pursuit; robot deployment and physical detour receipt remain pending; 2026-08-08 diagnostic overlay publishes bounded A* start/goal resolution, expanded cells, path and explicit failure outcome without changing planning policy
 
 ### `route`
 
@@ -137,9 +137,9 @@ this index describes code state and never implies robot acceptance.
 - Manifest: `architecture/modules/site_console.json`
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
-- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status
-- Produces: guided next-action workflow, operation receipts, field visualization, parameter and diagnostic views
-- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout; 2026-08-08 operation completion is explicitly a request receipt rather than route success; successful polling clears stale transient errors and patrol, replanning, detour, blocked and fault states have distinct operator wording; 2026-08-08 live browser receipt displayed BLOCKED as route obstruction while keeping the completed patrol operation explicitly scoped to request submission
+- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status, DiagnosticProfile, IncidentBundle replay
+- Produces: guided next-action workflow, operation receipts, field visualization, parameter and diagnostic views, diagnostic-mode controls, synchronized incident timeline
+- Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout; 2026-08-08 operation completion is explicitly a request receipt rather than route success; successful polling clears stale transient errors and patrol, replanning, detour, blocked and fault states have distinct operator wording; 2026-08-08 live browser receipt displayed BLOCKED as route obstruction while keeping the completed patrol operation explicitly scoped to request submission; 2026-08-08 browser-tested development/acceptance/production diagnostic modes and evidence-completeness-aware incident replay
 
 ### `transfer`
 

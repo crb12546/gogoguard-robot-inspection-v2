@@ -35,11 +35,26 @@ class FieldWorkstationApplication:
         self.catalog_path = self.data_root / "catalog.json"
         self._catalog_lock = threading.Lock()
         self._catalog = self._load_catalog()
+        self.incident_root = self.data_root / "incidents"
+        self.incident_root.mkdir(parents=True, exist_ok=True)
+        self._incident_stop = threading.Event()
+        self._incident_sync_lock = threading.Lock()
+        self._incident_thread: threading.Thread | None = None
 
     def start(self) -> None:
         self.journal.append("workstation.started", site_id=self.site_id)
+        self._incident_stop.clear()
+        self._incident_thread = threading.Thread(
+            target=self._incident_sync_loop,
+            name="incident-sync",
+            daemon=True,
+        )
+        self._incident_thread.start()
 
     def close(self) -> None:
+        self._incident_stop.set()
+        if self._incident_thread and self._incident_thread is not threading.current_thread():
+            self._incident_thread.join(timeout=2)
         self.journal.append("workstation.stopped", site_id=self.site_id)
 
     def status(self) -> dict:
@@ -200,6 +215,84 @@ class FieldWorkstationApplication:
 
     def navigation_diagnostics(self) -> dict:
         return self.robot.get("api/v1/navigation/diagnostics")
+
+    def diagnostic_profile(self) -> dict:
+        return self.robot.get("api/v1/diagnostics/profile")
+
+    def update_diagnostic_profile(self, value: dict) -> dict:
+        return self.robot.post("api/v1/diagnostics/profile", {"profile": value})
+
+    def capture_incident(self) -> dict:
+        return self.robot.post("api/v1/incidents/capture")
+
+    def incidents(self) -> list[dict]:
+        self.sync_incidents()
+        values = []
+        for path in sorted(self.incident_root.glob("incident-*/manifest.json"), reverse=True):
+            try:
+                values.append(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+        return values
+
+    def incident(self, incident_id: str) -> dict:
+        path = self._incident_path(incident_id) / "manifest.json"
+        if not path.is_file():
+            self.sync_incidents()
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise KeyError(incident_id) from exc
+
+    def incident_export(self, incident_id: str) -> dict:
+        incident = self.incident(incident_id)
+        return {"schema": "gogoguard.incident_export.v1", "incident": incident, "files": incident.get("files") or []}
+
+    def incident_file(self, incident_id: str, relative_name: str) -> Path:
+        root = self._incident_path(incident_id).resolve()
+        relative = Path(relative_name)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise KeyError(relative_name)
+        target = (root / relative).resolve()
+        if root not in target.parents or not target.is_file():
+            raise KeyError(relative_name)
+        allowed = {str(item.get("path")) for item in self.incident(incident_id).get("files") or []}
+        if relative.as_posix() not in allowed:
+            raise KeyError(relative_name)
+        return target
+
+    def sync_incidents(self) -> list[str]:
+        with self._incident_sync_lock:
+            try:
+                remote = self.robot.incidents()
+            except RobotConnectionError:
+                return []
+            synced = []
+            for item in remote:
+                incident_id = str(item.get("incident_id") or "")
+                if not incident_id.startswith("incident-") or item.get("state") not in {"sealed", "partial"}:
+                    continue
+                target = self._incident_path(incident_id)
+                manifest = target / "manifest.json"
+                if manifest.is_file():
+                    continue
+                try:
+                    self.robot.download_incident(incident_id, target)
+                    synced.append(incident_id)
+                    self.journal.append("incident.synced", incident_id=incident_id)
+                except (RobotConnectionError, OSError, ValueError) as exc:
+                    self.journal.append("incident.sync_failed", incident_id=incident_id, error=str(exc))
+            return synced
+
+    def _incident_sync_loop(self) -> None:
+        while not self._incident_stop.is_set():
+            self.sync_incidents()
+            self._incident_stop.wait(5.0)
+
+    def _incident_path(self, incident_id: str) -> Path:
+        if not incident_id.startswith("incident-") or "/" in incident_id or ".." in incident_id:
+            raise KeyError(incident_id)
+        return self.incident_root / incident_id
 
     def _load_catalog(self) -> dict:
         try:

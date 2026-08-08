@@ -104,6 +104,29 @@
         <details class="log-details"><summary>查看最近错误摘要</summary><pre id="diagnosticLogs">暂无</pre></details>
       </details>
     </section>
+    <section class="incident-lab">
+      <article class="panel incident-control">
+        <div class="panel-title"><div><span>研发事故记录</span><small>完整采集只在研发期间开启，到期自动回到生产模式</small></div><b id="diagnosticModeBadge">读取中</b></div>
+        <div class="diagnostic-profile-form">
+          <label>诊断档位<select id="diagnosticMode"><option value="development">研发：完整点云+视频+规划过程</option><option value="acceptance">验收：低频点云+代价地图</option><option value="production">生产：仅轻量状态日志</option></select></label>
+          <label>自动恢复<select id="diagnosticLifetime"><option value="next1">仅接下来 1 次巡检</option><option value="next3">接下来 3 次巡检</option><option value="60m">60 分钟后</option><option value="manual">手动关闭</option></select></label>
+        </div>
+        <div class="profile-explanation" id="diagnosticProfileHelp">研发模式会记录故障前 15 秒与后 5 秒；数据停车后同步到 Mac。</div>
+        <div class="inline-actions"><button id="saveDiagnosticMode">应用诊断档位</button><button id="captureIncident" class="secondary">手动保存当前现场</button><small id="diagnosticProfileMessage">正在读取</small></div>
+        <h3>事故历史</h3><div id="incidents" class="incident-list"><div class="asset-empty">暂无事故记录</div></div>
+      </article>
+      <article class="panel incident-replay">
+        <div class="panel-title"><div><span>同步现场回放</span><small id="incidentReplayMeta">选择一条事故，同时看现实、传感、规划与执行</small></div><b id="incidentReplayState">未选择</b></div>
+        <div id="incidentTruth" class="incident-truth">事故包会明确标记已有和缺失的证据，不会把推测写成现场事实。</div>
+        <div class="incident-views">
+          <figure><figcaption>摄像头现场</figcaption><video id="incidentVideo" controls muted playsinline></video><div id="incidentVideoMissing" class="incident-missing">没有同步视频</div></figure>
+          <figure><figcaption>3D 点云</figcaption><canvas id="incidentCloud"></canvas></figure>
+          <figure><figcaption>代价地图、原路线与 A* 搜索</figcaption><canvas id="incidentPlan"></canvas></figure>
+          <figure><figcaption>当时状态与决策</figcaption><pre id="incidentDecision">暂无数据</pre></figure>
+        </div>
+        <div class="incident-timeline"><span id="incidentTimeLabel">0.0 s</span><input id="incidentTimeline" type="range" min="0" max="0" step="0.1" value="0"></div>
+      </article>
+    </section>
   </main>
   <script src="/app.js"></script>
 </body>

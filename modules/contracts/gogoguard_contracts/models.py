@@ -28,6 +28,22 @@ class MapJobState(str, Enum):
     FAILED = "failed"
 
 
+class DiagnosticMode(str, Enum):
+    """Resource envelope for the temporary field-development recorder."""
+
+    DEVELOPMENT = "development"
+    ACCEPTANCE = "acceptance"
+    PRODUCTION = "production"
+
+
+class IncidentState(str, Enum):
+    CAPTURING = "capturing"
+    SEALING = "sealing"
+    SEALED = "sealed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
 @dataclass
 class DeviceStatus:
     schema: str = "gogoguard.device_status.v1"
@@ -109,6 +125,49 @@ class MapJob:
     bytes_transferred: int = 0
     bytes_total: int = 0
     transfer_rate_bps: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class DiagnosticProfile:
+    schema: str = "gogoguard.diagnostic_profile.v1"
+    revision: int = 1
+    mode: DiagnosticMode = DiagnosticMode.PRODUCTION
+    pre_trigger_s: float = 15.0
+    post_trigger_s: float = 5.0
+    point_cloud_hz: float = 0.0
+    record_camera: bool = False
+    record_costmap: bool = False
+    record_planner_detail: bool = False
+    expires_at: str | None = None
+    remaining_patrols: int | None = None
+    max_incidents: int = 20
+    max_storage_bytes: int = 2 * 1024 * 1024 * 1024
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class IncidentBundle:
+    schema: str = "gogoguard.incident_bundle.v1"
+    incident_id: str = ""
+    state: IncidentState = IncidentState.CAPTURING
+    trigger: str = "manual"
+    triggered_at: str = field(default_factory=utc_now)
+    started_at: str | None = None
+    ended_at: str | None = None
+    site_id: str = ""
+    robot_id: str = ""
+    sensor_id: str = ""
+    map_version: str | None = None
+    route_id: str | None = None
+    navigation_profile_revision: int | None = None
+    diagnostic_profile_revision: int = 1
+    diagnostic_mode: DiagnosticMode = DiagnosticMode.PRODUCTION
+    root: str = ""
+    files: list[dict[str, Any]] = field(default_factory=list)
+    evidence_present: list[str] = field(default_factory=list)
+    evidence_missing: list[str] = field(default_factory=list)
+    summary: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
 

@@ -11,9 +11,14 @@ const state = {
   cameraStarted: false,
   robotReachable: false,
   navigationProfile: null,
+  diagnosticProfile: null,
+  incidents: [],
+  incident: null,
+  incidentReplay: null,
   views: {
     live: {yaw: 0.7, pitch: 0.55, zoom: 28},
     result: {yaw: 0.7, pitch: 0.55, zoom: 18},
+    incident: {yaw: 0.7, pitch: 0.55, zoom: 28},
   },
 };
 
@@ -127,7 +132,7 @@ function drawCloud(canvas, points, trajectory, view) {
   const [context, width, height] = sizeCanvas(canvas);
   context.fillStyle = '#071421';
   context.fillRect(0, 0, width, height);
-  if ($('showMapPoints')?.checked !== false || canvas.id === 'cloud') {
+  if (canvas.id !== 'resultCloud' || $('showMapPoints')?.checked !== false) {
     for (const point of points || []) {
       const [x, y] = project(point, view, width, height);
       if (x < 0 || y < 0 || x > width || y > height) continue;
@@ -136,7 +141,7 @@ function drawCloud(canvas, points, trajectory, view) {
       context.fillRect(x, y, 2, 2);
     }
   }
-  if (trajectory?.length && $('showMapRoute')?.checked !== false) {
+  if (trajectory?.length && (canvas.id !== 'resultCloud' || $('showMapRoute')?.checked !== false)) {
     context.strokeStyle = '#22d3ee';
     context.lineWidth = 2.5;
     context.beginPath();
@@ -570,6 +575,168 @@ async function refreshDiagnostics() {
   } catch (error) { $('diagnosticSummary').textContent = friendlyError(error); }
 }
 
+const diagnosticModeLabels = {
+  development: '研发完整采集',
+  acceptance: '验收低负载采集',
+  production: '生产轻量记录',
+};
+
+function fillDiagnosticProfile(profile) {
+  state.diagnosticProfile = profile;
+  $('diagnosticMode').value = profile.mode;
+  $('diagnosticModeBadge').textContent = diagnosticModeLabels[profile.mode] || profile.mode;
+  $('diagnosticModeBadge').className = profile.mode === 'production' ? '' : 'online';
+  const expiry = profile.expires_at ? ` · ${profile.expires_at} 到期` : '';
+  const patrols = profile.remaining_patrols == null ? '' : ` · 剩余 ${profile.remaining_patrols} 次`;
+  $('diagnosticProfileMessage').textContent = `第 ${profile.revision} 版${patrols}${expiry}`;
+  const descriptions = {
+    development: '故障前 15 秒+后 5 秒；10 Hz 原始点云、H.264 视频、代价地图和规划过程。',
+    acceptance: '故障前 10 秒+后 5 秒；2 Hz 点云，不保存摄像头，用于验收时低负载取证。',
+    production: '不保存原始点云和视频，只保留已有的轻量运行状态链。',
+  };
+  $('diagnosticProfileHelp').textContent = descriptions[profile.mode];
+}
+
+async function refreshDiagnosticProfile() {
+  try { fillDiagnosticProfile(await api('/api/v1/diagnostics/profile')); }
+  catch (error) { $('diagnosticProfileMessage').textContent = friendlyError(error); }
+}
+
+async function saveDiagnosticProfile() {
+  const mode = $('diagnosticMode').value;
+  const lifetime = $('diagnosticLifetime').value;
+  const presets = {
+    development: {pre_trigger_s: 15, post_trigger_s: 5, point_cloud_hz: 10, record_camera: true, record_costmap: true, record_planner_detail: true},
+    acceptance: {pre_trigger_s: 10, post_trigger_s: 5, point_cloud_hz: 2, record_camera: false, record_costmap: true, record_planner_detail: true},
+    production: {pre_trigger_s: 0, post_trigger_s: 0, point_cloud_hz: 0, record_camera: false, record_costmap: false, record_planner_detail: false},
+  };
+  const profile = {...presets[mode], mode, max_incidents: 20, max_storage_bytes: 2 * 1024 ** 3};
+  if (mode !== 'production' && lifetime === 'next1') profile.remaining_patrols = 1;
+  if (mode !== 'production' && lifetime === 'next3') profile.remaining_patrols = 3;
+  if (mode !== 'production' && lifetime === '60m') profile.expires_at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  try {
+    const result = await post('/api/v1/diagnostics/profile', {profile});
+    fillDiagnosticProfile(result.profile);
+    $('diagnosticProfileMessage').textContent = result.message;
+  } catch (error) { $('diagnosticProfileMessage').textContent = friendlyError(error); }
+}
+
+function renderIncidents() {
+  $('incidents').innerHTML = state.incidents.map(incident => {
+    const selected = incident.incident_id === state.incident?.incident_id ? ' selected' : '';
+    const missing = (incident.evidence_missing || []).length;
+    const stateLabel = incident.state === 'sealed' ? '证据完整' : '证据不完整';
+    return `<button class="incident-row${selected}" data-incident-id="${escapeHtml(incident.incident_id)}"><span><strong>${escapeHtml(incident.trigger || '未知事件')}</strong><small>${escapeHtml(incident.triggered_at || '')} · ${escapeHtml(incident.map_version || '未绑定地图')}</small></span><b class="${missing ? 'warn' : 'ok'}">${stateLabel}</b></button>`;
+  }).join('') || '<div class="asset-empty">暂无事故记录</div>';
+}
+
+async function refreshIncidents() {
+  try {
+    const value = await api('/api/v1/incidents');
+    state.incidents = value.items || [];
+    renderIncidents();
+  } catch (_) {
+    // Robot offline does not invalidate incidents already synchronized to Mac.
+  }
+}
+
+function incidentEventAt(kind, epoch, predicate = () => true) {
+  const events = state.incidentReplay?.events || [];
+  let selected = null;
+  for (const event of events) {
+    // Slider values are decimal strings; tolerate sub-millisecond floating
+    // point rounding at the exact final event.
+    if (Number(event.timestamp) > epoch + 0.001) break;
+    if (event.kind === kind && predicate(event)) selected = event;
+  }
+  return selected;
+}
+
+function drawIncidentPlan(epoch) {
+  const canvas = $('incidentPlan');
+  const [context, width, height] = sizeCanvas(canvas);
+  context.fillStyle = '#07111f'; context.fillRect(0, 0, width, height);
+  const costmap = incidentEventAt('costmap', epoch);
+  const routeEvent = incidentEventAt('route', epoch);
+  const poseEvent = incidentEventAt('pose', epoch);
+  const planner = incidentEventAt('decision', epoch, event => event.topic === '/go2/runtime/planner_diagnostics');
+  const route = routeEvent?.points || state.incidentReplay?.route || [];
+  if (costmap) {
+    const gridWidth = costmap.width || 1, gridHeight = costmap.height || 1;
+    const scale = Math.min(width / gridWidth, height / gridHeight);
+    const ox = (width - gridWidth * scale) / 2, oy = (height - gridHeight * scale) / 2;
+    for (let y = 0; y < gridHeight; y += 1) for (let x = 0; x < gridWidth; x += 1) {
+      const value = Number(costmap.costs[y * gridWidth + x]);
+      if (value < 0) context.fillStyle = '#16263a';
+      else if (value >= 65) context.fillStyle = '#ef4444cc';
+      else if (value > 0) context.fillStyle = `rgba(251,146,60,${Math.max(.12, value / 100)})`;
+      else context.fillStyle = '#0b1d2e';
+      context.fillRect(ox + x * scale, oy + (gridHeight - 1 - y) * scale, Math.ceil(scale), Math.ceil(scale));
+    }
+    const world = point => [ox + (point[0] - costmap.origin[0]) / costmap.resolution * scale,
+      oy + (gridHeight - (point[1] - costmap.origin[1]) / costmap.resolution) * scale];
+    if (route.length) {
+      context.strokeStyle = '#22d3ee'; context.lineWidth = 2; context.beginPath();
+      route.forEach((point, index) => { const p = world(point); index ? context.lineTo(...p) : context.moveTo(...p); }); context.stroke();
+    }
+    for (const cell of planner?.payload?.expandedCells || []) {
+      context.fillStyle = '#a78bfa55'; context.fillRect(ox + cell[0] * scale, oy + (gridHeight - 1 - cell[1]) * scale, Math.max(1, scale), Math.max(1, scale));
+    }
+    const path = planner?.payload?.pathPoints || [];
+    if (path.length) {
+      context.strokeStyle = '#4ade80'; context.lineWidth = 3; context.beginPath();
+      path.forEach((point, index) => { const p = world(point); index ? context.lineTo(...p) : context.moveTo(...p); }); context.stroke();
+    }
+    if (poseEvent?.pose) {
+      const p = world([poseEvent.pose.x, poseEvent.pose.y]);
+      context.fillStyle = '#fb923c'; context.beginPath(); context.arc(p[0], p[1], 7, 0, Math.PI * 2); context.fill();
+      context.strokeStyle = '#fb923c'; context.lineWidth = 3; context.beginPath(); context.moveTo(...p);
+      context.lineTo(p[0] + Math.cos(poseEvent.pose.yaw || 0) * 22, p[1] - Math.sin(poseEvent.pose.yaw || 0) * 22); context.stroke();
+    }
+  } else {
+    context.fillStyle = '#8fa4bb'; context.textAlign = 'center'; context.fillText('这次事故没有保存局部代价地图', width / 2, height / 2);
+  }
+  const runtime = incidentEventAt('runtime', epoch);
+  $('incidentDecision').textContent = JSON.stringify({runtime: runtime?.payload || null, planner: planner?.payload || null, pose: poseEvent?.pose || null}, null, 2);
+}
+
+function renderIncidentFrame() {
+  if (!state.incidentReplay) return;
+  const events = state.incidentReplay.events || [];
+  const start = events.length ? Number(events[0].timestamp) : Number(state.incidentReplay.triggered_at_epoch || 0);
+  const offset = Number($('incidentTimeline').value || 0);
+  const epoch = start + offset;
+  $('incidentTimeLabel').textContent = `${offset.toFixed(1)} s`;
+  const cloud = incidentEventAt('cloud', epoch);
+  const route = incidentEventAt('route', epoch)?.points || state.incidentReplay.route || [];
+  drawCloud($('incidentCloud'), cloud?.points || [], route.map(point => [point[0], point[1], 0]), state.views.incident);
+  drawIncidentPlan(epoch);
+}
+
+async function openIncident(incidentId) {
+  state.incident = await api(`/api/v1/incidents/${encodeURIComponent(incidentId)}`);
+  renderIncidents();
+  $('incidentReplayState').textContent = state.incident.state === 'sealed' ? '已封存' : '证据不完整';
+  $('incidentReplayState').className = state.incident.state === 'sealed' ? 'online' : '';
+  $('incidentReplayMeta').textContent = `${state.incident.incident_id} · ${state.incident.map_version || '未绑定地图'} · ${state.incident.route_id || '未绑定路线'}`;
+  const present = state.incident.evidence_present || [], missing = state.incident.evidence_missing || [];
+  $('incidentTruth').innerHTML = `<b>已有证据：</b>${escapeHtml(present.join('、') || '无')}<br><b>缺失证据：</b>${escapeHtml(missing.join('、') || '无')}`;
+  const replayFile = (state.incident.files || []).find(item => item.path === 'replay.json');
+  if (!replayFile) {
+    state.incidentReplay = null; $('incidentDecision').textContent = '该事故没有可视化回放数据'; return;
+  }
+  state.incidentReplay = await api(`/api/v1/incidents/${encodeURIComponent(incidentId)}/files/replay.json`);
+  const events = state.incidentReplay.events || [];
+  const duration = events.length > 1 ? Number(events[events.length - 1].timestamp) - Number(events[0].timestamp) : 0;
+  $('incidentTimeline').max = Math.max(0, duration).toFixed(1);
+  $('incidentTimeline').value = Math.min(Math.max(0, Number(state.incidentReplay.triggered_at_epoch || 0) - Number(events[0]?.timestamp || 0)), duration).toFixed(1);
+  const video = (state.incident.files || []).find(item => item.path.startsWith('camera/') && item.path.endsWith('.mp4'));
+  $('incidentVideoMissing').hidden = Boolean(video);
+  $('incidentVideo').hidden = !video;
+  if (video) $('incidentVideo').src = `/api/v1/incidents/${encodeURIComponent(incidentId)}/files/${video.path.split('/').map(encodeURIComponent).join('/')}`;
+  renderIncidentFrame();
+}
+
 async function refreshNavigation() {
   try {
     state.navigation = await api('/api/v1/navigation');
@@ -695,10 +862,36 @@ $('stopPatrol').addEventListener('click', () => navigationAction('stop'));
 $('saveProfile').addEventListener('click', saveProfile);
 $('rollbackProfile').addEventListener('click', rollbackProfile);
 $('refreshDiagnostics').addEventListener('click', refreshDiagnostics);
+$('diagnosticMode').addEventListener('change', () => {
+  const mode = $('diagnosticMode').value;
+  const descriptions = {
+    development: '故障前 15 秒+后 5 秒；10 Hz 原始点云、H.264 视频、代价地图和规划过程。',
+    acceptance: '故障前 10 秒+后 5 秒；2 Hz 点云，不保存摄像头。',
+    production: '不保存原始点云和视频，只保留轻量运行状态。',
+  };
+  $('diagnosticProfileHelp').textContent = descriptions[mode];
+  $('diagnosticLifetime').disabled = mode === 'production';
+});
+$('saveDiagnosticMode').addEventListener('click', saveDiagnosticProfile);
+$('captureIncident').addEventListener('click', async () => {
+  try {
+    await post('/api/v1/incidents/capture');
+    $('diagnosticProfileMessage').textContent = '已请求保存当前现场；将在后置时间窗结束后封存';
+  } catch (error) { $('diagnosticProfileMessage').textContent = friendlyError(error); }
+});
+$('incidents').addEventListener('click', event => {
+  const row = event.target.closest('[data-incident-id]');
+  if (row) openIncident(row.dataset.incidentId).catch(error => {
+    $('incidentDecision').textContent = friendlyError(error);
+  });
+});
+$('incidentTimeline').addEventListener('input', renderIncidentFrame);
+attachCloudControls($('incidentCloud'), state.views.incident, renderIncidentFrame);
 addEventListener('resize', () => {
   renderLive();
   redrawResult();
   drawNavigation();
+  renderIncidentFrame();
 });
 
 async function initialize() {
@@ -712,9 +905,12 @@ async function initialize() {
   refreshCamera();
   refreshNavigation();
   refreshProfile();
+  refreshDiagnosticProfile();
+  refreshIncidents();
   scheduledTick();
   setInterval(refreshCamera, 2000);
   setInterval(refreshMapJobs, 3000);
+  setInterval(refreshIncidents, 5000);
 }
 
 let tickBusy = false;

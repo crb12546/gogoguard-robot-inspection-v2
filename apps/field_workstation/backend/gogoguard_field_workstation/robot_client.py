@@ -62,6 +62,9 @@ class RobotClient:
     def sessions(self) -> list[dict]:
         return list(self.get("api/v1/sessions").get("items") or [])
 
+    def incidents(self) -> list[dict]:
+        return list(self.get("api/v1/incidents").get("items") or [])
+
     def start_recording(self) -> dict:
         return self.post("api/v1/sessions/start")
 
@@ -156,6 +159,56 @@ class RobotClient:
             bytes_transferred=total,
             bytes_total=total,
             transfer_rate_bps=total / max(time.monotonic() - started, 0.001),
+        )
+        return destination
+
+    def download_incident(self, incident_id: str, destination: Path) -> Path:
+        descriptor = self.get(
+            f"api/v1/edge/incidents/{quote(incident_id, safe='')}/export"
+        )
+        manifest = dict(descriptor["incident"])
+        destination = Path(destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        for item in descriptor.get("files") or []:
+            relative = Path(str(item["path"]))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise RobotConnectionError("robot returned an unsafe incident path")
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            expected_size = int(item["bytes"])
+            expected_sha = str(item["sha256"])
+            if target.is_file() and target.stat().st_size == expected_size and _sha256(target) == expected_sha:
+                continue
+            temporary = target.with_name(f".{target.name}.part")
+            offset = min(temporary.stat().st_size, expected_size) if temporary.exists() else 0
+            if temporary.exists() and temporary.stat().st_size > expected_size:
+                temporary.unlink()
+                offset = 0
+            encoded = "/".join(quote(value, safe="") for value in relative.parts)
+            request = Request(
+                urljoin(
+                    self.base_url,
+                    f"api/v1/edge/incidents/{quote(incident_id, safe='')}/files/{encoded}",
+                ),
+                headers={"Range": f"bytes={offset}-"} if offset else {},
+            )
+            try:
+                response = urlopen(request, timeout=max(self.timeout_s, 60.0))
+            except (HTTPError, URLError, TimeoutError) as exc:
+                raise RobotConnectionError(f"incident download failed: {exc}") from exc
+            mode = "ab" if offset and getattr(response, "status", 200) == 206 else "wb"
+            with response, temporary.open(mode) as output:
+                while chunk := response.read(1024 * 1024):
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            if temporary.stat().st_size != expected_size or _sha256(temporary) != expected_sha:
+                temporary.unlink(missing_ok=True)
+                raise RobotConnectionError(f"incident file verification failed: {relative}")
+            os.replace(temporary, target)
+        manifest["root"] = str(destination)
+        (destination / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         return destination
 

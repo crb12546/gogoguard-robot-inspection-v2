@@ -35,6 +35,10 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.navigation_profile())
             if path == "/api/v1/navigation/diagnostics":
                 return self._json(200, self.server.application.navigation_diagnostics())
+            if path == "/api/v1/diagnostics/profile":
+                return self._json(200, self.server.application.diagnostic_profile())
+            if path == "/api/v1/incidents":
+                return self._json(200, {"items": self.server.application.incidents()})
             if path == "/api/v1/map-jobs":
                 return self._json(200, {"items": self.server.application.map_jobs()})
             if path == "/api/v1/sessions":
@@ -45,6 +49,28 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/map-jobs/([A-Za-z0-9-]+)", path)
             if match:
                 return self._json(200, self.server.application.map_job(match.group(1)))
+            match = re.fullmatch(r"/api/v1/incidents/(incident-[A-Za-z0-9-]+)", path)
+            if match:
+                return self._json(200, self.server.application.incident(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/edge/incidents/(incident-[A-Za-z0-9-]+)/export", path
+            )
+            if match:
+                return self._json(200, self.server.application.incident_export(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/edge/incidents/(incident-[A-Za-z0-9-]+)/files/(.+)", path
+            )
+            if match:
+                return self._stream_file(
+                    self.server.application.incident_file(match.group(1), unquote(match.group(2)))
+                )
+            match = re.fullmatch(
+                r"/api/v1/incidents/(incident-[A-Za-z0-9-]+)/files/(.+)", path
+            )
+            if match:
+                return self._stream_file(
+                    self.server.application.incident_file(match.group(1), unquote(match.group(2)))
+                )
             match = re.fullmatch(
                 r"/api/v1/edge/recordings/([A-Za-z0-9-]+)/export", path
             )
@@ -102,6 +128,11 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/navigation/profile":
                 body = self._body()
                 return self._json(200, self.server.application.update_navigation_profile(dict(body.get("profile") or {})))
+            if path == "/api/v1/diagnostics/profile":
+                body = self._body()
+                return self._json(200, self.server.application.update_diagnostic_profile(dict(body.get("profile") or {})))
+            if path == "/api/v1/incidents/capture":
+                return self._json(202, self.server.application.capture_incident())
             if path == "/api/v1/navigation/profile/rollback":
                 return self._json(200, self.server.application.rollback_navigation_profile())
             match = re.fullmatch(

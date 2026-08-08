@@ -10,6 +10,7 @@ required = {
         "trajectory", "cloud", "cameraFrame", "recordButton", "app.js",
         "巡检操作向导", "参数中心", "诊断中心", "blockedDecision",
         "发布所选地图与路线到机器狗", "自动清理并恢复",
+        "研发事故记录", "incidentTimeline", "diagnosticMode",
     ],
     "app.js": [
         "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
@@ -18,10 +19,12 @@ required = {
         "/api/v1/navigation/diagnostics", "/api/v1/navigation/profile",
         "mapSelectionExplicit", "candidateJobId",
         "巡检请求已提交", "规划绕障中", "LOCAL_DETOUR_ACCEPTED",
+        "/api/v1/incidents", "/api/v1/diagnostics/profile", "drawIncidentPlan",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",
         "[hidden]", "@media",
+        ".incident-lab", ".incident-views",
     ],
 }
 for name, needles in required.items():

@@ -1,6 +1,10 @@
 from .models import (
     CameraStreamStatus,
+    DiagnosticMode,
+    DiagnosticProfile,
     DeviceStatus,
+    IncidentBundle,
+    IncidentState,
     MapJob,
     MapJobState,
     RecordingSession,
@@ -12,7 +16,11 @@ from .models import (
 
 __all__ = [
     "CameraStreamStatus",
+    "DiagnosticMode",
+    "DiagnosticProfile",
     "DeviceStatus",
+    "IncidentBundle",
+    "IncidentState",
     "MapJob",
     "MapJobState",
     "RecordingSession",

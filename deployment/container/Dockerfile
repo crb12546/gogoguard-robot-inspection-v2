@@ -50,6 +50,7 @@ RUN cmake -S third_party/locked_stack/src/Livox-SDK2 -B /tmp/livox-sdk-build \
 
 COPY --from=locked_robot_deps /unitree_go /opt/gogoguard/ros_ws/src/unitree_go
 COPY modules/navigation/overlays/go2_nav2_runtime_delivery.patch /tmp/go2_nav2_runtime_delivery.patch
+COPY modules/navigation/overlays/go2_incident_diagnostics.patch /tmp/go2_incident_diagnostics.patch
 RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
@@ -62,6 +63,8 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/unitree_api /opt/gogoguard/ros_ws/src/ \
     && git -C /opt/gogoguard/ros_ws/src apply --check /tmp/go2_nav2_runtime_delivery.patch \
     && git -C /opt/gogoguard/ros_ws/src apply /tmp/go2_nav2_runtime_delivery.patch \
+    && git -C /opt/gogoguard/ros_ws/src apply --check /tmp/go2_incident_diagnostics.patch \
+    && git -C /opt/gogoguard/ros_ws/src apply /tmp/go2_incident_diagnostics.patch \
     && cp /opt/gogoguard/ros_ws/src/livox_ros_driver2/package_ROS2.xml \
       /opt/gogoguard/ros_ws/src/livox_ros_driver2/package.xml \
     && cp -a /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch_ROS2 \
@@ -80,7 +83,14 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && test -x install/lib/go2_map_manager/continuous_map_localizer \
     && test -x install/lib/go2_cmd_vel_bridge/go2_sdk2_udp_receiver \
     && test -x install/lib/go2_nav2_runtime/patrol_runtime_manager \
-    && rm -rf build log /tmp/go2_nav2_runtime_delivery.patch
+    && rm -rf build log /tmp/go2_nav2_runtime_delivery.patch /tmp/go2_incident_diagnostics.patch
+
+# H.264 incident video is remuxed without decode or encode. Keep this runtime
+# tool after the expensive ROS/C++ build so diagnostics changes do not
+# invalidate the Livox, FAST-LIO, Nav2 and Unitree compilation cache.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Pinned ARM64 MediaMTX release. The checksum is the upstream v1.20.0 release
 # checksum; the gateway only remuxes the commissioned Z1Pro H.264 RTSP stream.

@@ -92,6 +92,18 @@ setsid gogoguard-navigation-observer \
   >"$LOG_ROOT/navigation-observer.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
+# Development evidence is dormant under the production diagnostic profile.
+# When explicitly enabled it writes a bounded pre/post-trigger ring without
+# decoding camera video or participating in the navigation command path.
+setsid gogoguard-incident-recorder \
+  --data-root /var/lib/gogoguard \
+  --site-id local-first-site \
+  --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
+  --camera-source rtsp://192.168.144.108/ \
+  >"$LOG_ROOT/incident-recorder.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
 # The web API is only a client. This single, persistent owner prevents page or
 # API restarts from leaving duplicate Nav2/MPPI and Unitree bridge generations.
 setsid gogoguard-navigation-supervisor \

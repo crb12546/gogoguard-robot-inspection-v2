@@ -311,6 +311,62 @@ Updated: 2026-08-08
   command motion; physical clear-route and obstacle-detour acceptance remain
   pending.
 
+## 2026-08-08 temporary development incident replay (built, not deployed)
+
+- The evidence gap exposed by the second obstacle test is now explicit: the
+  deployed JSONL flight trace records PointCloud2 metadata but not XYZ bytes,
+  the historical local costmap or synchronized camera frames. It can prove
+  that the runtime returned `LOCAL_PATH_BLOCKED`, but cannot prove whether the
+  physical scene actually had a passable corridor.
+- A versioned `DiagnosticProfile` now separates `development`, `acceptance`
+  and `production` resource envelopes. Development retains a bounded 15-second
+  pre-trigger and 5-second post-trigger window with 10 Hz PointCloud2, local
+  costmap, TF/localization/commands, H.264 camera segments and planner detail.
+  Acceptance uses 2 Hz point cloud without camera. Production records none of
+  those heavy streams. A time or patrol-count limit automatically returns the
+  robot to production mode.
+- The new recorder is a dormant process in the existing primary edge
+  container, not a microservice or navigation dependency. It serializes only
+  while a non-production profile and patrol are active, writes bounded data,
+  never uploads during patrol, and is not part of the velocity command path.
+  Camera capture is H.264 remux without decode or encode; replay, rendering and
+  analysis remain on the Mac.
+- `BLOCKED`, `FAULT` or a manual request freezes an immutable IncidentBundle
+  containing checksummed MCAP sensor messages, a browser replay index,
+  parameters, route/map references, decisions and available camera segments.
+  The local A* overlay additionally publishes start/goal resolution, expanded
+  cells, compute time, path or the explicit `invalid_grid`,
+  `start_surrounded`, `goal_surrounded`, `expansion_limit` or `disconnected`
+  outcome without changing the planner policy.
+- The Mac workstation automatically discovers, resumes, hashes and archives
+  robot incident files. Its browser UI controls the temporary diagnostic mode
+  and expiry and replays video, 3D point cloud, costmap/original route/A*
+  search, pose and decisions on one timeline. Missing evidence is displayed as
+  missing instead of being inferred.
+- The old metadata-only runtime trace can be imported as a truthful partial
+  incident. A fixture reproduced the latest `BLOCKED / LOCAL_PATH_BLOCKED`
+  endpoint and explicitly listed point-cloud XYZ, local costmap, camera and A*
+  search cells as unavailable.
+- Offline evidence is 54 passing tests, Python compilation, UI and container
+  contract checks, clean sequential application of the delivery and incident
+  ROS overlays, and direct verification of the Humble MCAP writer API in the
+  completed ARM64 edge image. Real browser checks passed at 1280 px and 390 px
+  with no horizontal overflow or console error.
+- Built artifacts are
+  `gogoguard-robot-inspection:v2-edge-20260808-incident-r1` for Linux ARM64
+  (local image ID `sha256:95120e4e71af00c230cd6e324811feadd03214944cd72d957f5caad491916e25`)
+  and `gogoguard-field-workstation:20260808-incident-r1` for the Mac
+  workstation (local image ID
+  `sha256:68b2c4cad1d6fc850403098a53fd4c8a64c03e81aca1ee7820aab92370621238`).
+  In-image checks proved the recorder entry point and FFmpeg are installed,
+  the production default disables heavy capture, the planner diagnostics
+  overlay is present and a real `rosbag2_py` MCAP file can be written.
+- Neither image has been deployed and no robot connection or motion occurred
+  for this work. Before field use, deploy through the existing checksummed
+  Mac-to-robot release path, enable development mode for one patrol, and
+  compare CPU, memory, disk throughput, LiDAR/odometry rate, controller cadence
+  and temperature against the production-mode baseline.
+
 ## Known field follow-ups
 
 - Historical recordings, maps and navigation candidates remain truthfully

@@ -2,11 +2,11 @@
   "id": "field_workstation",
   "responsibility": "Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment",
   "runtime": ["workstation", "browser"],
-  "status": "deployed_roundtrip_verified_with_operation_specific_robot_timeouts",
+  "status": "incident_auto_sync_and_replay_offline_browser_verified_robot_pending",
   "codeRoots": ["apps/field_workstation", "deployment/workstation"],
   "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
   "dependsOn": ["contracts", "transfer", "map_factory", "site_console", "evidence"],
-  "consumes": ["robot Edge Agent API", "sealed RecordingBundle", "cloud GLIM progress and artifacts"],
-  "produces": ["field workflow UI", "map version catalog", "selected robot map deployment", "robot release staging"],
-  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06"]
+  "consumes": ["robot Edge Agent API", "sealed RecordingBundle", "cloud GLIM progress and artifacts", "immutable robot IncidentBundle exports"],
+  "produces": ["field workflow UI", "map version catalog", "selected robot map deployment", "robot release staging", "verified incident archive and synchronized replay"],
+  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06", "2026-08-08 Mac-owned automatic incident synchronization and replay"]
 }
