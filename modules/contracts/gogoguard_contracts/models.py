@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import math
 from pathlib import Path
 from typing import Any
 
@@ -182,4 +183,6 @@ def json_ready(value: Any) -> Any:
         return {str(key): json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [json_ready(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     return value

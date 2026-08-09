@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from gogoguard_contracts import json_ready
+
 
 class SiteConsoleServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -251,7 +253,12 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     def _json(self, status: int, value) -> None:
-        content = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+        content = json.dumps(
+            json_ready(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))

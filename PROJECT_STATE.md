@@ -759,6 +759,25 @@ parameters. Record each result before calling the release field-accepted.
   robot-side probe and the final workstation stop both returned
   `stopMoveConfirmed=true` and `remoteControlReleased=true`.
 
+## 2026-08-09 map publication UI correction (Mac workstation)
+
+- Recording `20260809T055524Z-236f3c74` sealed with 95 frames. Cloud GLIM job
+  `map-799f6f04e11d` completed, and the resulting map plus the 9.805 m,
+  37-waypoint route `route-799f6f04e11d-recorded` were published to the robot.
+- The operator-facing publication error was false: the navigation status still
+  contained an expired costmap age represented by Python as positive infinity.
+  The HTTP server emitted bare `Infinity`, which browser `JSON.parse` correctly
+  rejects even though Python's permissive decoder accepts it. Publication and
+  artifact transfer had already succeeded.
+- The shared JSON contract now converts every non-finite float (`NaN`, positive
+  infinity and negative infinity) to JSON `null`; the HTTP boundary also uses
+  `allow_nan=False` so a future unsanitized value fails during development
+  instead of corrupting the browser response. The native workstation was
+  restarted without changing the robot image or starting robot motion.
+- Receipt: 80 tests pass. A strict JSON decoder accepts `/api/v1/navigation`,
+  and browser verification shows `map-799f6f04e11d` as the current selected and
+  published map with no parse error.
+
 ## Next experiment (supersedes all older paragraphs)
 
 Keep `planar-release-r4` fixed and collect only the remaining acceptance
