@@ -2,11 +2,11 @@
   "id": "localization",
   "responsibility": "FAST-LIO local odometry plus continuous VGICP localization against one GLIM map",
   "runtime": ["robot"],
-  "status": "fixed_map_localization_vgicp_orin_v2_deployed_static_verified_motion_pending",
+  "status": "fixed_map_localization_vgicp_orin_v2_deployed_false_recovery_lockout_field_reproduced",
   "codeRoots": ["modules/localization", "third_party/locked_stack/src/FAST_LIO", "third_party/locked_stack/src/go2_map_manager"],
   "entrypoints": ["ros2 run fast_lio fastlio_mapping", "ros2 run go2_map_manager calibrated_cloud_transformer", "ros2 run go2_map_manager continuous_map_localizer"],
   "dependsOn": ["contracts", "device_io", "calibration"],
   "consumes": ["/mapping/livox/lidar", "/mapping/livox/imu", "/navigation/cloud_body", "versioned localization map PCD"],
   "produces": ["/Odometry", "map -> odom", "/localization/pose", "/localization/status", "/localization/usable"],
-  "sourceProvenance": ["old FAST-LIO tree 36ee56ee", "old go2_map_manager tree 3a512028", "small_gicp commit 8a2d373", "2026-08-09 localization-owned build patch go2-vgicp-orin-v2 bounds registration to a 24 m scan and 32 m local target after a field trace reached 144k target points and 526 ms; continuous-r1 deployed it without changing the frozen capability snapshot, generation 4 candidate binding passed, quality gates and V1 compatibility remain, and motion timing acceptance is pending"]
+  "sourceProvenance": ["old FAST-LIO tree 36ee56ee", "old go2_map_manager tree 3a512028", "small_gicp commit 8a2d373", "2026-08-09 localization-owned build patch go2-vgicp-orin-v2 bounds registration to a 24 m scan and 32 m local target after a field trace reached 144k target points and 526 ms; continuous-r1 deployed it without changing the frozen capability snapshot, generation 4 candidate binding passed, quality gates and V1 compatibility remain", "2026-08-09 complete-r1 map-6855ba54ae11 field trace produced eight localization holds; final recovery accepted a 3.58 m map-pose shift while FAST-LIO odometry moved 0.066 m because recovery disables the normal 0.75 m tracking jump constraint and accepts matches inside a 4 m recovery zone, then rejected 15 strong matches outside the shifted zone. Root cause is false in-zone relocalization followed by recovery-center lockout; no correction is deployed"]
 }

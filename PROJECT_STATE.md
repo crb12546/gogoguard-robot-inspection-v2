@@ -25,7 +25,7 @@ teleoperation remain later or parallel slices.
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts | Manual map quality approval/correction is not a complete workflow |
 | Map and route assets | Maps have versions/history/labels; recorded trajectories create map-bound generation-3 routes and can be published back to the robot | No independent graphical route editor; route editing/version comparison is incomplete |
-| Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols | Deliberate localization-loss and resume acceptance remains pending |
+| Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols | The latest long-route patrol exposed false in-zone relocalization followed by recovery-zone lockout; correction and repeatability acceptance are pending |
 | Navigation and motion | Nav2/MPPI has completed real routes; real dead-end stopping and remote-control release are verified | Sustained cruise speed, passable detour/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is the working delivery console for mapping, history, publication, patrol, parameters and diagnostics | It is an engineering/field UI, not a finished operator product; several workflows still need simplification |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
@@ -176,6 +176,48 @@ boundaries and receipts to distinguish them.
 
 ### Latest verified patrol and current diagnosis
 
+- The first physical `complete-r1` patrol selected the 318.997 m,
+  1,119-waypoint `map-6855ba54ae11` route, which runtime densified to 2,541
+  poses. From 20:03:54 to the operator stop at 20:07:59 CST, it reached only
+  index 364 (14.3%) with 275.43 m remaining. The last place at which the
+  operator could not regain localization was therefore not the route endpoint.
+- Runtime intentionally entered `HOLDING` eight times with
+  `LOCALIZATION_NOT_TRACKING`. This is the configured localization-loss
+  motion hold, not a periodic stop: localization becomes unusable after about
+  1.0 s without an accepted pose, enters recovery after about 2.5 s, and the
+  route suffix is resubmitted after 0.5 s of stable recovery. The earlier
+  holds recovered and continued, which matches the operator observation.
+- The triggering localization behavior was not healthy. Across the trace the
+  localizer reported 56 `not_converged`, 23 `translation_jump`, 65
+  `localization_input_stale` and 12 `localization_input_timeout` results.
+  These short failures exhausted the freshness window and caused the eight
+  protective holds; they were not obstacle, A*, MPPI or collision-monitor
+  decisions.
+- The final unrecovered hold began at 20:07:02 around map pose
+  `(3.098, -40.227)`. During the stopped interval FAST-LIO odometry moved only
+  0.066 m, but recovery accepted two VGICP matches and recentered the map pose
+  at `(4.779, -43.366)`, a 3.58 m change. Recovery mode does not apply the
+  normal 0.75 m tracking jump limit; it accepted this result because it was
+  still inside the broad 4.0 m recovery radius plus margin.
+- That false in-zone acceptance became the lockout center. The following 15
+  recovery results had strong geometry (roughly 0.86--0.90 inlier ratio and
+  0.046--0.065 fitness MSE) but were all rejected as
+  `initial_result_outside_declared_zone`. The last accepted localization aged
+  to about 49.3 s before the operator stopped. `COSTMAP_ROBOT_OUTSIDE` and
+  controller transform-extrapolation messages were downstream consequences,
+  not the initiating failure.
+- The field root cause is therefore defined as: patrol-time localization
+  recovery can accept a false but in-radius pose jump, propagate it as the new
+  recovery center, and then reject subsequent likely-correct matches outside
+  that shifted zone. Navigation's localization hold acted protectively once
+  the pose became untrustworthy and should not be classified as the root
+  cause. No runtime or parameter correction has been made yet.
+- Complete trace and checked evidence were synchronized under
+  `workstation-data/field-runs/20260809-120334-complete-r1-map685`. All 56
+  captured files passed their IncidentBundle hashes. The eight bundles remain
+  partial because the persisted diagnostic profile still has zero-second
+  pre/post windows; the complete runtime trace supplied the localization,
+  odometry and runtime sequence used above.
 - The first physical `continuous-r1` patrol on `map-799f6f04e11d` regressed
   severely versus `cruise-r1`: the operator stopped it after 86.9 seconds at
   94.7% and about 0.55 m remaining. Nav2 emitted 52
