@@ -121,7 +121,6 @@ controller_server:
         threshold_to_consider: 0.4
         max_angle_to_furthest: 1.2
         forward_preference: true
-
     # RPP owns only a bounded path from the current pose to a future route
     # rejoin anchor. Once that goal succeeds, the runtime gives the remaining
     # recorded route back to MPPI. Its default survives the downstream 0.85
@@ -190,7 +189,10 @@ local_costmap:
         mid360_body:
           topic: /navigation/cloud_body
           data_type: PointCloud2
-          min_obstacle_height: -0.10
+          # Ignore the floor-return band around z=0. The commissioned incident
+          # showed a one-frame StopZone hit with no persistent obstacle; real
+          # traversability hazards rise above this small calibration margin.
+          min_obstacle_height: 0.05
           max_obstacle_height: 1.45
           obstacle_min_range: 0.15
           obstacle_max_range: 4.0
@@ -238,8 +240,10 @@ collision_monitor:
       type: polygon
       points: [0.55, 0.27, 0.55, -0.27, -0.38, -0.27, -0.38, 0.27]
       action_type: stop
-      # Humble calls this max_points: 3 means four in-zone returns trigger.
-      max_points: 3
+      # Humble triggers when the in-zone count is greater than max_points.
+      # Nine coherent returns still react immediately to a physical object,
+      # while rejecting the observed isolated floor/self-return burst.
+      max_points: 8
       visualize: true
       polygon_pub_topic: /go2/collision/stop_zone
       enabled: true
@@ -251,7 +255,7 @@ collision_monitor:
       # indefinitely occupied slowdown zone.
       points: [1.00, 0.30, 1.00, -0.30, -0.55, -0.30, -0.55, 0.30]
       action_type: slowdown
-      max_points: 3
+      max_points: 8
       # 0.45 reduced the observed 0.341 m/s command to 0.153 m/s, below the
       # commissioned Go2 gait deadband, and caused a 15 s progress failure.
       slowdown_ratio: 0.85
@@ -264,13 +268,13 @@ collision_monitor:
       footprint_topic: /local_costmap/published_footprint
       time_before_collision: 0.7
       simulation_time_step: 0.10
-      max_points: 3
+      max_points: 8
       visualize: false
       enabled: true
     observation_sources: [mid360_body]
     mid360_body:
       type: pointcloud
       topic: /navigation/cloud_body
-      min_height: -0.10
+      min_height: 0.05
       max_height: 1.45
       enabled: true

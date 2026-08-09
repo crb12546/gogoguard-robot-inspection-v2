@@ -1,9 +1,9 @@
-"""Bounded development flight recorder for navigation incidents.
+"""Bounded passive flight recorder for navigation incidents.
 
 The recorder is deliberately outside the motion path.  It serializes ROS
-messages only while a non-production diagnostic profile is active, freezes a
-small pre/post-trigger window on BLOCKED/FAULT, and leaves all rendering and
-replay work to the Mac workstation.
+messages into a bounded lightweight ring during every patrol, optionally adds
+heavy development streams, and leaves all decisions to navigation. Recorder
+health is observable but never authorizes or blocks motion.
 """
 
 from __future__ import annotations
@@ -28,12 +28,30 @@ from .incidents import DiagnosticProfileStore, IncidentStore, new_incident_id
 
 ACTIVE_STATES = {
     "STARTING", "LOCALIZING", "PATROLLING", "HOLDING", "RESUMING",
-    "REPLANNING", "DETOURING", "REJOINING", "RETRYING",
+    "REPLANNING", "DETOURING", "REJOINING", "RETRYING", "RECOVERING",
+    "SEARCHING_PATH",
 }
-TRIGGER_STATES = {"BLOCKED", "FAULT"}
+TRIGGER_STATES = {
+    "BLOCKED", "FAULT", "HOLDING", "RECOVERING", "SEARCHING_PATH",
+}
 TERMINAL_STATES = {
     "IDLE", "STOPPED", "COMPLETE", "COMPLETED", "BLOCKED", "FAULT",
 }
+
+LIGHTWEIGHT_PRODUCTION_TOPICS = frozenset(
+    {
+        "/Odometry",
+        "/localization/pose",
+        "/localization/status",
+        "/go2/runtime/status",
+        "/go2/safety/status",
+        "/go2/runtime/planner_diagnostics",
+        "/go2/runtime/route",
+        "/nav2/raw_cmd_vel",
+        "/patrol_cmd",
+        "/cmd_vel",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -213,7 +231,7 @@ class IncidentRecorder:
         return self._patrol_profile or self.profile_store.get()
 
     def _capture_enabled(self) -> bool:
-        return self._profile().mode != DiagnosticMode.PRODUCTION and self._patrol_active
+        return self._patrol_active
 
     def _store(self, topic: str, type_name: str, message: Any) -> None:
         if not self._capture_enabled() and topic != "/go2/runtime/status":
@@ -221,6 +239,11 @@ class IncidentRecorder:
         from rclpy.serialization import serialize_message
 
         profile = self._profile()
+        if (
+            profile.mode == DiagnosticMode.PRODUCTION
+            and topic not in LIGHTWEIGHT_PRODUCTION_TOPICS
+        ):
+            return
         sample = SerializedSample(topic, type_name, time.time_ns(), bytes(serialize_message(message)))
         # Protect the Orin even if a malformed profile or unusually dense cloud appears.
         byte_limit = min(profile.max_storage_bytes // 4, 256 * 1024 * 1024)
@@ -404,11 +427,11 @@ class IncidentRecorder:
                 missing.append("point_cloud")
             if "/localization/pose" in sample_topics:
                 present.append("localization")
-            elif profile.mode != DiagnosticMode.PRODUCTION:
+            else:
                 missing.append("localization")
             if sample_topics.intersection({"/nav2/raw_cmd_vel", "/patrol_cmd", "/cmd_vel"}):
                 present.append("commands")
-            elif profile.mode != DiagnosticMode.PRODUCTION:
+            else:
                 missing.append("commands")
             if self._current_route or (root / "route.json").is_file():
                 present.append("route")

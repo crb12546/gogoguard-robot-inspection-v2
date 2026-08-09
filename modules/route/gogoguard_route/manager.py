@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 3
+CANDIDATE_GENERATION = 4
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -194,7 +194,7 @@ class RouteManager:
                 "frames": {"map": "map", "odom": "odom", "base": "base_link"},
                 "localization": {
                     "mapArtifact": "localization_map",
-                    "qualityProfileId": "go2-vgicp-orin-v1",
+                    "qualityProfileId": "go2-vgicp-orin-v2",
                     "initializationZone": {
                         "kind": "circle",
                         "center": {"x": first["x"], "y": first["y"], "z": 0.0},

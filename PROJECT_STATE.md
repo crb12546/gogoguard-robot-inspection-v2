@@ -176,6 +176,38 @@ boundaries and receipts to distinguish them.
 
 ### Latest verified patrol and current diagnosis
 
+- The first physical `continuous-r1` patrol on `map-799f6f04e11d` regressed
+  severely versus `cruise-r1`: the operator stopped it after 86.9 seconds at
+  94.7% and about 0.55 m remaining. Nav2 emitted 52
+  `Optimizer fail to compute path` aborts; all 52 decisions reported a healthy
+  costmap and `routeObstructed=false`, and no localization-loss state occurred.
+- The failures aligned with route curvature: the first occurred at 44.0%, just
+  after an 84.7 degree corner at 41.8% route length; the second sustained stall
+  occurred at the final 31.1 degree bend around 94.4%. One valid interval moved
+  from 45.3% to 92.0% in about 10.5 seconds with a 0.548 m/s five-second mean
+  command, proving the receiver and robot can execute the higher straight-line
+  speed.
+- The field root cause is V4's non-curvature-aware MPPI speed shaping, not an
+  obstacle stop or receiver cap. `VelocityDeadbandCritic` was configured with
+  a 0.60 m/s forward deadband while `vx_max`/`vx_std` rose to 0.90/0.40. This
+  penalizes the low predicted velocities required through corners and terminal
+  convergence; MPPI's CostCritic then found all sampled trajectories colliding.
+  Continuous recovery amplified the regression by removing the retry bound and
+  clearing/reissuing the same suffix approximately every 1.1 seconds.
+- A local profile V5 correction is now prepared but not deployed. It removes
+  `VelocityDeadbandCritic`, treats 0.60 m/s only as MPPI's forward ceiling,
+  restores the route-completing 0.40 rad/s turn, 0.40 m/s detour and 0.90 m/s2
+  acceleration/deceleration envelope, and retains V4 continuous recovery plus
+  the independent 0.90 m/s receiver hard ceiling. Existing V4 profiles with
+  the exact failed speed tuple migrate deterministically; custom profiles are
+  preserved. One complete-route physical receipt is still required.
+- Evidence was synchronized to
+  `workstation-data/field-runs/20260809-105714-continuous-r1` and 52 Mac-side
+  IncidentBundles passed all 364 file hashes. The bundles exposed a separate
+  deployment defect: the persisted production diagnostic profile remained at
+  zero-second pre/post windows, so every recovery produced a one-sample partial
+  bundle missing command and localization topics instead of the intended
+  lightweight 15 s/5 s ring.
 - The latest measured speed receipt used `map-799f6f04e11d`, not the candidate
   currently selected above. It completed the 9.805 m route normally at 100%,
   with localization confidence about 0.90, no detour and no stop.
@@ -191,6 +223,63 @@ boundaries and receipts to distinguish them.
   `/var/lib/gogoguard/navigation/logs/runtime-20260809-072829-2656-part001.jsonl`.
   The immediately preceding comparison trace is
   `runtime-20260809-071035-63558-part001.jsonl` in the same directory.
+
+### Current deployment — static receipt passed; first field motion receipt failed
+
+- The navigation-profile V4 change set is deployed as
+  `gogoguard-robot-inspection:v2-edge-20260809-continuous-r1`. The managed
+  service is enabled and active. Deployment authorization did not include
+  starting localization/Nav2, the Unitree motion bridge or physical motion;
+  all three remained stopped and UDP 5005 remained unbound throughout the
+  receipt. The first later physical route acceptance failed with the 52-abort
+  recovery loop documented above; `continuous-r1` is not field-accepted.
+- The controller now distinguishes a 0.60 m/s measured cruise objective from
+  0.90 m/s controller/receiver headroom, migrates the old 0.90 m/s2
+  acceleration to 2.00 m/s2, adds 2.50 m/s2 deceleration, and gives MPPI an
+  explicit forward-velocity objective instead of treating 0.60 only as a cap.
+- MPPI abort, costmap interruption, actuation stall and unsuccessful local A*
+  are recoverable task states. Retry counters are diagnostic only; the runtime
+  retains route progress and continues rate-limited MPPI/A* search until route
+  completion or explicit operator stop. Immutable binding, invalid schemas,
+  non-finite data, Unitree-reported faults and the receiver watchdog remain
+  hard boundaries.
+- The short-dropout defect that left an accepted goal stuck in `HOLDING` is
+  corrected. Evidence-recorder health is observable but no longer gates
+  motion. Production evidence now keeps a bounded lightweight 15 s pre/5 s
+  post ring and seals `HOLDING`, `RECOVERING` and `SEARCHING_PATH` incidents.
+- The transient StopZone correction rejects the calibrated floor-return band
+  and requires nine coherent in-zone points rather than four. It does not
+  remove Collision Monitor, footprint collision checks or the Unitree command
+  watchdog.
+- Candidate generation 4 selects `go2-vgicp-orin-v2`: a 24 m scan and 32 m
+  local target replace the V1 35 m/45 m compute envelope after the incident
+  reached about 144k target points and 526 ms. Quality thresholds remain
+  unchanged and V1 remains readable. New field timing and localization-quality
+  receipts are required before promotion.
+- Offline receipts pass 87 unit tests, Python compilation, Site Console UI
+  smoke and container static validation. The complete Linux/ARM64
+  image `gogoguard-robot-inspection:v2-edge-20260809-continuous-r1` built all
+  ROS packages with local image/manifest-list ID
+  `sha256:59b1eff3aa1d394a963e2a1bcbe95430badf020d92a911ef64730501573d83dd`
+  (1,171,982,504 bytes). In-image checks confirmed the installed localizer and
+  receiver, `go2-vgicp-orin-v2` at 24/32/4 m, 0.60 m/s cruise objective,
+  0.90 m/s forward headroom, 2.00/2.50 m/s2 acceleration/deceleration and a
+  0.75 s replan cadence.
+- The 1,172,022,784-byte release archive passed SHA-256 on Mac and robot with
+  digest `6ad4843cdab418831b63bc40b42eb94ccdac80e254dfe54703676979a928ad4e`.
+  The robot loaded Linux/ARM64 image/config ID
+  `sha256:da0c1c6b7d90f5ba36a89db25f9ae75b98ba16ea39cd3ca97e44aeed9296caf6`.
+  A persisted 0.90 m/s experiment initially migrated as the V4 cruise target;
+  the deployment receipt corrected the active profile to revision 4 with
+  target/headroom/lateral values 0.60/0.90/0.20 m/s. The selected
+  `map-6855ba54ae11` candidate was regenerated in place as generation 4 with
+  `go2-vgicp-orin-v2`; its runtime-profile binding digest is
+  `49419c72179a0ea33ac9f4df0b3fd36ec7b9796f8c1425ccbdb8790e017a5e1f`.
+  Service startup reported about 10.06 Hz LiDAR, 200 Hz raw IMU and 10 Hz
+  odometry with no core-log errors. This is not evidence that the route can
+  yet complete at 0.60 m/s; the required next acceptance is one full route,
+  then three consecutive full routes, with automatic recovery and evidence
+  review.
 
 ### Development roadmap and current priorities
 

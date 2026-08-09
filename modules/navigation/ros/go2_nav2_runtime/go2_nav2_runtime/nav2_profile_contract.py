@@ -189,7 +189,6 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError("PathAngleCritic must remain enabled for fixed routes")
     if path_angle.get("forward_preference") is not True:
         raise Nav2ProfileError("PathAngleCritic must prefer forward route progress")
-
     detour = _mapping(controller.get("DetourPath"), "DetourPath")
     if (
         detour.get("plugin")
@@ -283,18 +282,25 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         max_points = zone.get("max_points")
         if not isinstance(max_points, int) or isinstance(max_points, bool) or max_points < 0:
             raise Nav2ProfileError("%s.max_points must be a non-negative integer" % name)
-        if max_points > 3:
+        if not 3 <= max_points <= 12:
             raise Nav2ProfileError(
-                "%s must trigger from four in-zone points on Humble" % name
+                "%s must require between four and thirteen coherent points" % name
             )
     approach_max_points = approach_zone.get("max_points")
     if (
         not isinstance(approach_max_points, int)
         or isinstance(approach_max_points, bool)
-        or not 0 <= approach_max_points <= 3
+        or not 3 <= approach_max_points <= 12
     ):
         raise Nav2ProfileError(
-            "FootprintApproach must trigger from four in-zone points on Humble"
+            "FootprintApproach must require between four and thirteen coherent points"
+        )
+    collision_min_height = _finite(
+        collision_source.get("min_height"), "collision mid360_body.min_height"
+    )
+    if collision_min_height < 0.03:
+        raise Nav2ProfileError(
+            "collision source must reject the calibrated floor-return band"
         )
     if stop_zone.get("action_type") != "stop" or slow_zone.get("action_type") != "slowdown":
         raise Nav2ProfileError("collision zones have incorrect actions")

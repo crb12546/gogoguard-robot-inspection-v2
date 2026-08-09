@@ -8,7 +8,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git ninja-build pkg-config \
+    build-essential cmake git ninja-build patch pkg-config \
     python3-dev python3-matplotlib python3-pip python3-setuptools python3-yaml \
     python3-colcon-common-extensions python3-rosdep \
     libapr1-dev libboost-all-dev libeigen3-dev libomp-dev libpcl-dev \
@@ -52,6 +52,8 @@ COPY --from=locked_robot_deps /unitree_go /opt/gogoguard/ros_ws/src/unitree_go
 COPY modules/navigation/ros/go2_nav2_runtime /opt/gogoguard/ros_ws/src/go2_nav2_runtime
 COPY modules/device_io/ros/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp \
     /tmp/gogoguard-owned/go2_sdk2_udp_receiver.cpp
+COPY modules/localization/ros/patches/go2-vgicp-orin-v2.patch \
+    /tmp/gogoguard-owned/go2-vgicp-orin-v2.patch
 RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
@@ -63,6 +65,13 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/go2_fastlio_patrol /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/go2_site_ops /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/unitree_api /opt/gogoguard/ros_ws/src/ \
+    && cd /opt/gogoguard/ros_ws/src \
+    && patch --strip=1 --forward \
+      --input=/tmp/gogoguard-owned/go2-vgicp-orin-v2.patch \
+    && grep -q 'go2-vgicp-orin-v2' \
+      go2_map_manager/src/continuous_map_localizer.cpp \
+    && grep -q 'GO2_VGICP_ORIN_V2' \
+      go2_site_ops/go2_site_ops/localization_quality.py \
     && cp /opt/gogoguard/ros_ws/src/livox_ros_driver2/package_ROS2.xml \
       /opt/gogoguard/ros_ws/src/livox_ros_driver2/package.xml \
     && cp -a /opt/gogoguard/ros_ws/src/livox_ros_driver2/launch_ROS2 \

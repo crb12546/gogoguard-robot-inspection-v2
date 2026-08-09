@@ -37,6 +37,11 @@ void stop_signal_handler(int)
 
 constexpr uint32_t kCmdPacketMagic = 0x4732434dU;  // "G2CM"
 constexpr uint16_t kCmdPacketVersion = 2;
+// Device I/O owns only the final validity/watchdog envelope. Navigation owns
+// the target cruise and acceleration profile inside this control headroom.
+constexpr double kMaxForwardMps = 0.90;
+constexpr double kMaxLateralMps = 0.20;
+constexpr double kMaxYawRateRps = 0.60;
 
 #pragma pack(push, 1)
 struct CmdPacket
@@ -195,8 +200,8 @@ int main(int argc, char **argv)
   sport_client.SetTimeout(10.0f);
   sport_client.Init();
 
-  std::cout << "SDK command limits: max_vx=0.600 max_vy=0.200 "
-            << "max_vyaw=0.500" << std::endl;
+  std::cout << "SDK command limits: max_vx=0.900 max_vy=0.200 "
+            << "max_vyaw=0.600" << std::endl;
 
   // The active-map runtime is deliberately restarted when a new immutable
   // release is activated.  A software generation switch must never move the
@@ -381,7 +386,8 @@ int main(int argc, char **argv)
         pkt.packet_size == sizeof(CmdPacket))
     {
       const auto command = go2_cmd_vel_bridge::sanitize_planar_command(
-        pkt.vx, pkt.vy, pkt.vyaw, 0.60, 0.20, 0.5);
+        pkt.vx, pkt.vy, pkt.vyaw,
+        kMaxForwardMps, kMaxLateralMps, kMaxYawRateRps);
       if (!command.valid) {
         ++invalid_packets;
         last_vx = 0.0F;

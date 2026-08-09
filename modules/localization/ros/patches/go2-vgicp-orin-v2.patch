@@ -1,0 +1,157 @@
+--- a/go2_map_manager/config/continuous_map_localizer.yaml
++++ b/go2_map_manager/config/continuous_map_localizer.yaml
+@@ -4,7 +4,7 @@
+     map_file: ""
+     map_version: ""
+     # The immutable runtime profile selects this exact reviewed parameter set.
+-    quality.profile_id: go2-vgicp-orin-v1
++    quality.profile_id: go2-vgicp-orin-v2
+     registration.type: VGICP
+ 
+     cloud_topic: /navigation/cloud_body
+@@ -19,7 +19,7 @@
+     max_odom_cloud_skew_s: 0.08
+     min_scan_z: -1.5
+     max_scan_z: 2.5
+-    max_scan_range: 35.0
++    max_scan_range: 24.0
+     tracking_scan_leaf: 0.25
+     # Keep enough startup geometry on the commissioned MID-360 scene to meet
+     # the unchanged 250-point quality gate after a controlled reset.
+@@ -27,10 +27,10 @@
+     tracking_map_leaf: 0.30
+     coarse_map_leaf: 0.80
+     registration_threads: 4
+-    # Full maps are indexed once; registrations only see this nearby target.
+-    # 45m covers the 35m scan, 6m start/recovery envelope and 3m coarse gate.
+-    local_map.radius_m: 45.0
+-    local_map.refresh_distance_m: 5.0
++    # Full maps are indexed once; registrations see a bounded nearby target.
++    # 32 m exactly covers 24 m scan + 5 m start/recovery + 3 m coarse gate.
++    local_map.radius_m: 32.0
++    local_map.refresh_distance_m: 4.0
+ 
+     # This is a broad, map-versioned physical start zone, not a manually
+     # entered pose and not a promise that the dog was placed precisely.
+@@ -78,7 +78,7 @@
+     tracking.usable_timeout_s: 1.0
+     tracking.lost_timeout_s: 2.5
+ 
+-    # Exact go2-vgicp-orin-v1 values. The node rejects a matching profile ID
++    # Exact go2-vgicp-orin-v2 values. The node rejects a matching profile ID
+     # paired with different thresholds, so map binding cannot be cosmetic.
+     quality.min_input_points: 250
+     quality.min_inlier_ratio: 0.20
+--- a/go2_map_manager/src/continuous_map_localizer.cpp
++++ b/go2_map_manager/src/continuous_map_localizer.cpp
+@@ -276,15 +276,15 @@ public:
+     max_odom_cloud_skew_s_ = declare_parameter<double>("max_odom_cloud_skew_s", 0.08);
+     min_scan_z_ = declare_parameter<double>("min_scan_z", -1.5);
+     max_scan_z_ = declare_parameter<double>("max_scan_z", 2.5);
+-    max_scan_range_ = declare_parameter<double>("max_scan_range", 35.0);
++    max_scan_range_ = declare_parameter<double>("max_scan_range", 24.0);
+     tracking_scan_leaf_ = declare_parameter<double>("tracking_scan_leaf", 0.25);
+     coarse_scan_leaf_ = declare_parameter<double>("coarse_scan_leaf", 0.65);
+     tracking_map_leaf_ = declare_parameter<double>("tracking_map_leaf", 0.30);
+     coarse_map_leaf_ = declare_parameter<double>("coarse_map_leaf", 0.80);
+     registration_threads_ = declare_parameter<int>("registration_threads", 4);
+-    local_map_radius_m_ = declare_parameter<double>("local_map.radius_m", 45.0);
++    local_map_radius_m_ = declare_parameter<double>("local_map.radius_m", 32.0);
+     local_map_refresh_distance_m_ = declare_parameter<double>(
+-      "local_map.refresh_distance_m", 5.0);
++      "local_map.refresh_distance_m", 4.0);
+     initial_x_ = declare_parameter<double>("initialization.center_x", 0.0);
+     initial_y_ = declare_parameter<double>("initialization.center_y", 0.0);
+     initial_z_ = declare_parameter<double>("initialization.center_z", 0.0);
+@@ -426,14 +426,20 @@ private:
+     if (map_version_.empty()) {
+       throw std::runtime_error("map_version is required; unversioned maps are forbidden");
+     }
+-    if (quality_profile_id_ != "go2-vgicp-orin-v1") {
++    const bool quality_v1 = quality_profile_id_ == "go2-vgicp-orin-v1";
++    const bool quality_v2 = quality_profile_id_ == "go2-vgicp-orin-v2";
++    if (!quality_v1 && !quality_v2) {
+       throw std::runtime_error("unsupported or missing sealed localization quality profile");
+     }
+     if (registration_type_ != "VGICP") {
+       throw std::runtime_error("production localization registration.type must be VGICP");
+     }
+-    if (!near(local_map_radius_m_, 45.0) ||
+-      !near(local_map_refresh_distance_m_, 5.0) || !near(max_scan_range_, 35.0) ||
++    const double expected_local_radius = quality_v2 ? 32.0 : 45.0;
++    const double expected_refresh_distance = quality_v2 ? 4.0 : 5.0;
++    const double expected_scan_range = quality_v2 ? 24.0 : 35.0;
++    if (!near(local_map_radius_m_, expected_local_radius) ||
++      !near(local_map_refresh_distance_m_, expected_refresh_distance) ||
++      !near(max_scan_range_, expected_scan_range) ||
+       !near(tracking_scan_leaf_, 0.25) || !near(coarse_scan_leaf_, 0.65) ||
+       !near(tracking_map_leaf_, 0.30) || !near(coarse_map_leaf_, 0.80) ||
+       registration_threads_ != 4 || !near(coarse_correspondence_m_, 3.0) ||
+@@ -449,7 +455,7 @@ private:
+       !near(thresholds_.max_input_age_s, 0.35))
+     {
+       throw std::runtime_error(
+-              "ROS parameters do not match sealed quality profile go2-vgicp-orin-v1");
++              "ROS parameters do not match the selected sealed quality profile");
+     }
+     if (map_frame_ != "map" || odom_frame_ != "odom" || base_frame_ != "base_link") {
+       throw std::runtime_error("frame contract must remain map -> odom -> base_link");
+@@ -1309,14 +1315,14 @@ private:
+   double max_odom_cloud_skew_s_ = 0.08;
+   double min_scan_z_ = -1.5;
+   double max_scan_z_ = 2.5;
+-  double max_scan_range_ = 35.0;
++  double max_scan_range_ = 24.0;
+   double tracking_scan_leaf_ = 0.25;
+   double coarse_scan_leaf_ = 0.65;
+   double tracking_map_leaf_ = 0.30;
+   double coarse_map_leaf_ = 0.80;
+   int registration_threads_ = 4;
+-  double local_map_radius_m_ = 45.0;
+-  double local_map_refresh_distance_m_ = 5.0;
++  double local_map_radius_m_ = 32.0;
++  double local_map_refresh_distance_m_ = 4.0;
+   double initial_x_ = 0.0;
+   double initial_y_ = 0.0;
+   double initial_z_ = 0.0;
+--- a/go2_site_ops/go2_site_ops/localization_quality.py
++++ b/go2_site_ops/go2_site_ops/localization_quality.py
+@@ -101,8 +101,40 @@ GO2_VGICP_ORIN_V1 = LocalizationQualityProfile(
+     maximum_input_age_s=0.35,
+ )
+ 
++# Tracking receipts showed the 45 m target growing to 144k points and one
++# registration taking 526 ms. V2 keeps the unchanged quality gates while
++# bounding both source and target geometry to the indoor range actually needed
++# by the 5 m startup/recovery search: 24 m scan + 5 m search + 3 m coarse gate.
++GO2_VGICP_ORIN_V2 = LocalizationQualityProfile(
++    profile_id="go2-vgicp-orin-v2",
++    registration_type="VGICP",
++    local_map_radius_m=32.0,
++    local_map_refresh_distance_m=4.0,
++    max_scan_range_m=24.0,
++    tracking_scan_leaf_m=0.25,
++    coarse_scan_leaf_m=0.65,
++    tracking_map_leaf_m=0.30,
++    coarse_map_leaf_m=0.80,
++    registration_threads=4,
++    coarse_correspondence_m=3.0,
++    screening_iterations=5,
++    screening_min_inlier_ratio=0.05,
++    coarse_iterations=15,
++    tracking_correspondence_m=1.2,
++    tracking_iterations=30,
++    minimum_input_points=250,
++    minimum_inlier_ratio=0.20,
++    maximum_fitness_mse=0.20,
++    minimum_hessian_eigenvalue=1.0e-6,
++    maximum_hessian_condition=1.0e8,
++    maximum_correction_translation_m=0.75,
++    maximum_correction_rotation_deg=15.0,
++    maximum_input_age_s=0.35,
++)
++
+ SUPPORTED_LOCALIZATION_QUALITY_PROFILES = {
+     GO2_VGICP_ORIN_V1.profile_id: GO2_VGICP_ORIN_V1,
++    GO2_VGICP_ORIN_V2.profile_id: GO2_VGICP_ORIN_V2,
+ }

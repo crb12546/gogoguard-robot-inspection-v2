@@ -52,6 +52,9 @@ OWNED_RECEIVER = ROOT / (
     "modules/device_io/ros/go2_cmd_vel_bridge/src/"
     "go2_sdk2_udp_receiver.cpp"
 )
+LOCALIZATION_V2_PATCH = ROOT / (
+    "modules/localization/ros/patches/go2-vgicp-orin-v2.patch"
+)
 
 
 class NavigationRuntimeCompatibilityTest(unittest.TestCase):
@@ -175,6 +178,28 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             resume_branch.index("refresh = self._resume_costmap_refresh(now)"),
             resume_branch.index("self._request_resume()"),
         )
+
+    def test_recovery_is_continuous_and_evidence_is_not_a_motion_gate(self) -> None:
+        source = RUNTIME_MANAGER.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for name in ("_runtime_gate", "_start_readiness"):
+            method = next(
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef) and node.name == name
+            )
+            calls = {
+                node.func.attr
+                for node in ast.walk(method)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+            }
+            self.assertNotIn("_runtime_trace_gate", calls)
+        self.assertIn('self.runtime_state = "SEARCHING_PATH"', source)
+        self.assertIn('self.runtime_state = "RECOVERING"', source)
+        self.assertIn('self.runtime_reason = "RUNTIME_TRANSIENT_RECOVERED"', source)
+        self.assertNotIn("mppiRetryLimit", source)
+        self.assertNotIn("mppi_retry_limit", source)
 
     def test_idle_costmap_startup_wait_is_not_a_terminal_fault(self) -> None:
         tree = ast.parse(RUNTIME_MANAGER.read_text(encoding="utf-8"))
@@ -315,6 +340,9 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("always_send_full_costmap: true", nav2_config)
         self.assertIn("plugins: [obstacle_layer, inflation_layer]", nav2_config)
         self.assertIn("plugin: nav2_costmap_2d::ObstacleLayer", nav2_config)
+        self.assertIn("min_obstacle_height: 0.05", nav2_config)
+        self.assertIn("min_height: 0.05", nav2_config)
+        self.assertGreaterEqual(nav2_config.count("max_points: 8"), 3)
         self.assertNotIn("nav2_costmap_2d::VoxelLayer", nav2_config)
         self.assertNotIn("origin_z:", nav2_config)
         runtime_manager = RUNTIME_MANAGER.read_text(encoding="utf-8")
@@ -327,10 +355,15 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             '"DetourPath.rotate_to_heading_angular_vel": turn_speed', launch
         )
         self.assertIn('"FollowPath.vx_std": forward_velocity_std', launch)
-        self.assertIn("speed * 0.50", launch)
+        self.assertIn("target_cruise * 0.50", launch)
+        self.assertNotIn("VelocityDeadbandCritic", nav2_config)
+        self.assertNotIn("VelocityDeadbandCritic", launch)
         receiver = OWNED_RECEIVER.read_text(encoding="utf-8")
-        self.assertIn("max_vx=0.600 max_vy=0.200", receiver)
-        self.assertIn("pkt.vx, pkt.vy, pkt.vyaw, 0.60, 0.20, 0.5", receiver)
+        self.assertIn("max_vx=0.900 max_vy=0.200", receiver)
+        self.assertIn("constexpr double kMaxForwardMps = 0.90", receiver)
+        self.assertIn(
+            "kMaxForwardMps, kMaxLateralMps, kMaxYawRateRps", receiver
+        )
 
     def test_container_builds_owned_runtime_without_navigation_overlays(self) -> None:
         dockerfile = (
@@ -342,11 +375,23 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn(
             "COPY modules/device_io/ros/go2_cmd_vel_bridge/src/", dockerfile
         )
+        self.assertIn(
+            "modules/localization/ros/patches/go2-vgicp-orin-v2.patch",
+            dockerfile,
+        )
+        self.assertIn("patch --strip=1 --forward", dockerfile)
         self.assertNotIn("go2_nav2_runtime_delivery.patch", dockerfile)
         self.assertNotIn("go2_incident_diagnostics.patch", dockerfile)
         self.assertNotIn(
             "cp -a third_party/locked_stack/src/go2_nav2_runtime", dockerfile
         )
+
+    def test_localization_v2_is_owned_without_mutating_the_frozen_source(self) -> None:
+        patch = LOCALIZATION_V2_PATCH.read_text(encoding="utf-8")
+        self.assertIn("go2-vgicp-orin-v2", patch)
+        self.assertIn("local_map.radius_m: 32.0", patch)
+        self.assertIn("max_scan_range: 24.0", patch)
+        self.assertIn("GO2_VGICP_ORIN_V2", patch)
 
     def test_runtime_exit_reaps_its_motion_bridge(self) -> None:
         class Process:
@@ -526,6 +571,11 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("coarse_scan_leaf: 0.65", config)
         self.assertIn("coarse_scan_leaf_m=0.65", profile)
         self.assertIn("quality.min_input_points: 250", config)
+        patch = LOCALIZATION_V2_PATCH.read_text(encoding="utf-8")
+        self.assertIn("quality.profile_id: go2-vgicp-orin-v2", patch)
+        self.assertIn("local_map.radius_m: 32.0", patch)
+        self.assertIn("max_scan_range: 24.0", patch)
+        self.assertIn('profile_id="go2-vgicp-orin-v2"', patch)
 
 
 if __name__ == "__main__":

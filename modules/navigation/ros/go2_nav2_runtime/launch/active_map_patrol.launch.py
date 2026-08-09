@@ -58,11 +58,13 @@ def _runtime_nodes(context):
     robot_state_timeout_s = ParameterValue(
         LaunchConfiguration("robot_state_timeout_s"), value_type=float
     )
-    straight_speed = float(LaunchConfiguration("straight_speed_mps").perform(context))
+    target_cruise = float(LaunchConfiguration("target_cruise_mps").perform(context))
+    max_forward = float(LaunchConfiguration("max_forward_mps").perform(context))
     detour_speed = float(LaunchConfiguration("detour_speed_mps").perform(context))
     turn_speed = float(LaunchConfiguration("turn_speed_radps").perform(context))
     lateral_speed = float(LaunchConfiguration("lateral_speed_mps").perform(context))
     acceleration = float(LaunchConfiguration("acceleration_mps2").perform(context))
+    deceleration = float(LaunchConfiguration("deceleration_mps2").perform(context))
     stop_front = float(LaunchConfiguration("stop_zone_front_m").perform(context))
     stop_rear = float(LaunchConfiguration("stop_zone_rear_m").perform(context))
     stop_half_width = float(LaunchConfiguration("stop_zone_half_width_m").perform(context))
@@ -73,9 +75,8 @@ def _runtime_nodes(context):
     progress_timeout_s = float(
         LaunchConfiguration("progress_timeout_s").perform(context)
     )
-    mppi_retry_limit = int(LaunchConfiguration("mppi_retry_limit").perform(context))
-    detour_attempt_limit = int(
-        LaunchConfiguration("detour_attempt_limit").perform(context)
+    replan_interval_s = float(
+        LaunchConfiguration("replan_interval_s").perform(context)
     )
     obstruction_cost_threshold = int(
         LaunchConfiguration("obstruction_cost_threshold").perform(context)
@@ -140,12 +141,10 @@ def _runtime_nodes(context):
     )
     # The route owns geometry and start/end behavior. The active, versioned
     # robot profile owns commissioning speed and avoidance behavior.
-    speed = straight_speed
-    # MPPI samples around the preceding solution. Keeping the old fixed 0.18
-    # distribution while raising the commissioned cruise request left nearly
-    # all samples in the historical 0.3 m/s basin. Scale exploration with the
-    # real Go2 speed range while retaining a bounded distribution.
-    forward_velocity_std = max(0.20, min(0.35, speed * 0.50))
+    # Keep MPPI inside the last route-completing speed envelope. The target is
+    # a controller ceiling, not a minimum velocity objective: corners and goal
+    # convergence must remain free to choose slower feasible trajectories.
+    forward_velocity_std = max(0.20, min(0.35, target_cruise * 0.50))
     robot_id = LaunchConfiguration("robot_id").perform(context).strip()
     sensor_id = LaunchConfiguration("sensor_id").perform(context).strip()
     if runtime_source == "active":
@@ -244,8 +243,7 @@ def _runtime_nodes(context):
                     LaunchConfiguration("localization_recovery_stable_s"), value_type=float
                 ),
                 "progress_timeout_s": progress_timeout_s,
-                "mppi_retry_limit": mppi_retry_limit,
-                "detour_attempt_limit": detour_attempt_limit,
+                "replan_interval_s": replan_interval_s,
                 "obstruction_cost_threshold": obstruction_cost_threshold,
                 "obstruction_min_samples": obstruction_min_samples,
                 "obstruction_confirmation_s": obstruction_confirmation_s,
@@ -405,7 +403,7 @@ def _runtime_nodes(context):
                 nav2_config,
                 {
                     "controller_frequency": controller_frequency,
-                    "FollowPath.vx_max": speed,
+                    "FollowPath.vx_max": target_cruise,
                     "FollowPath.vx_std": forward_velocity_std,
                     "FollowPath.model_dt": 1.0 / controller_frequency,
                     "FollowPath.vy_max": lateral_speed,
@@ -432,12 +430,13 @@ def _runtime_nodes(context):
             parameters=[
                 nav2_config,
                 {
-                    "max_velocity": [speed, lateral_speed, turn_speed],
+                    "max_velocity": [target_cruise, lateral_speed, turn_speed],
                     # The immutable route is directional. Keep lateral and yaw
                     # authority for an omni bypass, but never re-authorize
                     # reverse x after the sealed profile rejected it.
                     "min_velocity": [0.0, -lateral_speed, -turn_speed],
                     "max_accel": [acceleration, max(0.35, acceleration * 0.5), 0.80],
+                    "max_decel": [-deceleration, -max(0.45, deceleration * 0.5), -1.20],
                     "use_sim_time": use_sim_time,
                 },
             ],
@@ -514,7 +513,7 @@ def _runtime_nodes(context):
                     "cloud_timeout": safety_stream_timeout_s,
                     "localization_timeout": safety_stream_timeout_s,
                     "runtime_authorization_timeout": safety_stream_timeout_s,
-                    "max_vx": speed,
+                    "max_vx": max_forward,
                     "max_vy": lateral_speed,
                     "max_yaw_rate": turn_speed,
                     "output_cmd_topic": "/cmd_vel",
@@ -538,7 +537,7 @@ def _runtime_nodes(context):
                     {
                         "target_ip": "127.0.0.1",
                         "target_port": 5005,
-                        "max_vx": speed,
+                        "max_vx": max_forward,
                         "max_vy": lateral_speed,
                         "max_vyaw": turn_speed,
                         "unitree_vy_sign": 1.0,
@@ -645,11 +644,13 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("localization_status_timeout_s", default_value="0.60"),
-            DeclareLaunchArgument("straight_speed_mps", default_value="0.60"),
+            DeclareLaunchArgument("target_cruise_mps", default_value="0.60"),
+            DeclareLaunchArgument("max_forward_mps", default_value="0.90"),
             DeclareLaunchArgument("detour_speed_mps", default_value="0.40"),
             DeclareLaunchArgument("turn_speed_radps", default_value="0.40"),
             DeclareLaunchArgument("lateral_speed_mps", default_value="0.20"),
             DeclareLaunchArgument("acceleration_mps2", default_value="0.90"),
+            DeclareLaunchArgument("deceleration_mps2", default_value="0.90"),
             DeclareLaunchArgument("stop_zone_front_m", default_value="0.55"),
             DeclareLaunchArgument("stop_zone_rear_m", default_value="0.38"),
             DeclareLaunchArgument("stop_zone_half_width_m", default_value="0.27"),
@@ -658,8 +659,7 @@ def generate_launch_description():
             DeclareLaunchArgument("slow_zone_half_width_m", default_value="0.30"),
             DeclareLaunchArgument("slowdown_ratio", default_value="0.85"),
             DeclareLaunchArgument("progress_timeout_s", default_value="5.0"),
-            DeclareLaunchArgument("mppi_retry_limit", default_value="2"),
-            DeclareLaunchArgument("detour_attempt_limit", default_value="2"),
+            DeclareLaunchArgument("replan_interval_s", default_value="0.75"),
             DeclareLaunchArgument("obstruction_cost_threshold", default_value="65"),
             DeclareLaunchArgument("obstruction_min_samples", default_value="2"),
             DeclareLaunchArgument("obstruction_confirmation_s", default_value="0.50"),

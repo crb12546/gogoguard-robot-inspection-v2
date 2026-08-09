@@ -65,7 +65,6 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(),
-                mppi_retry_count=0,
             )
         )
         self.assertEqual(decision.failure_class, FailureClass.TRANSIENT_CONTROL)
@@ -80,7 +79,6 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(),
-                mppi_retry_count=0,
             )
         )
         self.assertEqual(decision.failure_class, FailureClass.PATH_OBSTRUCTED)
@@ -95,7 +93,6 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(),
-                mppi_retry_count=0,
             )
         )
         self.assertEqual(failure.action, RecoveryAction.START_DETOUR)
@@ -117,12 +114,11 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(translation=0.051, linear=0.24),
-                mppi_retry_count=0,
             )
         )
         self.assertEqual(decision.failure_class, FailureClass.ACTUATION_STALL)
-        self.assertEqual(decision.action, RecoveryAction.STOP_FAULT)
-        self.assertEqual(decision.reason, "ACTUATION_STALL")
+        self.assertEqual(decision.action, RecoveryAction.RETRY_ACTUATION)
+        self.assertEqual(decision.reason, "ACTUATION_RECOVERY")
 
     def test_detour_failure_never_recursively_starts_another_detour(self):
         decision = decide_controller_failure(
@@ -133,12 +129,11 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(translation=0.3, linear=0.35),
-                mppi_retry_count=0,
             )
         )
-        self.assertEqual(decision.action, RecoveryAction.STOP_BLOCKED)
+        self.assertEqual(decision.action, RecoveryAction.SEARCH_PATH)
 
-    def test_retry_budget_exhaustion_is_controller_failure(self):
+    def test_repeated_mppi_failure_remains_recoverable(self):
         decision = decide_controller_failure(
             FailureEvidence(
                 controller=ControllerMode.MPPI,
@@ -147,11 +142,10 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(),
-                mppi_retry_count=2,
             )
         )
-        self.assertEqual(decision.failure_class, FailureClass.CONTROLLER_FAILED)
-        self.assertEqual(decision.action, RecoveryAction.STOP_FAULT)
+        self.assertEqual(decision.failure_class, FailureClass.TRANSIENT_CONTROL)
+        self.assertEqual(decision.action, RecoveryAction.RETRY_MPPI)
 
     def test_pure_turn_progress_is_not_actuation_stall(self):
         snapshot = motion(
@@ -188,7 +182,7 @@ class NavigationOrchestrationTest(unittest.TestCase):
         )
         self.assertFalse(snapshot.has_actuation_stall())
 
-    def test_unhealthy_costmap_stops_without_authorizing_detour(self):
+    def test_unhealthy_costmap_waits_without_authorizing_detour(self):
         decision = decide_controller_failure(
             FailureEvidence(
                 controller=ControllerMode.MPPI,
@@ -197,11 +191,10 @@ class NavigationOrchestrationTest(unittest.TestCase):
                 costmap_reason="COSTMAP_FRAME_INVALID",
                 route_obstructed=True,
                 motion=motion(),
-                mppi_retry_count=0,
             )
         )
         self.assertEqual(decision.failure_class, FailureClass.COSTMAP_UNHEALTHY)
-        self.assertEqual(decision.action, RecoveryAction.STOP_FAULT)
+        self.assertEqual(decision.action, RecoveryAction.WAIT_COSTMAP)
         self.assertEqual(decision.reason, "COSTMAP_FRAME_INVALID")
 
     def test_costmap_health_requires_map_frame_and_free_robot_cell(self):

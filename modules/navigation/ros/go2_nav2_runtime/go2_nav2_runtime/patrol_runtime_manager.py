@@ -65,13 +65,32 @@ from .start_timing import StartAttemptTimeline
 from .local_detour import GridView, route_rejoin_index
 
 
-RECOVERABLE_LOCALIZATION_GATES = frozenset(
+RECOVERABLE_RUNTIME_GATES = frozenset(
     {
+        "LOCALIZATION_STATUS_MISSING",
         "LOCALIZATION_STATUS_STALE",
         "LOCALIZATION_NOT_TRACKING",
         "LOCALIZATION_NOT_USABLE",
         "LOCALIZATION_POSE_MISSING",
         "LOCALIZATION_POSE_STALE",
+        "FASTLIO_ODOMETRY_MISSING",
+        "FASTLIO_ODOMETRY_STALE",
+        "FASTLIO_ODOMETRY_INVALID",
+        "FASTLIO_TIME_RESET",
+        "FASTLIO_FRAME_GAP",
+        "FASTLIO_WAITING_FOR_STATIONARY",
+        "FASTLIO_SETTLING",
+        "FASTLIO_STATIONARY_DRIFT",
+        "NAV2_FOLLOW_PATH_UNAVAILABLE",
+        "ROBOT_STATE_MISSING",
+        "ROBOT_STATE_STALE",
+        "ROBOT_POSTURE_NOT_READY",
+        "ROBOT_ACTION_IN_PROGRESS",
+        "COSTMAP_MISSING",
+        "COSTMAP_STALE",
+        "COSTMAP_ROBOT_POSE_MISSING",
+        "COSTMAP_ROBOT_OUTSIDE",
+        "COSTMAP_ROBOT_OCCUPIED",
     }
 )
 
@@ -114,8 +133,7 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("localization_dropout_grace_s", 1.0)
         self.declare_parameter("localization_recovery_stable_s", 0.5)
         self.declare_parameter("progress_timeout_s", 5.0)
-        self.declare_parameter("mppi_retry_limit", 2)
-        self.declare_parameter("detour_attempt_limit", 2)
+        self.declare_parameter("replan_interval_s", 0.75)
         self.declare_parameter("obstruction_cost_threshold", 65)
         self.declare_parameter("obstruction_min_samples", 2)
         self.declare_parameter("obstruction_confirmation_s", 0.30)
@@ -233,9 +251,8 @@ class PatrolRuntimeManager(Node):
         self.progress_timeout_s = float(
             self.get_parameter("progress_timeout_s").value
         )
-        self.mppi_retry_limit = int(self.get_parameter("mppi_retry_limit").value)
-        self.detour_attempt_limit = int(
-            self.get_parameter("detour_attempt_limit").value
+        self.replan_interval_s = float(
+            self.get_parameter("replan_interval_s").value
         )
         self.obstruction_cost_threshold = int(
             self.get_parameter("obstruction_cost_threshold").value
@@ -289,10 +306,8 @@ class PatrolRuntimeManager(Node):
             raise RuntimeError("localization_recovery_stable_s is invalid")
         if not 2.0 <= self.progress_timeout_s <= 12.0:
             raise RuntimeError("progress_timeout_s is invalid")
-        if not 0 <= self.mppi_retry_limit <= 3:
-            raise RuntimeError("mppi_retry_limit is invalid")
-        if not 1 <= self.detour_attempt_limit <= 3:
-            raise RuntimeError("detour_attempt_limit is invalid")
+        if not 0.25 <= self.replan_interval_s <= 3.0:
+            raise RuntimeError("replan_interval_s is invalid")
         if not 1 <= self.obstruction_cost_threshold <= 100:
             raise RuntimeError("obstruction_cost_threshold is invalid")
         if not 1 <= self.obstruction_min_samples <= 10:
@@ -416,6 +431,10 @@ class PatrolRuntimeManager(Node):
         self.last_rejoin_index = None
         self.active_controller = ControllerMode.MPPI
         self.mppi_retry_count = 0
+        self.recovery_pending = ""
+        self.recovery_requested_at = None
+        self.recovery_reason = ""
+        self.last_controller_result = None
         self.last_failure_class = None
         self.last_route_obstructed = False
         self.obstruction_evidence = ObstructionEvidenceTracker(
@@ -728,7 +747,6 @@ class PatrolRuntimeManager(Node):
             self.pose is None
             or self.local_costmap is None
             or not self._costmap_health().healthy
-            or self.detour_attempt_count >= self.detour_attempt_limit
             or not self._route_obstructed()
         ):
             return False
@@ -806,11 +824,10 @@ class PatrolRuntimeManager(Node):
             goal_handle = None
             self.runtime_reason = "LOCAL_DETOUR_TRANSPORT: %s" % exc
         if goal_handle is None or not goal_handle.accepted:
-            self.runtime_state = "FAULT"
             self.last_failure_class = "CONTROLLER_FAILED"
             if not self.runtime_reason.startswith("LOCAL_DETOUR_TRANSPORT"):
                 self.runtime_reason = "LOCAL_DETOUR_REJECTED"
-            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            self._schedule_recovery("DETOUR", self.runtime_reason)
             return
         self.goal_handle = goal_handle
         if self.stop_requested:
@@ -848,9 +865,8 @@ class PatrolRuntimeManager(Node):
             )
         except Exception as exc:
             self.goal_request_pending = False
-            self.runtime_state = "FAULT"
             self.runtime_reason = "NAV2_CONTINUATION_TRANSPORT: %s" % exc
-            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            self._schedule_recovery("MPPI", self.runtime_reason)
             return False
         future.add_done_callback(
             lambda completed, accepted_reason=reason: (
@@ -861,6 +877,20 @@ class PatrolRuntimeManager(Node):
         )
         return True
 
+    def _schedule_recovery(self, mode: str, reason: str) -> None:
+        """Keep the patrol alive while waiting for fresh planning evidence."""
+
+        self.recovery_pending = str(mode)
+        self.recovery_requested_at = time.monotonic()
+        self.recovery_reason = str(reason)
+        self._reset_costmap_refresh()
+        if mode == "DETOUR":
+            self.runtime_state = "SEARCHING_PATH"
+            self.runtime_reason = "SEARCHING_FOR_PATH"
+        else:
+            self.runtime_state = "RECOVERING"
+            self.runtime_reason = str(reason)
+
     def _continuation_goal_response_callback(self, future, accepted_reason: str) -> None:
         self.goal_request_pending = False
         try:
@@ -869,11 +899,10 @@ class PatrolRuntimeManager(Node):
             goal_handle = None
             self.runtime_reason = "NAV2_CONTINUATION_TRANSPORT: %s" % exc
         if goal_handle is None or not goal_handle.accepted:
-            self.runtime_state = "FAULT"
             self.last_failure_class = "CONTROLLER_FAILED"
             if not self.runtime_reason.startswith("NAV2_CONTINUATION_TRANSPORT"):
                 self.runtime_reason = "NAV2_CONTINUATION_REJECTED"
-            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            self._schedule_recovery("MPPI", self.runtime_reason)
             return
         self.goal_handle = goal_handle
         if self.stop_requested:
@@ -983,9 +1012,6 @@ class PatrolRuntimeManager(Node):
     def _runtime_gate(self) -> PatrolReadiness:
         if not self.runtime_binding_valid:
             return PatrolReadiness(False, "FAULT", self.runtime_binding_reason)
-        trace = self._runtime_trace_gate()
-        if not trace.ready:
-            return trace
         if self.require_fastlio_health:
             fastlio = self.fastlio_health.assess()
             if not fastlio.ready:
@@ -1015,9 +1041,6 @@ class PatrolRuntimeManager(Node):
     def _start_readiness(self) -> PatrolReadiness:
         if not self.runtime_binding_valid:
             return PatrolReadiness(False, "FAULT", self.runtime_binding_reason)
-        trace = self._runtime_trace_gate()
-        if not trace.ready:
-            return trace
         if self.require_fastlio_health:
             fastlio = self.fastlio_health.assess()
             if not fastlio.ready:
@@ -1105,6 +1128,10 @@ class PatrolRuntimeManager(Node):
         self.last_rejoin_index = None
         self.active_controller = ControllerMode.MPPI
         self.mppi_retry_count = 0
+        self.recovery_pending = ""
+        self.recovery_requested_at = None
+        self.recovery_reason = ""
+        self.last_controller_result = None
         self.last_failure_class = None
         self.last_route_obstructed = False
         self.obstruction_evidence.reset()
@@ -1218,19 +1245,34 @@ class PatrolRuntimeManager(Node):
 
     def _result_callback(self, future) -> None:
         completed_controller = self.active_controller
+        result_message = None
         try:
             wrapped = future.result()
             status = wrapped.status
+            result_message = getattr(wrapped, "result", None)
+            self.last_controller_result = {
+                "controller": completed_controller.value,
+                "status": int(status),
+                "errorCode": getattr(result_message, "error_code", None),
+                "errorMessage": getattr(result_message, "error_msg", None),
+                "receivedAt": time.time(),
+            }
         except Exception as exc:
             status = None
             self.runtime_reason = "NAV2_RESULT_TRANSPORT: %s" % exc
+            self.last_controller_result = {
+                "controller": completed_controller.value,
+                "status": None,
+                "transportError": str(exc),
+                "receivedAt": time.time(),
+            }
         self.goal_handle = None
         self.goal_request_pending = False
         if self.gate_cancel_reason:
             cancel_reason = self.gate_cancel_reason
             self.runtime_state = (
                 "HOLDING"
-                if cancel_reason in RECOVERABLE_LOCALIZATION_GATES
+                if cancel_reason in RECOVERABLE_RUNTIME_GATES
                 else "FAULT"
             )
             self.runtime_reason = cancel_reason
@@ -1261,7 +1303,7 @@ class PatrolRuntimeManager(Node):
             attempt_outcome = "COMPLETED"
         else:
             gate = self._runtime_gate()
-            if not gate.ready and gate.reason not in RECOVERABLE_LOCALIZATION_GATES:
+            if not gate.ready and gate.reason not in RECOVERABLE_RUNTIME_GATES:
                 self.runtime_state = "FAULT"
                 self.runtime_reason = gate.reason
                 self.last_failure_class = "RUNTIME_GATE_FAILED"
@@ -1277,7 +1319,8 @@ class PatrolRuntimeManager(Node):
                     controller=completed_controller,
                     localization_usable=(
                         gate.ready
-                        or gate.reason not in RECOVERABLE_LOCALIZATION_GATES
+                        or not gate.reason.startswith("LOCALIZATION_")
+                        and not gate.reason.startswith("FASTLIO_")
                     ),
                     costmap_healthy=costmap_health.healthy,
                     costmap_reason=costmap_health.reason,
@@ -1285,8 +1328,6 @@ class PatrolRuntimeManager(Node):
                     motion=self.motion_evidence.snapshot(
                         time.monotonic(), window_s=self.progress_timeout_s
                     ),
-                    mppi_retry_count=self.mppi_retry_count,
-                    mppi_retry_limit=self.mppi_retry_limit,
                 )
             )
             self.last_failure_class = decision.failure_class.value
@@ -1295,24 +1336,24 @@ class PatrolRuntimeManager(Node):
                 self.runtime_state = "HOLDING"
                 self.runtime_reason = gate.reason
                 return
-            if decision.action == RecoveryAction.RETRY_MPPI:
+            if decision.action in {
+                RecoveryAction.RETRY_MPPI,
+                RecoveryAction.WAIT_COSTMAP,
+                RecoveryAction.RETRY_ACTUATION,
+            }:
                 self.mppi_retry_count += 1
-                self._request_mppi_suffix(decision.reason)
+                self._schedule_recovery("MPPI", decision.reason)
                 return
             if decision.action == RecoveryAction.START_DETOUR:
                 if self._try_local_replan():
                     return
-                self.runtime_state = "BLOCKED"
-                self.runtime_reason = "PATH_OBSTRUCTED"
-                attempt_outcome = "FAILED"
-            elif decision.action == RecoveryAction.STOP_BLOCKED:
-                self.runtime_state = "BLOCKED"
-                self.runtime_reason = decision.reason
-                attempt_outcome = "FAILED"
-            else:
-                self.runtime_state = "FAULT"
-                self.runtime_reason = decision.reason
-                attempt_outcome = "FAILED"
+                self._schedule_recovery("DETOUR", "SEARCHING_FOR_PATH")
+                return
+            if decision.action == RecoveryAction.SEARCH_PATH:
+                self._schedule_recovery("DETOUR", decision.reason)
+                return
+            self._schedule_recovery("MPPI", decision.reason)
+            return
         self._finish_active_start_attempt(
             attempt_outcome,
             self.runtime_reason,
@@ -1322,6 +1363,9 @@ class PatrolRuntimeManager(Node):
         del request
         self.stop_requested = True
         self.resume_pending = False
+        self.recovery_pending = ""
+        self.recovery_requested_at = None
+        self.recovery_reason = ""
         self._reset_costmap_refresh()
         self.runtime_state = "STOPPING"
         self.runtime_reason = "STOP_REQUESTED"
@@ -1340,7 +1384,7 @@ class PatrolRuntimeManager(Node):
         self.runtime_reason = reason
         self.gate_cancel_reason = reason
         if self.goal_handle is not None:
-            self.resume_pending = reason in RECOVERABLE_LOCALIZATION_GATES
+            self.resume_pending = reason in RECOVERABLE_RUNTIME_GATES
             if self.resume_pending:
                 self._reset_costmap_refresh()
         if self.goal_handle is not None:
@@ -1377,10 +1421,10 @@ class PatrolRuntimeManager(Node):
             )
         except Exception as exc:
             self.goal_request_pending = False
-            self.resume_pending = False
-            self.runtime_state = "FAULT"
             self.runtime_reason = "NAV2_RESUME_TRANSPORT: %s" % exc
-            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            self.resume_pending = True
+            self.localization_recovered_at = None
+            self._reset_costmap_refresh()
             return
         future.add_done_callback(self._resume_goal_response_callback)
 
@@ -1392,11 +1436,12 @@ class PatrolRuntimeManager(Node):
             goal_handle = None
             self.runtime_reason = "NAV2_RESUME_TRANSPORT: %s" % exc
         if goal_handle is None or not goal_handle.accepted:
-            self.resume_pending = False
-            self.runtime_state = "FAULT"
             if not self.runtime_reason.startswith("NAV2_RESUME_TRANSPORT"):
                 self.runtime_reason = "NAV2_RESUME_REJECTED"
-            self._finish_active_start_attempt("FAILED", self.runtime_reason)
+            self.resume_pending = True
+            self.localization_recovered_at = None
+            self._reset_costmap_refresh()
+            self.runtime_state = "HOLDING"
             return
         self.goal_handle = goal_handle
         if self.stop_requested:
@@ -1452,10 +1497,10 @@ class PatrolRuntimeManager(Node):
         accepted_goal = self.goal_handle is not None
         motion_authorized = accepted_goal and gate.ready and self.runtime_state == "PATROLLING"
         if (accepted_goal or self.goal_request_pending) and not gate.ready:
-            if gate.reason in RECOVERABLE_LOCALIZATION_GATES:
+            if gate.reason in RECOVERABLE_RUNTIME_GATES:
                 if self.localization_gate_failed_at is None:
-                    self.localization_gate_failed_at = time.monotonic()
-                elapsed = time.monotonic() - self.localization_gate_failed_at
+                    self.localization_gate_failed_at = now
+                elapsed = now - self.localization_gate_failed_at
                 self.runtime_state = "HOLDING"
                 self.runtime_reason = gate.reason
                 if elapsed >= self.localization_dropout_grace_s:
@@ -1463,6 +1508,76 @@ class PatrolRuntimeManager(Node):
             else:
                 self._cancel_for_gate(gate.reason)
             motion_authorized = False
+        elif (
+            accepted_goal
+            and gate.ready
+            and self.runtime_state == "HOLDING"
+            and self.localization_gate_failed_at is not None
+            and not self.gate_cancel_reason
+        ):
+            # A brief status/TF/costmap gap does not require canceling the Nav2
+            # goal. Restore the exact same goal once the runtime gate is fresh.
+            self.localization_gate_failed_at = None
+            self.localization_recovered_at = None
+            self.runtime_state = "PATROLLING"
+            self.runtime_reason = "RUNTIME_TRANSIENT_RECOVERED"
+            motion_authorized = True
+        elif (
+            self.recovery_pending
+            and not accepted_goal
+            and not self.goal_request_pending
+        ):
+            motion_authorized = False
+            if not gate.ready:
+                if gate.reason in RECOVERABLE_RUNTIME_GATES:
+                    self.runtime_state = (
+                        "SEARCHING_PATH"
+                        if self.recovery_pending == "DETOUR"
+                        else "RECOVERING"
+                    )
+                    self.runtime_reason = gate.reason
+                else:
+                    self.recovery_pending = ""
+                    self.recovery_requested_at = None
+                    self.runtime_state = "FAULT"
+                    self.runtime_reason = gate.reason
+                    self._finish_active_start_attempt("FAILED", gate.reason)
+            elif (
+                self.recovery_requested_at is not None
+                and now - self.recovery_requested_at >= self.replan_interval_s
+            ):
+                mode = self.recovery_pending
+                reason = self.recovery_reason or "TRANSIENT_CONTROL_RETRY"
+                if mode == "DETOUR":
+                    if not self._route_obstructed():
+                        self._schedule_recovery(
+                            "MPPI", "OBSTRUCTION_CLEARED_RESUMING_ROUTE"
+                        )
+                    else:
+                        self.recovery_pending = ""
+                        self.recovery_requested_at = None
+                        self.recovery_reason = ""
+                        if not self._try_local_replan():
+                            self._schedule_recovery(
+                                "DETOUR", "SEARCHING_FOR_PATH"
+                            )
+                else:
+                    refresh = self._resume_costmap_refresh(now)
+                    if refresh.ready:
+                        self.recovery_pending = ""
+                        self.recovery_requested_at = None
+                        self.recovery_reason = ""
+                        self._request_mppi_suffix(reason)
+                    elif refresh.state == "FAULT":
+                        # Clearing and fresh-map acquisition are also transient
+                        # operations. Keep retrying at the configured cadence.
+                        self._reset_costmap_refresh()
+                        self.recovery_requested_at = now
+                        self.runtime_state = "RECOVERING"
+                        self.runtime_reason = refresh.reason
+                    else:
+                        self.runtime_state = "RECOVERING"
+                        self.runtime_reason = refresh.reason
         elif self.resume_pending and not accepted_goal and not self.goal_request_pending:
             costmap_only_gate = gate.reason.startswith("COSTMAP_")
             if gate.ready or costmap_only_gate:
@@ -1473,14 +1588,14 @@ class PatrolRuntimeManager(Node):
                     if refresh.ready:
                         self._request_resume()
                     elif refresh.state == "FAULT":
-                        self.resume_pending = False
-                        self.runtime_state = "FAULT"
+                        self._reset_costmap_refresh()
+                        self.localization_recovered_at = now
+                        self.runtime_state = "HOLDING"
                         self.runtime_reason = refresh.reason
-                        self._finish_active_start_attempt("FAILED", refresh.reason)
                     else:
                         self.runtime_state = refresh.state
                         self.runtime_reason = refresh.reason
-            elif gate.reason not in RECOVERABLE_LOCALIZATION_GATES:
+            elif gate.reason not in RECOVERABLE_RUNTIME_GATES:
                 self.resume_pending = False
                 self.runtime_state = "FAULT"
                 self.runtime_reason = gate.reason
@@ -1497,7 +1612,7 @@ class PatrolRuntimeManager(Node):
             "FAULT",
             "BLOCKED",
             "STOPPING",
-        }:
+        } and not self.recovery_pending:
             readiness = self._start_readiness()
             self.runtime_state = readiness.state
             self.runtime_reason = readiness.reason
@@ -1587,8 +1702,11 @@ class PatrolRuntimeManager(Node):
                 )
             ),
             "failureClass": self.last_failure_class,
+            "lastControllerResult": self.last_controller_result,
             "mppiRetryCount": self.mppi_retry_count,
-            "mppiRetryLimit": self.mppi_retry_limit,
+            "replanIntervalS": self.replan_interval_s,
+            "recoveryPending": self.recovery_pending or None,
+            "recoveryReason": self.recovery_reason or None,
             "routeObstructed": self.last_route_obstructed,
             "costmapHealth": {
                 "healthy": costmap_health.healthy,

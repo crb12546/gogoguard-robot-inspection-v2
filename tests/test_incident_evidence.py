@@ -15,7 +15,9 @@ from gogoguard_evidence import (
 )
 from gogoguard_evidence.incident_recorder import (
     ACTIVE_STATES,
+    LIGHTWEIGHT_PRODUCTION_TOPICS,
     TERMINAL_STATES,
+    TRIGGER_STATES,
     RollingSamples,
     SerializedSample,
 )
@@ -24,9 +26,28 @@ from gogoguard_evidence.incident_recorder import (
 class IncidentEvidenceTest(unittest.TestCase):
     def test_navigation_recovery_states_remain_inside_incident_capture(self) -> None:
         self.assertTrue(
-            {"DETOURING", "REJOINING", "RETRYING"}.issubset(ACTIVE_STATES)
+            {
+                "DETOURING",
+                "REJOINING",
+                "RETRYING",
+                "RECOVERING",
+                "SEARCHING_PATH",
+            }.issubset(ACTIVE_STATES)
         )
         self.assertIn("COMPLETED", TERMINAL_STATES)
+        self.assertTrue(
+            {"HOLDING", "RECOVERING", "SEARCHING_PATH"}.issubset(
+                TRIGGER_STATES
+            )
+        )
+
+    def test_production_profile_keeps_a_lightweight_incident_ring(self) -> None:
+        profile = preset_profile(DiagnosticMode.PRODUCTION)
+        self.assertEqual(profile.pre_trigger_s, 15.0)
+        self.assertEqual(profile.post_trigger_s, 5.0)
+        self.assertIn("/Odometry", LIGHTWEIGHT_PRODUCTION_TOPICS)
+        self.assertIn("/cmd_vel", LIGHTWEIGHT_PRODUCTION_TOPICS)
+        self.assertNotIn("/navigation/cloud_body", LIGHTWEIGHT_PRODUCTION_TOPICS)
 
     def test_rolling_samples_are_bounded_by_time_and_bytes(self) -> None:
         values = RollingSamples()

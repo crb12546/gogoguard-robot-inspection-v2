@@ -30,10 +30,11 @@ class FailureClass(str, Enum):
 
 class RecoveryAction(str, Enum):
     HOLD_LOCALIZATION = "HOLD_LOCALIZATION"
+    WAIT_COSTMAP = "WAIT_COSTMAP"
     RETRY_MPPI = "RETRY_MPPI"
     START_DETOUR = "START_DETOUR"
-    STOP_BLOCKED = "STOP_BLOCKED"
-    STOP_FAULT = "STOP_FAULT"
+    SEARCH_PATH = "SEARCH_PATH"
+    RETRY_ACTUATION = "RETRY_ACTUATION"
 
 
 class ControllerSuccessAction(str, Enum):
@@ -110,8 +111,6 @@ class FailureEvidence:
     costmap_reason: str
     route_obstructed: bool
     motion: MotionSnapshot
-    mppi_retry_count: int
-    mppi_retry_limit: int = 2
 
 
 @dataclass(frozen=True)
@@ -124,10 +123,10 @@ class FailureDecision:
 def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
     """Classify a controller abort before selecting a recovery action.
 
-    A clear costmap can never authorize a detour.  A detour controller can
-    never recursively create another detour.  An unclassified MPPI abort gets
-    a bounded MPPI retry because Humble's FollowPath result carries no detailed
-    error code.
+    A clear costmap can never authorize a detour. A failed search or controller
+    attempt is recoverable: counters remain diagnostics and never terminate an
+    attended patrol. Humble's FollowPath result carries no detailed error code,
+    so a fresh costmap and rate-limited retry provide the next evidence sample.
     """
 
     if not evidence.localization_usable:
@@ -139,15 +138,15 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
     if not evidence.costmap_healthy:
         return FailureDecision(
             FailureClass.COSTMAP_UNHEALTHY,
-            RecoveryAction.STOP_FAULT,
+            RecoveryAction.WAIT_COSTMAP,
             evidence.costmap_reason or "COSTMAP_UNHEALTHY",
         )
     if evidence.route_obstructed:
         if evidence.controller == ControllerMode.DETOUR_RPP:
             return FailureDecision(
                 FailureClass.PATH_OBSTRUCTED,
-                RecoveryAction.STOP_BLOCKED,
-                "PATH_OBSTRUCTED",
+                RecoveryAction.SEARCH_PATH,
+                "SEARCHING_FOR_PATH",
             )
         return FailureDecision(
             FailureClass.PATH_OBSTRUCTED,
@@ -157,25 +156,19 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
     if evidence.motion.has_actuation_stall():
         return FailureDecision(
             FailureClass.ACTUATION_STALL,
-            RecoveryAction.STOP_FAULT,
-            "ACTUATION_STALL",
+            RecoveryAction.RETRY_ACTUATION,
+            "ACTUATION_RECOVERY",
         )
     if evidence.controller == ControllerMode.DETOUR_RPP:
         return FailureDecision(
             FailureClass.CONTROLLER_FAILED,
-            RecoveryAction.STOP_FAULT,
-            "DETOUR_CONTROLLER_FAILED",
-        )
-    if evidence.mppi_retry_count < evidence.mppi_retry_limit:
-        return FailureDecision(
-            FailureClass.TRANSIENT_CONTROL,
-            RecoveryAction.RETRY_MPPI,
-            "TRANSIENT_CONTROL_RETRY",
+            RecoveryAction.SEARCH_PATH,
+            "SEARCHING_FOR_PATH",
         )
     return FailureDecision(
-        FailureClass.CONTROLLER_FAILED,
-        RecoveryAction.STOP_FAULT,
-        "MPPI_RETRY_EXHAUSTED",
+        FailureClass.TRANSIENT_CONTROL,
+        RecoveryAction.RETRY_MPPI,
+        "TRANSIENT_CONTROL_RETRY",
     )
 
 

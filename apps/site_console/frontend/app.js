@@ -94,6 +94,8 @@ const patrolStepStateText = runtime => {
     DETOURING: '提交局部绕行中',
     REJOINING: '交还 MPPI 中',
     RETRYING: 'MPPI 自动重试中',
+    RECOVERING: '自动恢复中',
+    SEARCHING_PATH: '持续寻路中',
     HOLDING: '定位等待中',
     RESUMING: '恢复路线中',
     COMPLETED: '已完成',
@@ -444,7 +446,7 @@ function renderNavigation() {
   const stopOperationBusy = operationBusy && ['runtime.stop', 'patrol.stop'].includes(operation?.kind);
   const patrolRunning = [
     'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
-    'DETOURING', 'REJOINING', 'RETRYING',
+    'DETOURING', 'REJOINING', 'RETRYING', 'RECOVERING', 'SEARCHING_PATH',
   ].includes(runtime.state);
   $('navigationCandidate').textContent = candidate ? `${candidate.map_version} · ${candidate.route_id}` : '等待地图与路线';
   $('runtimeBadge').textContent = runtimeRunning ? '运行中' : '未启动';
@@ -459,8 +461,8 @@ function renderNavigation() {
   $('patrolReason').textContent = runtime.operatorMessage || runtime.reason || '尚未启动';
   $('finalVelocity').textContent = `${Number(command.vx || 0).toFixed(2)} m/s`;
   const controller = runtime.activeController || runtime.selectedController;
-  const cruise = state.navigationProfile?.motion?.straightSpeedMps;
-  $('motionAuthority').textContent = `${runtime.motionAuthorized ? '运动权已打开' : '运动权关闭'}${controller ? ` · ${controller}` : ''}${cruise == null ? '' : ` · 目标 ${Number(cruise).toFixed(2)}`}`;
+  const cruise = state.navigationProfile?.motion?.targetCruiseMps;
+  $('motionAuthority').textContent = `${runtime.motionAuthorized ? '运动权已打开' : '运动权关闭'}${controller ? ` · ${controller}` : ''}${cruise == null ? '' : ` · MPPI上限 ${Number(cruise).toFixed(2)}`}`;
   $('routeProgress').textContent = `${Number(runtime.routeProgressPercent || 0).toFixed(0)}%`;
   $('remainingRoute').textContent = runtime.remainingRoutePointCount == null
     ? '尚未开始' : `剩余 ${runtime.remainingRoutePointCount} 个路径点`;
@@ -490,6 +492,8 @@ function renderNavigation() {
   if (runtime.state === 'DETOURING') guidance = '代价地图已确认原路线前方被占用，正只向 RPP 提交到重入点的局部绕行路径。';
   if (runtime.state === 'REJOINING') guidance = 'RPP 已到达重入点，正将未完成的录制路线交还 MPPI。';
   if (runtime.state === 'RETRYING') guidance = '原路线前方没有确认障碍，正从当前进度自动重试 MPPI，不会误入绕行。';
+  if (runtime.state === 'RECOVERING') guidance = '控制或代价地图短暂中断，任务和当前进度已保留，系统会持续自动恢复。';
+  if (runtime.state === 'SEARCHING_PATH') guidance = '原路线已确认受阻，系统会按固定频率不断重新寻路，只有操作员停止才会结束。';
   if (runtime.state === 'PATROLLING' && runtime.reason === 'LOCAL_DETOUR_ACCEPTED') guidance = '已找到绕行路径：机器狗会先对准绕行方向，再以有效步态接回原路线。';
   if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
@@ -549,7 +553,10 @@ async function navigationAction(action) {
 
 function fillProfile(profile) {
   state.navigationProfile = profile;
-  $('straightSpeed').value = profile.motion.straightSpeedMps;
+  $('straightSpeed').value = profile.motion.targetCruiseMps;
+  $('maxForwardSpeed').value = profile.motion.maxForwardMps;
+  $('acceleration').value = profile.motion.accelerationMps2;
+  $('deceleration').value = profile.motion.decelerationMps2;
   $('detourSpeed').value = profile.motion.detourSpeedMps;
   $('turnSpeed').value = profile.motion.turnSpeedRadps;
   $('lateralSpeed').value = profile.motion.lateralSpeedMps;
@@ -566,8 +573,7 @@ function fillProfile(profile) {
   $('controllerFrequency').value = profile.controller.frequencyHz;
   $('mppiTimeSteps').value = profile.controller.timeSteps;
   $('mppiBatchSize').value = profile.controller.batchSize;
-  $('mppiRetryLimit').value = profile.recovery.mppiRetryLimit;
-  $('detourAttemptLimit').value = profile.recovery.detourAttemptLimit;
+  $('replanInterval').value = profile.recovery.replanIntervalS;
   $('obstructionCost').value = profile.avoidance.obstructionCostThreshold;
   $('obstructionSamples').value = profile.avoidance.obstructionMinSamples;
   $('obstructionConfirmation').value = profile.avoidance.obstructionConfirmationS;
@@ -582,7 +588,10 @@ async function refreshProfile() {
 async function saveProfile() {
   if (!state.navigationProfile) return;
   const profile = JSON.parse(JSON.stringify(state.navigationProfile));
-  profile.motion.straightSpeedMps = Number($('straightSpeed').value);
+  profile.motion.targetCruiseMps = Number($('straightSpeed').value);
+  profile.motion.maxForwardMps = Number($('maxForwardSpeed').value);
+  profile.motion.accelerationMps2 = Number($('acceleration').value);
+  profile.motion.decelerationMps2 = Number($('deceleration').value);
   profile.motion.detourSpeedMps = Number($('detourSpeed').value);
   profile.motion.turnSpeedRadps = Number($('turnSpeed').value);
   profile.motion.lateralSpeedMps = Number($('lateralSpeed').value);
@@ -599,8 +608,7 @@ async function saveProfile() {
   profile.controller.frequencyHz = Number($('controllerFrequency').value);
   profile.controller.timeSteps = Number($('mppiTimeSteps').value);
   profile.controller.batchSize = Number($('mppiBatchSize').value);
-  profile.recovery.mppiRetryLimit = Number($('mppiRetryLimit').value);
-  profile.recovery.detourAttemptLimit = Number($('detourAttemptLimit').value);
+  profile.recovery.replanIntervalS = Number($('replanInterval').value);
   profile.avoidance.obstructionCostThreshold = Number($('obstructionCost').value);
   profile.avoidance.obstructionMinSamples = Number($('obstructionSamples').value);
   profile.avoidance.obstructionConfirmationS = Number($('obstructionConfirmation').value);
@@ -660,7 +668,7 @@ function fillDiagnosticProfile(profile) {
   const descriptions = {
     development: '故障前 15 秒+后 5 秒；10 Hz 原始点云、H.264 视频、代价地图和规划过程。',
     acceptance: '故障前 10 秒+后 5 秒；2 Hz 点云，不保存摄像头，用于验收时低负载取证。',
-    production: '不保存原始点云和视频，只保留已有的轻量运行状态链。',
+    production: '故障前 15 秒+后 5 秒；自动保存里程计、定位、命令链和决策，不保存原始点云和视频。',
   };
   $('diagnosticProfileHelp').textContent = descriptions[profile.mode];
 }
@@ -676,7 +684,7 @@ async function saveDiagnosticProfile() {
   const presets = {
     development: {pre_trigger_s: 15, post_trigger_s: 5, point_cloud_hz: 10, record_camera: true, record_costmap: true, record_planner_detail: true},
     acceptance: {pre_trigger_s: 10, post_trigger_s: 5, point_cloud_hz: 2, record_camera: false, record_costmap: true, record_planner_detail: true},
-    production: {pre_trigger_s: 0, post_trigger_s: 0, point_cloud_hz: 0, record_camera: false, record_costmap: false, record_planner_detail: false},
+    production: {pre_trigger_s: 15, post_trigger_s: 5, point_cloud_hz: 0, record_camera: false, record_costmap: false, record_planner_detail: false},
   };
   const profile = {...presets[mode], mode, max_incidents: 20, max_storage_bytes: 2 * 1024 ** 3};
   if (mode !== 'production' && lifetime === 'next1') profile.remaining_patrols = 1;
@@ -969,7 +977,7 @@ $('diagnosticMode').addEventListener('change', () => {
   const descriptions = {
     development: '故障前 15 秒+后 5 秒；10 Hz 原始点云、H.264 视频、代价地图和规划过程。',
     acceptance: '故障前 10 秒+后 5 秒；2 Hz 点云，不保存摄像头。',
-    production: '不保存原始点云和视频，只保留轻量运行状态。',
+    production: '故障前 15 秒+后 5 秒；自动保存里程计、定位、命令链和决策，不保存原始点云和视频。',
   };
   $('diagnosticProfileHelp').textContent = descriptions[mode];
   $('diagnosticLifetime').disabled = mode === 'production';

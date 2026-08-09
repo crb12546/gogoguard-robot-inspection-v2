@@ -42,8 +42,8 @@ PROFILE_PRESETS: dict[DiagnosticMode, dict[str, Any]] = {
         "record_planner_detail": True,
     },
     DiagnosticMode.PRODUCTION: {
-        "pre_trigger_s": 0.0,
-        "post_trigger_s": 0.0,
+        "pre_trigger_s": 15.0,
+        "post_trigger_s": 5.0,
         "point_cloud_hz": 0.0,
         "record_camera": False,
         "record_costmap": False,

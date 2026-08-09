@@ -2,11 +2,11 @@
   "id": "route",
   "responsibility": "Versioned map-bound route model, validation and execution request",
   "runtime": ["robot", "workstation", "cloud"],
-  "status": "recorded_glim_route_generation_3_deployed_patrol_verified_editor_pending",
+  "status": "recorded_glim_route_generation_4_deployed_candidate_prepared_motion_pending",
   "codeRoots": ["modules/route", "third_party/locked_stack/src/go2_site_ops/go2_site_ops/route_contract.py"],
   "entrypoints": ["gogoguard_route.manager:RouteManager"],
   "dependsOn": ["contracts", "map_factory"],
   "consumes": ["cloud GLIM map artifact and optimized trajectory"],
   "produces": ["map-bound go2.route.v1 candidate and runtime profile"],
-  "sourceProvenance": ["V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c", "candidate generation 3 regenerates existing candidates with the 0.60 m/s delivery profile and supplies monotonic progress/recovery metadata"]
+  "sourceProvenance": ["V2 route preparation over the locked go2.route.v1 contract from commit 3a7597c", "candidate generation 3 regenerates existing candidates with the 0.60 m/s delivery profile and supplies monotonic progress/recovery metadata", "candidate generation 4 selects the versioned go2-vgicp-orin-v2 compute profile while preserving the map-bound route and 0.60 m/s route contract; continuous-r1 regenerated map-6855ba54ae11 in place with all 1119 waypoints and a verified runtime-profile binding, while motion acceptance remains pending"]
 }

@@ -48,7 +48,7 @@ class NavigationCandidateTest(unittest.TestCase):
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 3)
+        self.assertEqual(candidate["candidate_generation"], 4)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -60,6 +60,10 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(len(candidate["localization_map_hash"]), 64)
         profile = json.loads(Path(candidate["runtime_profile"]).read_text(encoding="utf-8"))
         self.assertEqual(profile["patrol"]["speedLimitMps"], 0.60)
+        self.assertEqual(
+            profile["localization"]["qualityProfileId"],
+            "go2-vgicp-orin-v2",
+        )
 
     def test_repeated_prepare_keeps_runtime_artifact_identity(self):
         manager = RouteManager(self.root, site_id="test-site")
