@@ -125,14 +125,14 @@ Updated: 2026-08-09
 
 ## Current deployed release
 
-- Active V2 implementation commit: `3cf679716ce177e1e91064474852da0d8ddfa3d9`.
+- Active V2 implementation commit: `a615ab9a32fa46dbb73a4f6fc30db6cce2de8054`.
 - Robot image config digest:
-  `sha256:15e2b7c6951ea27ea4131bfbec4fe35d5302b9750ecafe700bf25665d6d785a1`
+  `sha256:593a5336f355277e72b513e006a34a61e335b4dc94ae3468c48b52c92a016ab1`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260809-planar-release-r4`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260809-cruise-r1`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The active release archive SHA-256 is
-  `83b4cc8e0ce2d9d0feff31a804fe3cfc64d53fd139ac838d044ae5b37918d7a2`.
+  `d80fb512d63474e25a3782761f28b851bd526a07ed6e4f5a1c93d59075678142`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -778,7 +778,7 @@ parameters. Record each result before calling the release field-accepted.
   and browser verification shows `map-799f6f04e11d` as the current selected and
   published map with no parse error.
 
-## 2026-08-09 cruise-speed contract correction (offline; deployment pending)
+## 2026-08-09 cruise-speed contract correction (deployed; dynamic receipt pending)
 
 - Three completed patrol traces on `map-799f6f04e11d` proved that the former
   speed control was misleading. At the original 0.60 m/s setting, final mean
@@ -790,19 +790,31 @@ parameters. Record each result before calling the release field-accepted.
   execute: 0.90 m/s forward, 0.40 m/s lateral and 0.60 rad/s yaw versus the
   receiver's 0.60, 0.20 and 0.50 limits. Profile V3 aligns the UI, validation,
   MPPI, smoother and receiver limits and migrates impossible V1/V2 values.
-- The offline correction treats 0.60 m/s as the clear-route cruise request,
+- The correction treats 0.60 m/s as the clear-route cruise request,
   scales MPPI forward sampling to 0.30 m/s standard deviation at that request,
   raises the default batch from 700 to 1,000 within the existing compute
   budget, and raises PathFollow progress authority from 5.0 to 8.0. StopZone,
-  SlowZone and collision thresholds are unchanged. Robot deployment and a
-  measured clear-route speed receipt are still required.
+  SlowZone and collision thresholds are unchanged.
+- Release `v2-edge-20260809-cruise-r1` was built for Linux/ARM64 from commit
+  `a615ab9a32fa46dbb73a4f6fc30db6cce2de8054`. The 1,171,283,456-byte archive
+  passed SHA-256 on Mac and robot with digest
+  `d80fb512d63474e25a3782761f28b851bd526a07ed6e4f5a1c93d59075678142`.
+  The robot loaded config digest
+  `sha256:593a5336f355277e72b513e006a34a61e335b4dc94ae3468c48b52c92a016ab1`;
+  its managed service is `enabled` and `active` with exactly one navigation
+  supervisor. Static acceptance reported LiDAR 10.0 Hz, IMU 103.0 Hz and
+  odometry 10.0 Hz. Nav2 and the Unitree motion bridge remained stopped, so no
+  motion command was sent. The active V2 profile migrated to revision 3 with
+  forward/detour/yaw/lateral limits 0.60/0.60/0.50/0.20 and MPPI batch 1,000.
+  A measured clear-route speed receipt is still required.
 
 ## Next experiment (supersedes all older paragraphs)
 
-Keep `planar-release-r4` fixed and collect only the remaining acceptance
+Keep `v2-edge-20260809-cruise-r1` fixed and collect only the remaining acceptance
 receipts: one obstacle that leaves a physically passable side corridor and
 therefore exercises A* -> `DetourPath` -> MPPI rejoin; localization-loss route
 resume; and handheld-remote movement immediately after a stop from an active
-patrol and from `FAULT`. The terminal dead-end stop and normal MPPI travel are
-already field verified; do not weaken obstacle thresholds to make an actually
-sealed path appear passable.
+patrol and from `FAULT`; also record the achieved clear-route speed after this
+release. The terminal dead-end stop and normal MPPI travel are already field
+verified; do not weaken obstacle thresholds to make an actually sealed path
+appear passable.
