@@ -23,7 +23,9 @@ the Mac, cloud or SaaS being online.
 
 ## Start every Codex task here
 
-- Read `PROJECT_STATE.md` for facts and deployment receipts.
+- Read `PROJECT_STATE.md` section **New-task handoff — start here** first. Use
+  its current snapshot and final next-work list; consult dated sections only
+  for the evidence or provenance needed by the task.
 - Read `docs/generated/repository-index.md`, then only the manifest for the
   primary module being changed.
 - State the primary owning module and any necessary cross-module contract

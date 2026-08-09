@@ -2,6 +2,93 @@
 
 Updated: 2026-08-09
 
+## New-task handoff — start here
+
+This section is the compact authoritative handoff for a new Codex task. The
+dated sections below are evidence history; do not treat an older "next
+experiment" paragraph as current when it conflicts with this section or the
+final paragraph of this file.
+
+### Product and execution boundaries
+
+- The current acceptance loop is record map -> cloud GLIM -> review/publish ->
+  fixed-map localization -> recorded-route Nav2/MPPI patrol. Inspection media,
+  SaaS dispatch, realtime dialogue and remote teleoperation are separate
+  product slices and must not be mixed into navigation debugging.
+- Robot owns live ROS, localization, Nav2, obstacle handling and Unitree motion.
+  Mac owns `http://127.0.0.1:8080/`, history, transfer, review, orchestration and
+  release publication. Alibaba Cloud owns only the pinned GLIM job. GitHub
+  communicates with Mac only.
+- Preserve the established Livox/FAST-LIO/GLIM/small_gicp/Nav2/Unitree stack.
+  Change owned V2 composition and parameters from measured evidence; do not
+  replace algorithms or add services/containers as a reflex.
+
+### Current deployed and live snapshot
+
+- Active product worktree: this repository on branch
+  `agent/three-end-field-workstation`. It contains local commits not yet pushed
+  to `origin/agent/three-end-field-workstation`; do not claim GitHub is current.
+- Robot release: code commit
+  `a615ab9a32fa46dbb73a4f6fc30db6cce2de8054`, image
+  `gogoguard-robot-inspection:v2-edge-20260809-cruise-r1`, config digest
+  `sha256:593a5336f355277e72b513e006a34a61e335b4dc94ae3468c48b52c92a016ab1`.
+  `gogoguard-edge.service` is enabled and active.
+- Latest read-only live check found sensors online and one navigation
+  supervisor. Nav2 and the Unitree motion bridge were stopped, so the robot had
+  no V2 motion authorization. The currently selected candidate was
+  `map-8ddcf3f8c078`; always re-read live state because the operator can change
+  the selected map between tasks.
+- Active navigation profile is schema V3 revision 3: straight/detour/yaw/
+  lateral limits `0.60/0.60/0.50/0.20`, acceleration `0.90`, MPPI batch 1,000.
+  StopZone, SlowZone and collision thresholds were not weakened by the speed
+  correction.
+
+### Latest verified patrol and current diagnosis
+
+- The latest measured speed receipt used `map-799f6f04e11d`, not the candidate
+  currently selected above. It completed the 9.805 m route normally at 100%,
+  with localization confidence about 0.90, no detour and no stop.
+- `cruise-r1` reduced same-route completion time from 33.20 to 30.20 seconds.
+  Odometry-integrated mean speed was 0.297 m/s; final command mean/p90/max were
+  0.342/0.435/0.551 m/s, and 72.6% of nonzero final commands remained below
+  0.40 m/s.
+- MPPI raw mean was 0.349 m/s and final mean was 0.342 m/s. Collision handling
+  therefore removed only about 2%; the remaining speed limit is primarily in
+  MPPI/path-follow behavior, not the receiver, Mac workstation, obstacle-stop
+  policy or a DetourPath state.
+- The exact trace is robot runtime log
+  `/var/lib/gogoguard/navigation/logs/runtime-20260809-072829-2656-part001.jsonl`.
+  The immediately preceding comparison trace is
+  `runtime-20260809-071035-63558-part001.jsonl` in the same directory.
+
+### Current next work
+
+1. For speed, explain from trajectory/critic evidence why clear and nearly
+   straight segments still average only about 0.36--0.38 m/s before changing
+   another parameter. Do not tune the safety layer to solve this measurement.
+2. Remaining navigation acceptance is a physically passable obstacle corridor
+   exercising A* -> DetourPath -> MPPI rejoin, localization-loss route resume,
+   and handheld-remote control immediately after stop from active patrol and
+   `FAULT`.
+3. Before any physical test, confirm the operator's intended map and route,
+   confirm the robot is standing in that map, and obtain explicit authorization
+   in the current task. A deployment or diagnostic request never authorizes
+   motion by itself.
+
+### Parallel Codex and Git boundary
+
+- Realtime dialogue is being developed independently in worktree
+  `runtime-data/worktrees/realtime-dialogue-v1` on branch
+  `agent/realtime-dialogue-v1` (handoff commit `3215515`). Do not edit, deploy or
+  merge it from a navigation task without an explicit integration request.
+- `agent/realtime-interaction-spike` is attached to the superseded
+  `gogoguard_robot_inspection_v2` worktree. It is not evidence of current robot
+  runtime behavior and must not be deployed.
+- New navigation work stays on `agent/three-end-field-workstation`, names
+  `navigation` as the primary owner, updates its manifest and
+  `PROJECT_STATE.md`, passes the required checks, and records commit plus image
+  digest after a real deployment. Never infer deployed state from branch HEAD.
+
 ## Verified external facts
 
 - Robot: Unitree Go2 expansion dock, 100 TOPS class, Jetson Orin NX 16 GB.
