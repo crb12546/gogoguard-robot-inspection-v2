@@ -2,7 +2,7 @@
   "id": "calibration",
   "responsibility": "One authoritative base-to-lidar mount and lidar-to-IMU internal transform",
   "runtime": ["robot", "workstation"],
-  "status": "ported_offline_ros_runtime_pending",
+  "status": "integrated_replacement_sensor_calibration_field_verified",
   "codeRoots": ["modules/calibration", "third_party/locked_stack/src/go2_site_ops"],
   "entrypoints": ["gogoguard_calibration.mount_tf_publisher:main"],
   "dependsOn": ["contracts"],

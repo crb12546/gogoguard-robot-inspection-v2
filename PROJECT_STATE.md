@@ -4,10 +4,141 @@ Updated: 2026-08-09
 
 ## New-task handoff — start here
 
-This section is the compact authoritative handoff for a new Codex task. The
-dated sections below are evidence history; do not treat an older "next
-experiment" paragraph as current when it conflicts with this section or the
-final paragraph of this file.
+This section is the compact authoritative handoff for the whole product, not
+only the latest navigation problem. The dated sections below are evidence
+history; do not treat an older "next experiment" paragraph as current when it
+conflicts with this section or the final paragraph of this file.
+
+### Overall product status
+
+GoGoGuard V2 is a **field-commissioning system with one real core vertical
+slice**, not a completed inspection product. The robot -> Mac -> cloud -> Mac ->
+robot loop has produced real maps and completed real route patrols. The current
+work is proving and productizing reliable autonomous movement. Inspection
+actions, mission execution, SaaS integration, realtime dialogue and remote
+teleoperation remain later or parallel slices.
+
+| Product area | Current reality | Remaining product gap |
+|---|---|---|
+| Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
+| Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active | Long-duration full-load performance is not yet characterized |
+| Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
+| Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts | Manual map quality approval/correction is not a complete workflow |
+| Map and route assets | Maps have versions/history/labels; recorded trajectories create map-bound generation-3 routes and can be published back to the robot | No independent graphical route editor; route editing/version comparison is incomplete |
+| Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols | Deliberate localization-loss and resume acceptance remains pending |
+| Navigation and motion | Nav2/MPPI has completed real routes; real dead-end stopping and remote-control release are verified | Sustained cruise speed, passable detour/rejoin and repeatability remain commissioning work |
+| Field workstation and UI | The Mac page is the working delivery console for mapping, history, publication, patrol, parameters and diagnostics | It is an engineering/field UI, not a finished operator product; several workflows still need simplification |
+| Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
+| Inspection actions/evidence | Camera live preview works | Checkpoint photo/video actions and versioned inspection evidence are not implemented |
+| Mission/task system | Boundary is designed | Mission state machine, checkpoint orchestration and result aggregation are not implemented |
+| SaaS integration | Existing GoGoGuard SaaS is retained as an external system | Device agent, task/result contract integration and operational rollout are not implemented in V2 |
+| Realtime dialogue and teleoperation | Realtime dialogue has an independent development branch; Unitree low-level motion boundary exists | Neither dialogue nor remote teleoperation is integrated into the deployed inspection product |
+
+### Proven end-to-end product flow
+
+The following is real field capability, although not every step has final UX or
+repeatability acceptance:
+
+1. Robot publishes Livox/IMU/camera/odometry and records a mapping bag while the
+   operator drives with the handheld remote.
+2. Robot seals the RecordingBundle; Mac discovers and resumes its download.
+3. Mac submits the immutable bundle to the Alibaba Cloud GLIM adapter and
+   receives map PLY/JSON/SVG plus the optimized trajectory.
+4. Mac stores map history and labels, visualizes map artifacts, derives the
+   recorded map-bound route and publishes the selected candidate to the robot.
+5. Robot runs FAST-LIO, fixed-map localization, Nav2/MPPI, local costmap,
+   obstacle classification and the Unitree receiver without requiring cloud or
+   SaaS connectivity.
+6. Mac starts/stops the engineering patrol workflow and reads live status,
+   parameters and bounded diagnostic evidence. A route has completed at 100%
+   and a genuinely sealed path has stopped correctly.
+
+This proves the core mobility loop. It does **not** yet prove a complete
+inspection mission with checkpoint actions, business task state or SaaS result
+delivery.
+
+### Development journey compressed from this Codex task
+
+This task spans the product reset and many real commissioning cycles. Preserve
+these decisions and lessons when continuing in a new conversation:
+
+1. **Six parallel conversations exposed the original governance failure.** The
+   product topics looked separate, but their code changed shared deployment,
+   runtime and contracts without one integration owner. The response was not
+   dozens of microservices: it was one modular monorepo, explicit ownership,
+   one integration branch, generated module knowledge and evidence-backed
+   deployment receipts.
+2. **The product goal was narrowed before more code was written.** The first
+   deliverable is a robot that can record a site, produce a usable map, localize
+   in it and repeatedly patrol a route. Camera inspection actions, SaaS tasks,
+   realtime dialogue and remote movement matter, but they are separate layers
+   that should be added only after the mobility foundation is measurable.
+3. **The old application was rejected, but its capabilities were not.** The old
+   AI-written repository had never completed a deployment, so V2 did not keep
+   its application structure. Livox, FAST-LIO, GLIM, small_gicp, Nav2/MPPI and
+   Unitree sources were frozen by commit/tree hash and selectively composed
+   behind new module boundaries.
+4. **The deployment architecture was corrected to three ends.** Robot runs one
+   ROS 2 Humble edge container and owns live sensor/motion traffic. Mac is the
+   delivery workstation and Git/release boundary. Alibaba Cloud runs only the
+   pinned GLIM job. This replaced early behavior that made the robot pull code
+   or upload large recordings directly and made field failures hard to see.
+5. **The real hardware/software baseline was commissioned.** The Mac gained an
+   ARM64 builder and checksummed offline release flow. The JetPack 5 / Ubuntu
+   20.04 robot runs the Ubuntu 22.04 / Humble product container under an enabled
+   systemd service. The 100 TOPS Orin NX has run the current sensor stack at low
+   memory use; the 40 TOPS option has not been benchmarked and must not be
+   claimed equivalent.
+6. **Sensor and observation capability became real.** Livox, internal IMU,
+   FAST-LIO, the fixed 32.242667 degree mount calibration, Z1Pro RTSP -> WebRTC
+   preview and Unitree SDK motion boundary were integrated. A failed original
+   MID-360 was replaced by MID-360S `ARMCP6B0035634`; identity/config changed
+   while the operator-confirmed rigid geometry was retained. Host clock jumps,
+   NTP startup and IMU display under-counting were separated from actual sensor
+   faults.
+7. **The mapping workflow moved from fragile upload to a product data flow.**
+   Real bags were recorded and sealed; early `load failed`, broken-pipe,
+   progress and direct-upload problems led to resumable robot -> Mac transfer,
+   Mac -> cloud orchestration and immutable map return. GLIM has produced real
+   maps, Mac displays 2D/3D assets and history, and selected map/route candidates
+   can be published to the robot. Manual map correction and independent route
+   authoring are still incomplete.
+8. **Localization and patrol moved through real failures, not a demo.** Early
+   runs exposed non-convergence, incorrect initial assumptions, narrow-door
+   interpretation, stale selected maps, duplicate/orphan processes, misleading
+   `timeout` UI, unavailable stop control and motion-control contention. The
+   system gained fixed-map VGICP status, guided asynchronous operations, one
+   persistent supervisor, owned process cleanup and an explicit stop-and-release
+   path.
+9. **Obstacle handling was redesigned after patch-by-patch tuning failed.**
+   Logs showed that controller abort, localization loss, actuation stall and
+   true obstruction had been conflated. V2 now classifies them separately,
+   requires healthy temporal costmap evidence, bounds A* detours, gives RPP only
+   the local segment and returns route ownership to MPPI. A real changed-room
+   table formed a sealed dead end; stopping was correctly verified. A passable
+   detour/rejoin is still not field-accepted.
+10. **Debugging became a first-class development capability.** The Mac gained
+    parameter views, operation receipts, incident synchronization/replay and
+    layered runtime evidence; the robot records raw/smoothed/collision/final
+    command chains, odometry, localization, costmap and controller state.
+    Diagnostics are development infrastructure and may be reduced later, but
+    current algorithm decisions must use these traces instead of operator
+    impressions or repeated code grep alone.
+11. **Recent field results prove both progress and remaining limits.** Real
+    patrols have completed, localization has tracked accurately, a real dead end
+    stopped correctly, and remote-control release passed. The latest speed
+    release shortened the same route by about 9% and reached 0.551 m/s peak,
+    while actual mean remained about 0.30 m/s. That is a partial improvement,
+    not completion of speed commissioning.
+12. **Parallel feature work now has an explicit integration boundary.**
+    Realtime dialogue lives on its own branch/worktree and is not deployed with
+    inspection navigation. It can later integrate through declared contracts;
+    it must not silently merge composition, deployment or motion ownership.
+
+The recurring lesson is to diagnose the whole ownership and data path before
+changing a local parameter. A field symptom may be algorithmic, orchestration,
+deployment, stale-state, UX or evidence-quality failure; the system now has
+boundaries and receipts to distinguish them.
 
 ### Product and execution boundaries
 
@@ -61,19 +192,34 @@ final paragraph of this file.
   The immediately preceding comparison trace is
   `runtime-20260809-071035-63558-part001.jsonl` in the same directory.
 
-### Current next work
+### Development roadmap and current priorities
 
-1. For speed, explain from trajectory/critic evidence why clear and nearly
-   straight segments still average only about 0.36--0.38 m/s before changing
-   another parameter. Do not tune the safety layer to solve this measurement.
-2. Remaining navigation acceptance is a physically passable obstacle corridor
-   exercising A* -> DetourPath -> MPPI rejoin, localization-loss route resume,
-   and handheld-remote control immediately after stop from active patrol and
-   `FAULT`.
-3. Before any physical test, confirm the operator's intended map and route,
-   confirm the robot is standing in that map, and obtain explicit authorization
-   in the current task. A deployment or diagnostic request never authorizes
-   motion by itself.
+1. **P0 — finish the repeatable mobility loop.** Explain and correct MPPI's
+   low clear-route output from trajectory/critic evidence; field-accept a
+   physically passable A* -> DetourPath -> MPPI rejoin; field-accept
+   localization-loss resume and remote-control release from active patrol and
+   `FAULT`. Do not weaken obstacle safety to solve a controller-speed issue.
+2. **P1 — make maps and routes real operator assets.** Add a clear map quality
+   review/approval workflow, expose useful pre/post-GLIM artifacts, support an
+   independent graphical route editor with validation, and make select/load/
+   rename/version/rollback semantics unambiguous in the workstation.
+3. **P2 — build actual inspection execution.** Implement checkpoint actions,
+   photo/video evidence, inspection result contracts, and the mission state
+   machine that composes route travel with those actions. Keep algorithm
+   evidence separate from business inspection evidence while sharing immutable
+   identifiers and timestamps.
+4. **P3 — connect external product surfaces.** Integrate the existing SaaS
+   through a narrow device-agent task/result boundary. Integrate realtime
+   dialogue and later remote teleoperation as separate capabilities; neither
+   may bypass navigation ownership or silently take motion control.
+5. **P4 — close delivery engineering.** Productize Mac installation/startup,
+   define release promotion and rollback, push/review the integration branch,
+   and add full-load performance/soak acceptance on the 16 GB Orin NX.
+
+Before any physical test, confirm the operator's intended map and route,
+confirm the robot is standing in that map, and obtain explicit authorization in
+the current task. A deployment or diagnostic request never authorizes motion by
+itself.
 
 ### Parallel Codex and Git boundary
 
@@ -98,11 +244,12 @@ final paragraph of this file.
 - Sensor: replacement Livox MID-360S `ARMCP6B0035634` at `192.168.1.134`.
   Camera: Z1Pro.
 - Cloud mapping: existing Alibaba Cloud Ubuntu 24.04 x86_64 / ROS 2 Jazzy GLIM
-  worker. A stationary native PointCloud2 + Imu smoke dataset previously
-  completed GLIM and produced 12 review artifacts. Dynamic production mapping
-  is not verified.
-- SaaS: existing GoGoGuard platform is retained. V2 implements only its robot
-  integration adapter.
+  worker. It first passed a stationary native PointCloud2 + Imu smoke dataset
+  and has since processed real operator-driven robot recordings into maps used
+  for fixed-map localization and patrol. Map quality review remains an operator
+  acceptance step.
+- SaaS: existing GoGoGuard platform is retained. Its V2 device-agent/task/result
+  integration boundary is planned but is not part of the deployed core loop.
 
 ## V2 implementation state
 

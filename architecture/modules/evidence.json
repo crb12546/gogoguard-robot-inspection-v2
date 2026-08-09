@@ -2,7 +2,7 @@
   "id": "evidence",
   "responsibility": "Append-only runtime events, bounded development incident capture and immutable receipts; no product decision logic",
   "runtime": ["robot", "cloud", "workstation"],
-  "status": "development_incident_bundle_and_v2_navigation_state_contract_deployed",
+  "status": "runtime_trace_deployed_incident_bundle_coverage_partial",
   "codeRoots": ["modules/evidence"],
   "entrypoints": ["gogoguard_evidence.journal:EventJournal", "gogoguard_evidence.incident_recorder:main"],
   "dependsOn": ["contracts"],

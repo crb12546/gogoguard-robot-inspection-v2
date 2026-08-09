@@ -2,7 +2,7 @@
   "id": "data_capture",
   "responsibility": "Start, stop, seal and replay raw mapping evidence without owning algorithms",
   "runtime": ["robot"],
-  "status": "migrating_locked_source",
+  "status": "real_mapping_recording_and_sealed_bundle_field_verified",
   "codeRoots": ["modules/data_capture", "third_party/locked_stack/src/go2_mapping_capture"],
   "entrypoints": ["gogoguard_data_capture.manager:CaptureManager", "go2_mapping_capture/launch/mid360_mapping_capture.launch.py"],
   "dependsOn": ["contracts", "device_io", "calibration", "localization", "evidence"],
