@@ -778,7 +778,7 @@ parameters. Record each result before calling the release field-accepted.
   and browser verification shows `map-799f6f04e11d` as the current selected and
   published map with no parse error.
 
-## 2026-08-09 cruise-speed contract correction (deployed; dynamic receipt pending)
+## 2026-08-09 cruise-speed contract correction (deployed; field measured)
 
 - Three completed patrol traces on `map-799f6f04e11d` proved that the former
   speed control was misleading. At the original 0.60 m/s setting, final mean
@@ -806,7 +806,18 @@ parameters. Record each result before calling the release field-accepted.
   odometry 10.0 Hz. Nav2 and the Unitree motion bridge remained stopped, so no
   motion command was sent. The active V2 profile migrated to revision 3 with
   forward/detour/yaw/lateral limits 0.60/0.60/0.50/0.20 and MPPI batch 1,000.
-  A measured clear-route speed receipt is still required.
+  The first same-route speed receipt is recorded below.
+- On `map-799f6f04e11d`, release `cruise-r1` completed the 9.805 m route in
+  30.20 seconds versus 33.20 seconds on the immediately preceding release, a
+  9.0% reduction. Odometry-integrated mean speed rose from 0.286 to 0.297 m/s.
+  The final command's 90th percentile rose from 0.402 to 0.435 m/s and its
+  maximum from 0.474 to 0.551 m/s, but mean final translational command remained
+  0.342 m/s and 72.6% of nonzero commands were below 0.40 m/s. MPPI raw mean was
+  0.349 m/s versus 0.342 m/s after collision handling, so the safety chain
+  removed only about 2%; no detour or stop occurred and the route reached 100%.
+  The release is measurably faster but does not yet deliver sustained 0.60 m/s
+  travel. The remaining speed limit is primarily the MPPI/path-follow output,
+  not the receiver or obstacle-stop policy.
 
 ## Next experiment (supersedes all older paragraphs)
 
@@ -814,7 +825,8 @@ Keep `v2-edge-20260809-cruise-r1` fixed and collect only the remaining acceptanc
 receipts: one obstacle that leaves a physically passable side corridor and
 therefore exercises A* -> `DetourPath` -> MPPI rejoin; localization-loss route
 resume; and handheld-remote movement immediately after a stop from an active
-patrol and from `FAULT`; also record the achieved clear-route speed after this
-release. The terminal dead-end stop and normal MPPI travel are already field
-verified; do not weaken obstacle thresholds to make an actually sealed path
-appear passable.
+patrol and from `FAULT`. For speed work, explain why clear and nearly straight
+segments still average only about 0.36--0.38 m/s before changing another
+parameter; do not attribute the measured limit to collision handling. The
+terminal dead-end stop and normal MPPI travel are already field verified; do
+not weaken obstacle thresholds to make an actually sealed path appear passable.
