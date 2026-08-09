@@ -201,6 +201,17 @@ boundaries and receipts to distinguish them.
   the independent 0.90 m/s receiver hard ceiling. Existing V4 profiles with
   the exact failed speed tuple migrate deterministically; custom profiles are
   preserved. One complete-route physical receipt is still required.
+- The correction is committed as `e651e84f92ae084a03031beb8098972863f2fcd2`
+  and built for Linux/ARM64 as
+  `gogoguard-robot-inspection:v2-edge-20260809-complete-r1`. The local image
+  manifest-list ID is
+  `sha256:2f4b77eba52151813a3d6143f2bee9bdbb498973b47b67f0dc7ca6a5c99ed495`
+  (1,171,981,741 bytes). In-image checks confirmed profile V5, no
+  `VelocityDeadbandCritic`, MPPI/smoother 0.60 m/s, detour/turn 0.40 and
+  acceleration/deceleration 0.90 m/s2. The 1,172,021,760-byte immutable
+  release archive has SHA-256
+  `2bbda1667274637db28c291411d948c156219da37ea9db1fecb850cd11f15448`.
+  The release has not connected to or been installed on the robot.
 - Evidence was synchronized to
   `workstation-data/field-runs/20260809-105714-continuous-r1` and 52 Mac-side
   IncidentBundles passed all 364 file hashes. The bundles exposed a separate
