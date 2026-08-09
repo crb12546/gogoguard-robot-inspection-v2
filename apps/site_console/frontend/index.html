@@ -66,7 +66,8 @@
           <button id="resetLocalization" class="secondary">机器狗位置不对：重新定位</button>
           <button id="recoverRuntime" class="secondary">运行异常：自动清理并恢复</button>
           <button id="startPatrol">开始巡检</button>
-          <button id="stopPatrol" class="stop">暂停巡检</button>
+          <button id="stopPatrol" class="stop">停止巡检并释放遥控权</button>
+          <small id="stopPatrolHelp" class="action-help">任何运行、故障或卡住状态都可以使用；会关闭 Nav2 速度链和 SDK 运动接收器，之后遥控器可直接控制机器狗。</small>
         </div>
         <div id="navigationError" class="error"></div>
       </article>
@@ -99,6 +100,7 @@
           <label>单次巡检绕行上限<input id="detourAttemptLimit" type="number" min="1" max="3" step="1"></label>
           <label>路线障碍代价阈值<input id="obstructionCost" type="number" min="1" max="100" step="1"></label>
           <label>路线障碍连续样本<input id="obstructionSamples" type="number" min="1" max="10" step="1"></label>
+          <label>路线障碍持续确认 (秒)<input id="obstructionConfirmation" type="number" min="0.2" max="2" step="0.1"></label>
         </div></details>
         <div class="inline-actions"><button id="saveProfile">保存新参数</button><button id="rollbackProfile" class="secondary">回滚上一版</button><small id="profileMessage">正在读取参数</small></div>
       </details>

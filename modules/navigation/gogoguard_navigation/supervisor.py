@@ -50,11 +50,30 @@ class OperationRegistry:
                 completion_messages = {
                     "runtime.start": "运行进程启动请求已完成；定位是否可用以实时状态为准",
                     "patrol.start": "Nav2 已接收巡检请求；整条路线结果以巡检状态为准",
+                    "runtime.stop": "导航速度链和 SDK 运动桥已停止；遥控权已释放",
+                    "patrol.stop": "巡检、导航速度链和 SDK 运动桥已停止；遥控权已释放",
                 }
+                message = completion_messages.get(kind, "请求已完成")
+                if kind in {"runtime.stop", "patrol.stop"} and isinstance(result, dict):
+                    if not result.get("remoteControlReleased"):
+                        error = "导航进程未完全停止，遥控权释放未确认"
+                        self._change(
+                            operation_id,
+                            state="failed",
+                            message=error,
+                            error=error,
+                            result=result,
+                        )
+                        return
+                    if not result.get("stopMoveConfirmed"):
+                        message = (
+                            "导航速度链和 SDK 运动桥已停止，遥控权已释放；"
+                            "Unitree StopMove 回执未确认"
+                        )
                 self._change(
                     operation_id,
                     state="complete",
-                    message=completion_messages.get(kind, "请求已完成"),
+                    message=message,
                     result=result,
                 )
 
@@ -76,6 +95,21 @@ class SupervisorService:
     def __init__(self, manager: NavigationManager) -> None:
         self.manager = manager
         self.operations = OperationRegistry()
+        self._control_epoch = 0
+        self._control_lock = threading.Lock()
+
+    def _epoch(self) -> int:
+        with self._control_lock:
+            return self._control_epoch
+
+    def _invalidate_control(self) -> int:
+        with self._control_lock:
+            self._control_epoch += 1
+            return self._control_epoch
+
+    def _require_current(self, expected_epoch: int) -> None:
+        if self._epoch() != expected_epoch:
+            raise RuntimeError("操作已被停止并释放遥控权请求取消")
 
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
         if method == "status":
@@ -93,25 +127,46 @@ class SupervisorService:
             return self.manager.rollback_profile()
         if method == "diagnostics":
             return self.manager.diagnostics()
+        if method in {"runtime.stop", "patrol.stop"}:
+            self._invalidate_control()
+        control_epoch = self._epoch()
         actions = {
-            "runtime.start": lambda: self.manager.start_runtime(str(params.get("candidate_id", ""))),
+            "runtime.start": lambda: self._start_runtime(
+                str(params.get("candidate_id", "")), control_epoch
+            ),
             "runtime.stop": self.manager.stop_runtime,
             "localization.reset": self.manager.reset_localization,
-            "patrol.start": self.manager.start_patrol,
+            "patrol.start": lambda: self._start_patrol(control_epoch),
             "patrol.stop": self.manager.stop_patrol,
-            "runtime.recover": self._recover,
+            "runtime.recover": lambda: self._recover(control_epoch),
         }
         if method in actions:
             lane = "stop" if method in {"runtime.stop", "patrol.stop"} else "control"
             return self.operations.submit(method, actions[method], lane=lane)
         raise ValueError(f"unknown supervisor method: {method}")
 
-    def _recover(self) -> dict[str, Any]:
+    def _start_runtime(self, candidate_id: str, control_epoch: int) -> dict[str, Any]:
+        self._require_current(control_epoch)
+        result = self.manager.start_runtime(candidate_id)
+        self._require_current(control_epoch)
+        return result
+
+    def _start_patrol(self, control_epoch: int) -> dict[str, Any]:
+        self._require_current(control_epoch)
+        result = self.manager.start_patrol()
+        self._require_current(control_epoch)
+        return result
+
+    def _recover(self, control_epoch: int) -> dict[str, Any]:
+        self._require_current(control_epoch)
         candidate = self.manager.status().get("candidate")
         if not candidate:
             raise RuntimeError("尚未选择地图与路线")
         self.manager.stop_runtime()
-        return self.manager.start_runtime(str(candidate["candidate_id"]))
+        self._require_current(control_epoch)
+        result = self.manager.start_runtime(str(candidate["candidate_id"]))
+        self._require_current(control_epoch)
+        return result
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):

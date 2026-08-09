@@ -113,6 +113,84 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "motion bridge is not running"):
             manager.start_patrol()
 
+    def test_patrol_start_waits_for_a_new_healthy_costmap(self) -> None:
+        class Process:
+            def poll(self):
+                return None
+
+        manager = NavigationManager.__new__(NavigationManager)
+        manager._lock = threading.Lock()
+        manager._candidate = {
+            "map_version": "map-123456789abc",
+            "route_id": "route-123456789abc-recorded",
+        }
+        manager._process = Process()
+        manager._receiver_process = Process()
+        statuses = iter(
+            [
+                {
+                    "runtime_process": {"running": True},
+                    "runtime": {"costmapHealth": {"sequence": 4, "healthy": True}},
+                },
+                {
+                    "runtime_process": {"running": True},
+                    "runtime": {"costmapHealth": {"sequence": 5, "healthy": True}},
+                },
+            ]
+        )
+        manager.status = lambda: next(statuses)
+        calls = []
+
+        def service(name, type_name, request, timeout=12):
+            calls.append((name, type_name))
+            return {"success": True, "output": "success: true"}
+
+        manager._service = service
+        result = manager.start_patrol()
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            calls[0],
+            (
+                "/local_costmap/clear_entirely_local_costmap",
+                "nav2_msgs/srv/ClearEntireCostmap",
+            ),
+        )
+        self.assertEqual(calls[1][0], "/go2/patrol/start")
+
+    def test_localization_resume_uses_the_same_fresh_costmap_barrier(self) -> None:
+        source = RUNTIME_MANAGER.read_text(encoding="utf-8")
+        refresh = source[source.index("def _resume_costmap_refresh") :]
+        self.assertIn("ClearEntireCostmap.Request()", refresh)
+        self.assertIn(
+            "self.costmap_sequence > baseline and health.healthy",
+            refresh,
+        )
+        resume_branch = source[source.index("elif self.resume_pending") :]
+        self.assertIn("refresh = self._resume_costmap_refresh(now)", resume_branch)
+        self.assertLess(
+            resume_branch.index("refresh = self._resume_costmap_refresh(now)"),
+            resume_branch.index("self._request_resume()"),
+        )
+
+    def test_operator_stop_is_idempotent_and_reports_remote_release(self) -> None:
+        manager = NavigationManager.__new__(NavigationManager)
+        manager._lock = threading.Lock()
+        manager._process = None
+        manager._receiver_process = None
+        manager._log_handle = None
+        manager._receiver_log_handle = None
+        manager._last_runtime_exit = None
+        manager._last_receiver_exit = None
+        manager.status = lambda: {
+            "runtime_process": {"running": False},
+            "motion_bridge": {"running": False},
+        }
+        result = manager.stop_patrol()
+        self.assertTrue(result["success"])
+        self.assertTrue(result["remoteControlReleased"])
+        self.assertTrue(result["runtimeStopped"])
+        self.assertTrue(result["motionBridgeStopped"])
+
     def test_motion_bridge_uses_the_paired_unitree_dds_prefix(self) -> None:
         manager = NavigationManager.__new__(NavigationManager)
         with tempfile.TemporaryDirectory() as temporary:
@@ -168,25 +246,11 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             ).group(1)
         )
         self.assertGreaterEqual(detour_speed * slowdown_ratio, 0.20)
-        voxel = re.search(
-            r"voxel_layer:.*?origin_z:\s*([-0-9.]+).*?"
-            r"z_resolution:\s*([0-9.]+).*?z_voxels:\s*([0-9]+).*?"
-            r"max_obstacle_height:\s*([0-9.]+)",
-            nav2_config,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(voxel)
-        origin_z, z_resolution, z_voxels, max_obstacle_height = (
-            float(voxel.group(1)),
-            float(voxel.group(2)),
-            int(voxel.group(3)),
-            float(voxel.group(4)),
-        )
-        self.assertLessEqual(origin_z, -0.32)
-        self.assertGreaterEqual(
-            origin_z + z_resolution * z_voxels,
-            max_obstacle_height,
-        )
+        self.assertIn("global_frame: map", nav2_config)
+        self.assertIn("plugins: [obstacle_layer, inflation_layer]", nav2_config)
+        self.assertIn("plugin: nav2_costmap_2d::ObstacleLayer", nav2_config)
+        self.assertNotIn("nav2_costmap_2d::VoxelLayer", nav2_config)
+        self.assertNotIn("origin_z:", nav2_config)
         runtime_manager = RUNTIME_MANAGER.read_text(encoding="utf-8")
         self.assertIn('goal.controller_id = "DetourPath"', runtime_manager)
         self.assertIn("route_obstruction_evidence", runtime_manager)

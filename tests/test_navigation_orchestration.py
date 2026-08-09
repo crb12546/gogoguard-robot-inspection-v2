@@ -14,9 +14,11 @@ from gogoguard_navigation.orchestration import (
     FailureEvidence,
     MotionEvidenceTracker,
     MotionSnapshot,
+    ObstructionEvidenceTracker,
     RecoveryAction,
     controller_success_action,
     decide_controller_failure,
+    evaluate_costmap_health,
     route_obstruction_evidence,
 )
 
@@ -45,6 +47,7 @@ class Grid:
 def motion(translation=0.5, linear=0.4, rotation=0.0, angular=0.0):
     return MotionSnapshot(
         window_s=2.5,
+        observed_duration_s=2.5,
         translation_m=translation,
         rotation_rad=rotation,
         mean_linear_command_mps=linear,
@@ -58,6 +61,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.MPPI,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(),
                 mppi_retry_count=0,
@@ -71,6 +76,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.MPPI,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(),
                 mppi_retry_count=0,
@@ -84,6 +91,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.MPPI,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(),
                 mppi_retry_count=0,
@@ -104,6 +113,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.DETOUR_RPP,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(translation=0.051, linear=0.24),
                 mppi_retry_count=0,
@@ -118,6 +129,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.DETOUR_RPP,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=True,
                 motion=motion(translation=0.3, linear=0.35),
                 mppi_retry_count=0,
@@ -130,6 +143,8 @@ class NavigationOrchestrationTest(unittest.TestCase):
             FailureEvidence(
                 controller=ControllerMode.MPPI,
                 localization_usable=True,
+                costmap_healthy=True,
+                costmap_reason="OK",
                 route_obstructed=False,
                 motion=motion(),
                 mppi_retry_count=2,
@@ -157,7 +172,72 @@ class NavigationOrchestrationTest(unittest.TestCase):
         self.assertAlmostEqual(snapshot.translation_m, 0.10)
         self.assertAlmostEqual(snapshot.rotation_rad, 0.05)
         self.assertAlmostEqual(snapshot.mean_linear_command_mps, 0.24)
+        self.assertAlmostEqual(snapshot.observed_duration_s, 2.5)
         self.assertTrue(snapshot.has_actuation_stall())
+
+    def test_subsecond_controller_abort_is_not_actuation_stall(self):
+        snapshot = MotionSnapshot(
+            window_s=5.0,
+            observed_duration_s=0.96,
+            translation_m=0.055,
+            rotation_rad=0.01,
+            mean_linear_command_mps=0.29,
+            mean_angular_command_rps=0.05,
+            linear_command_active_ratio=0.8,
+            angular_command_active_ratio=0.4,
+        )
+        self.assertFalse(snapshot.has_actuation_stall())
+
+    def test_unhealthy_costmap_stops_without_authorizing_detour(self):
+        decision = decide_controller_failure(
+            FailureEvidence(
+                controller=ControllerMode.MPPI,
+                localization_usable=True,
+                costmap_healthy=False,
+                costmap_reason="COSTMAP_FRAME_INVALID",
+                route_obstructed=True,
+                motion=motion(),
+                mppi_retry_count=0,
+            )
+        )
+        self.assertEqual(decision.failure_class, FailureClass.COSTMAP_UNHEALTHY)
+        self.assertEqual(decision.action, RecoveryAction.STOP_FAULT)
+        self.assertEqual(decision.reason, "COSTMAP_FRAME_INVALID")
+
+    def test_costmap_health_requires_map_frame_and_free_robot_cell(self):
+        grid = Grid()
+        healthy = evaluate_costmap_health(
+            grid,
+            frame_id="map",
+            expected_frame="map",
+            age_s=0.1,
+            robot_xy=(0.5, 0.5),
+        )
+        self.assertTrue(healthy.healthy)
+        wrong_frame = evaluate_costmap_health(
+            grid,
+            frame_id="odom",
+            expected_frame="map",
+            age_s=0.1,
+            robot_xy=(0.5, 0.5),
+        )
+        self.assertEqual(wrong_frame.reason, "COSTMAP_FRAME_INVALID")
+        grid.occupy(0.5, 0.5, cost=254)
+        occupied = evaluate_costmap_health(
+            grid,
+            frame_id="map",
+            expected_frame="map",
+            age_s=0.1,
+            robot_xy=(0.5, 0.5),
+        )
+        self.assertEqual(occupied.reason, "COSTMAP_ROBOT_OCCUPIED")
+
+    def test_obstruction_requires_multiple_healthy_frames_over_time(self):
+        tracker = ObstructionEvidenceTracker(confirmation_s=0.30)
+        self.assertFalse(tracker.update(1.0, blocked=True, source_healthy=True))
+        self.assertFalse(tracker.update(1.2, blocked=True, source_healthy=True))
+        self.assertTrue(tracker.update(1.31, blocked=True, source_healthy=True))
+        self.assertFalse(tracker.update(1.4, blocked=True, source_healthy=False))
 
     def test_route_obstruction_requires_consecutive_inflated_cells(self):
         grid = Grid()

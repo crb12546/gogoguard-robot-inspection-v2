@@ -58,11 +58,11 @@ const setFault = error => { $('error').textContent = friendlyError(error); };
 
 const operationKindLabels = {
   'runtime.start': '启动定位与 Nav2',
-  'runtime.stop': '停止定位与 Nav2',
+  'runtime.stop': '停止并释放遥控权',
   'runtime.recover': '清理并恢复导航',
   'localization.reset': '重新定位',
   'patrol.start': '提交巡检',
-  'patrol.stop': '停止巡检',
+  'patrol.stop': '停止并释放遥控权',
 };
 const operationStateText = operation => {
   if (!operation) return '无';
@@ -431,6 +431,7 @@ function renderNavigation() {
   const localization = navigation.localization || {};
   const command = navigation.commands?.final || {};
   const runtimeRunning = Boolean(navigation.runtime_process?.running);
+  const motionBridgeRunning = Boolean(navigation.motion_bridge?.running);
   const selectedJobId = state.latestMapJob?.job_id;
   const assetReady = Boolean(candidate && selectedJobId && candidate.map_job_id === selectedJobId);
   const runtimeMapId = runtime.mapVersion || localization.mapVersion;
@@ -440,6 +441,7 @@ function renderNavigation() {
   const selectedRuntimeReady = assetReady && runtimeMatchesCandidate;
   const operation = (navigation.operations || [])[0];
   const operationBusy = ['accepted', 'running'].includes(operation?.state);
+  const stopOperationBusy = operationBusy && ['runtime.stop', 'patrol.stop'].includes(operation?.kind);
   const patrolRunning = [
     'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
     'DETOURING', 'REJOINING', 'RETRYING',
@@ -482,7 +484,7 @@ function renderNavigation() {
   else if (runtimeRunning && !localization.usable) guidance = '正在地图中定位，请让机器狗站稳等待；无需重复点击。';
   else if (selectedRuntimeReady && localization.usable && !patrolRunning) guidance = '定位已可用。下一步：确认现场后点击“开始巡检”。';
   if (runtime.state === 'STARTING') guidance = '开始请求正在由 Nav2 确认；这还不代表整条路线已经完成。';
-  if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断时点击“暂停巡检”。';
+  if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断或改用遥控器时，点击“停止巡检并释放遥控权”。';
   if (runtime.state === 'REPLANNING') guidance = '原路线局部受阻，正在根据当前代价地图规划绕行并接回前方路线。';
   if (runtime.state === 'DETOURING') guidance = '代价地图已确认原路线前方被占用，正只向 RPP 提交到重入点的局部绕行路径。';
   if (runtime.state === 'REJOINING') guidance = 'RPP 已到达重入点，正将未完成的录制路线交还 MPPI。';
@@ -490,7 +492,7 @@ function renderNavigation() {
   if (runtime.state === 'PATROLLING' && runtime.reason === 'LOCAL_DETOUR_ACCEPTED') guidance = '已找到绕行路径：机器狗会先对准绕行方向，再以有效步态接回原路线。';
   if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
-  if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；可先查看下方诊断，或点击“自动清理并恢复”。`;
+  if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；需要遥控机器狗时先点击“停止巡检并释放遥控权”，需要继续测试时再启动定位与 Nav2。`;
   if (operation?.state === 'failed') {
     guidance = `操作失败：${operation.message || operation.error || '未知错误'}。请不要重复点击，可查看下方诊断。`;
     $('navigationError').textContent = operation.message || operation.error || '导航操作失败';
@@ -513,8 +515,11 @@ function renderNavigation() {
   $('recoverRuntime').disabled = operationBusy;
   $('startPatrol').hidden = !selectedRuntimeReady || patrolRunning;
   $('startPatrol').disabled = !localization.usable || operationBusy || ['FAULT', 'BLOCKED'].includes(runtime.state);
-  $('stopPatrol').hidden = !patrolRunning;
-  $('stopPatrol').disabled = operationBusy;
+  $('stopPatrol').hidden = !runtimeRunning && !motionBridgeRunning;
+  $('stopPatrolHelp').hidden = !runtimeRunning && !motionBridgeRunning;
+  // Stop uses its own supervisor lane and must remain available even when a
+  // start/recovery operation is stuck in the control lane.
+  $('stopPatrol').disabled = stopOperationBusy;
   drawNavigation();
 }
 
@@ -531,7 +536,7 @@ async function navigationAction(action) {
     } else if (action === 'start') {
       await post('/api/v1/navigation/patrol/start');
     } else if (action === 'stop') {
-      await post('/api/v1/navigation/patrol/stop');
+      await post('/api/v1/navigation/runtime/stop');
     } else if (action === 'recover') {
       await post('/api/v1/navigation/runtime/recover');
     }
@@ -564,6 +569,7 @@ function fillProfile(profile) {
   $('detourAttemptLimit').value = profile.recovery.detourAttemptLimit;
   $('obstructionCost').value = profile.avoidance.obstructionCostThreshold;
   $('obstructionSamples').value = profile.avoidance.obstructionMinSamples;
+  $('obstructionConfirmation').value = profile.avoidance.obstructionConfirmationS;
   $('profileMessage').textContent = `当前第 ${profile.revision} 版`;
 }
 
@@ -596,6 +602,7 @@ async function saveProfile() {
   profile.recovery.detourAttemptLimit = Number($('detourAttemptLimit').value);
   profile.avoidance.obstructionCostThreshold = Number($('obstructionCost').value);
   profile.avoidance.obstructionMinSamples = Number($('obstructionSamples').value);
+  profile.avoidance.obstructionConfirmationS = Number($('obstructionConfirmation').value);
   try {
     const result = await post('/api/v1/navigation/profile', {profile});
     fillProfile(result.profile);

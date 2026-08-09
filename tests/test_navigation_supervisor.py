@@ -20,9 +20,14 @@ class FakeManager:
         time.sleep(0.03)
         return {"candidate_id": candidate_id}
 
-    def stop_runtime(self): return {"stopped": True}
+    def stop_runtime(self):
+        return {
+            "success": True,
+            "remoteControlReleased": True,
+            "stopMoveConfirmed": True,
+        }
     def start_patrol(self): return {"started": True}
-    def stop_patrol(self): return {"stopped": True}
+    def stop_patrol(self): return self.stop_runtime()
     def reset_localization(self): return {"reset": True}
     def prepare(self, job_id): return {"job_id": job_id}
     def profile(self): return {"schema": "profile"}
@@ -76,6 +81,36 @@ class NavigationSupervisorTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual(operation["state"], "complete")
             self.assertIn("整条路线结果以巡检状态为准", operation["message"])
+            server.shutdown()
+            server.server_close()
+
+    def test_stop_lane_remains_available_while_start_lane_is_busy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            socket_path = Path(temporary) / "supervisor.sock"
+            manager = FakeManager()
+            server = NavigationSupervisorServer(
+                socket_path, SupervisorService(manager)
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            client = NavigationSupervisorClient(socket_path)
+            start = client.start_runtime("map-123456789abc")
+            stop = client.stop_runtime()
+            self.assertNotEqual(start["operationId"], stop["operationId"])
+            self.assertEqual(stop["kind"], "runtime.stop")
+            deadline = time.time() + 1.0
+            completed = None
+            while time.time() < deadline:
+                operations = client.status()["operations"]
+                completed = next(
+                    item for item in operations
+                    if item["operationId"] == stop["operationId"]
+                )
+                if completed["state"] == "complete":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(completed["state"], "complete")
+            self.assertIn("遥控权已释放", completed["message"])
             server.shutdown()
             server.server_close()
 

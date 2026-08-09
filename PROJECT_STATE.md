@@ -691,3 +691,61 @@ and the corrected obstacle detour returning to the recorded route. If a run
 blocks or faults, wait for the evidence bundle to seal and inspect its point
 cloud, local costmap, planner search, commands and camera window before changing
 parameters. Record each result before calling the release field-accepted.
+
+## 2026-08-09 planar-costmap and control-release correction (offline verified; not deployed)
+
+- The latest matching-map patrol did not fail because the route was proven
+  blocked. MPPI first commanded about 0.409 m/s and then reported
+  `Optimizer fail to compute path`; the bounded detour subsequently reported
+  `Failed to make progress`. At the same time, the 75 x 75 local costmap held
+  1,034 lethal and 898 inscribed cells, with 535 of 625 cells inside the
+  one-metre robot neighbourhood hard-blocked. This is inconsistent with the
+  observed open space.
+- Live TF showed the fixed-map result `map -> base_link` was near the intended
+  origin while the 3D `odom -> base_link` translation carried approximately
+  -2.99 m Z and a tilted frame. The rolling VoxelLayer used `odom` and a
+  -0.60 m lower raytrace bound, so its LiDAR sensor origin fell outside its own
+  vertical volume and stale obstacle cells accumulated. Increasing clearances
+  or adding another detour retry would hide this coordinate-contract defect.
+- The owned Nav2 profile now expresses the rolling local costmap in `map` and
+  uses a planar `ObstacleLayer`. Startup clears the local costmap, waits for a
+  newer frame and rejects patrol submission unless the new frame is fresh, is
+  in `map`, contains the robot and leaves its cell traversable. Unhealthy
+  costmap evidence is a dedicated failure class and cannot enter detour. A
+  localization-loss recovery performs the same asynchronous clear/new-frame
+  barrier before it resubmits the unfinished route.
+- A route is considered obstructed only after the same condition persists
+  across fresh costmap frames for `obstructionConfirmationS` (default 0.50 s).
+  Actuation-stall classification now requires a complete observation window;
+  a sub-second controller abort cannot be mislabeled as a motion stall.
+- The workstation now exposes a persistent **停止巡检并释放遥控权** action whenever the
+  runtime or Unitree motion bridge exists, including `FAULT` and `BLOCKED`.
+  It invalidates an overlapping start/recovery, cancels patrol, revokes motion
+  authorization, terminates the Nav2 runtime and SDK velocity receiver, sends
+  `StopMove`, and returns a structured release receipt. This addresses the
+  field symptom in which repeated SDK zero commands competed with the handheld
+  remote after a failed patrol.
+- Offline receipts: 77 unit/integration tests pass, including initial and
+  localization-resume costmap barriers,
+  frame/robot-cell health, temporal obstruction, short-abort classification,
+  independent stop control lane and idempotent release receipt. Python compile,
+  UI smoke, container contract validation, knowledge validation and diff checks
+  pass. The Linux/ARM64 image built all ten ROS 2 packages and passed in-image
+  Python imports, the strict Nav2 profile validator and installed
+  planar-costmap/resume-runtime checks. The single local
+  candidate is `gogoguard-robot-inspection:v2-edge-20260809-planar-release-r1`,
+  manifest-list/image ID
+  `sha256:77b8f49da398824b355135fb88cc93e5bcf55a92b5aa33d6537d5588d23b5700`
+  (1,171,239,282 virtual bytes). The robot still runs
+  `v2-edge-20260809-orchestration-r2`; none of these corrections has been
+  deployed or physically accepted yet.
+
+## Next experiment (supersedes all older paragraphs)
+
+Build and deploy exactly one correction image. Before permitting motion, verify
+`map -> base_link`, a fresh `map` local costmap and a traversable robot cell.
+Then collect, in order: a stationary start receipt, a clear-route MPPI run, one
+real obstacle with temporally confirmed detour and MPPI rejoin, an operator stop
+from an active patrol, an operator stop from `FAULT`, and immediate handheld
+remote movement after the release receipt. Do not tune speed or clearance until
+the planar costmap is visually consistent with the physical scene.

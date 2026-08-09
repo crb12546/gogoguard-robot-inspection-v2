@@ -32,6 +32,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
         "rejoinLookaheadM": 2.0,
         "obstructionCostThreshold": 65,
         "obstructionMinSamples": 2,
+        "obstructionConfirmationS": 0.50,
     },
     "recovery": {
         "progressTimeoutS": 5.0,
@@ -116,6 +117,12 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
                     1,
                     10,
                 )
+            ),
+            "obstructionConfirmationS": _finite(
+                avoidance.get("obstructionConfirmationS", 0.50),
+                "路线障碍持续确认时间",
+                0.20,
+                2.00,
             ),
         },
         "recovery": {

@@ -152,7 +152,11 @@ local_costmap:
       use_sim_time: false
       update_frequency: 10.0
       publish_frequency: 2.0
-      global_frame: odom
+      # Fixed-map patrol is authorized only while map localization is usable.
+      # Keep the 2D costmap in that planar product frame instead of FAST-LIO's
+      # full 6-DoF odom frame, whose roll/pitch/z are valid localization input
+      # but are not a valid vertical datum for Costmap2D.
+      global_frame: map
       robot_base_frame: base_link
       transform_tolerance: 0.30
       rolling_window: true
@@ -164,20 +168,14 @@ local_costmap:
       footprint_padding: 0.03
       track_unknown_space: false
       always_send_full_costmap: false
-      plugins: [voxel_layer, inflation_layer]
-      voxel_layer:
-        plugin: nav2_costmap_2d::VoxelLayer
+      plugins: [obstacle_layer, inflation_layer]
+      obstacle_layer:
+        # Navigation owns a 2D obstacle surface. The complete 3D body cloud is
+        # retained for localization, collision monitoring and incident replay;
+        # it must not turn raw odom.z into a fixed voxel-volume dependency.
+        plugin: nav2_costmap_2d::ObstacleLayer
         enabled: true
         footprint_clearing_enabled: true
-        publish_voxel_map: false
-        # MID-360S field traces put the transformed sensor origin as low as
-        # -0.32 m. Keep it inside the raytrace volume while still covering the
-        # configured obstacle ceiling with Humble's 16 voxel allocation.
-        origin_z: -0.60
-        z_resolution: 0.13
-        z_voxels: 16
-        unknown_threshold: 15
-        mark_threshold: 1
         max_obstacle_height: 1.45
         combination_method: 1
         observation_sources: mid360_body

@@ -161,6 +161,7 @@ class NavigationManager:
             f"rejoin_lookahead_m:={avoidance['rejoinLookaheadM']}",
             f"obstruction_cost_threshold:={avoidance['obstructionCostThreshold']}",
             f"obstruction_min_samples:={avoidance['obstructionMinSamples']}",
+            f"obstruction_confirmation_s:={avoidance['obstructionConfirmationS']}",
             f"progress_timeout_s:={recovery['progressTimeoutS']}",
             f"mppi_retry_limit:={recovery['mppiRetryLimit']}",
             f"detour_attempt_limit:={recovery['detourAttemptLimit']}",
@@ -373,6 +374,32 @@ class NavigationManager:
             raise RuntimeError("navigation runtime is not running")
         if not self._receiver_process or self._receiver_process.poll() is not None:
             raise RuntimeError("Unitree motion bridge is not running")
+        before = self.status()
+        before_health = (before.get("runtime") or {}).get("costmapHealth") or {}
+        before_sequence = int(before_health.get("sequence") or 0)
+        self._service(
+            "/local_costmap/clear_entirely_local_costmap",
+            "nav2_msgs/srv/ClearEntireCostmap",
+            "{}",
+        )
+        deadline = time.monotonic() + 4.0
+        last_reason = "COSTMAP_MISSING"
+        while time.monotonic() < deadline:
+            current = self.status()
+            health = (current.get("runtime") or {}).get("costmapHealth") or {}
+            last_reason = str(health.get("reason") or last_reason)
+            if (
+                int(health.get("sequence") or 0) > before_sequence
+                and health.get("healthy") is True
+            ):
+                break
+            if not current.get("runtime_process", {}).get("running"):
+                raise RuntimeError("导航运行进程已退出，无法开始巡检")
+            time.sleep(0.05)
+        else:
+            raise RuntimeError(
+                f"代价地图清理后未恢复健康：{last_reason}；未向机器狗提交巡检"
+            )
         request = (
             "{expected_map_version: '" + candidate["map_version"] +
             "', expected_route_id: '" + candidate["route_id"] + "'}"
@@ -439,14 +466,10 @@ class NavigationManager:
         }
 
     def stop_patrol(self) -> dict[str, Any]:
-        result: dict[str, Any] = {"success": True, "output": "runtime is not active"}
-        if self._process and self._process.poll() is None:
-            result = self._service("/go2/patrol/stop", "std_srvs/srv/Trigger", "{}")
-        subprocess.run(
-            ["ros2", "run", "go2_cmd_vel_bridge", "go2_sdk2_motion_probe", "--iface", "eth0", "stop"],
-            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=12,
-        )
-        return result
+        # Operator stop means relinquishing the SDK motion owner, not merely
+        # cancelling a FollowPath goal while a zero-command publisher keeps
+        # competing with the handheld remote.
+        return self.stop_runtime()
 
     def reset_localization(self) -> dict[str, Any]:
         return self._service("/localization/reset", "std_srvs/srv/Trigger", "{}")
@@ -479,6 +502,27 @@ class NavigationManager:
         receiver_exit = self._terminate_process(
             receiver_process, interrupt_timeout=5, terminate_timeout=3
         )
+        probe_returncode = 0
+        if process is not None or receiver_process is not None:
+            try:
+                probe = subprocess.run(
+                    [
+                        "ros2",
+                        "run",
+                        "go2_cmd_vel_bridge",
+                        "go2_sdk2_motion_probe",
+                        "--iface",
+                        "eth0",
+                        "stop",
+                    ],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=12,
+                )
+                probe_returncode = probe.returncode
+            except (OSError, subprocess.TimeoutExpired):
+                probe_returncode = -1
         with self._lock:
             self._last_runtime_exit = runtime_exit
             self._last_receiver_exit = receiver_exit
@@ -486,4 +530,23 @@ class NavigationManager:
             log_handle.close()
         if receiver_log_handle:
             receiver_log_handle.close()
-        return self.status()
+        # Verify the process objects themselves. They were deliberately
+        # detached from manager status before termination so a new operation
+        # cannot treat this generation as owned; using status here would make
+        # every termination look successful even if a child survived.
+        runtime_stopped = process is None or process.poll() is not None
+        bridge_stopped = (
+            receiver_process is None or receiver_process.poll() is not None
+        )
+        remote_control_released = runtime_stopped and bridge_stopped
+        return {
+            "schema": "gogoguard.motion_release.v1",
+            "success": remote_control_released,
+            "patrolCancelled": True,
+            "runtimeStopped": runtime_stopped,
+            "motionBridgeStopped": bridge_stopped,
+            "stopMoveConfirmed": probe_returncode == 0,
+            "remoteControlReleased": remote_control_released,
+            "runtimeExitCode": runtime_exit,
+            "motionBridgeExitCode": receiver_exit,
+        }

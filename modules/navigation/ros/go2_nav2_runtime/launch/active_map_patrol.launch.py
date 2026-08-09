@@ -83,6 +83,9 @@ def _runtime_nodes(context):
     obstruction_min_samples = int(
         LaunchConfiguration("obstruction_min_samples").perform(context)
     )
+    obstruction_confirmation_s = float(
+        LaunchConfiguration("obstruction_confirmation_s").perform(context)
+    )
     controller_frequency = float(LaunchConfiguration("controller_frequency_hz").perform(context))
     mppi_time_steps = int(LaunchConfiguration("mppi_time_steps").perform(context))
     mppi_batch_size = int(LaunchConfiguration("mppi_batch_size").perform(context))
@@ -240,6 +243,7 @@ def _runtime_nodes(context):
                 "detour_attempt_limit": detour_attempt_limit,
                 "obstruction_cost_threshold": obstruction_cost_threshold,
                 "obstruction_min_samples": obstruction_min_samples,
+                "obstruction_confirmation_s": obstruction_confirmation_s,
                 "rejoin_lookahead_m": ParameterValue(
                     LaunchConfiguration("rejoin_lookahead_m"), value_type=float
                 ),
@@ -652,6 +656,7 @@ def generate_launch_description():
             DeclareLaunchArgument("detour_attempt_limit", default_value="2"),
             DeclareLaunchArgument("obstruction_cost_threshold", default_value="65"),
             DeclareLaunchArgument("obstruction_min_samples", default_value="2"),
+            DeclareLaunchArgument("obstruction_confirmation_s", default_value="0.50"),
             DeclareLaunchArgument("rejoin_lookahead_m", default_value="2.0"),
             DeclareLaunchArgument("localization_dropout_grace_s", default_value="1.0"),
             DeclareLaunchArgument("localization_recovery_stable_s", default_value="0.5"),

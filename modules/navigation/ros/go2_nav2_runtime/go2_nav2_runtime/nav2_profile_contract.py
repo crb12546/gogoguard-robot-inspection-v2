@@ -209,8 +209,8 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     local = _mapping(profile.get("local_costmap"), "local_costmap")
     local = _mapping(local.get("local_costmap"), "local_costmap.local_costmap")
     local = _mapping(local.get("ros__parameters"), "local costmap parameters")
-    if local.get("global_frame") != "odom" or local.get("robot_base_frame") != "base_link":
-        raise Nav2ProfileError("local costmap frames must be odom -> base_link")
+    if local.get("global_frame") != "map" or local.get("robot_base_frame") != "base_link":
+        raise Nav2ProfileError("local costmap frames must be map -> base_link")
     footprint = _footprint(local.get("footprint"))
     circumscribed_radius = max(math.hypot(x, y) for x, y in footprint)
     footprint_padding = _finite(local.get("footprint_padding"), "footprint_padding")
@@ -244,8 +244,15 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     height = _positive(local.get("height"), "local_costmap.height")
     if min(width, height) < 4.0:
         raise Nav2ProfileError("local costmap is too small for a short bypass")
-    voxel = _mapping(local.get("voxel_layer"), "voxel_layer")
-    source = _mapping(voxel.get("mid360_body"), "voxel_layer.mid360_body")
+    plugins = local.get("plugins")
+    if plugins != ["obstacle_layer", "inflation_layer"]:
+        raise Nav2ProfileError(
+            "local costmap must use the planar obstacle layer before inflation"
+        )
+    obstacle = _mapping(local.get("obstacle_layer"), "obstacle_layer")
+    if obstacle.get("plugin") != "nav2_costmap_2d::ObstacleLayer":
+        raise Nav2ProfileError("local obstacle owner must be the 2D ObstacleLayer")
+    source = _mapping(obstacle.get("mid360_body"), "obstacle_layer.mid360_body")
     if source.get("topic") != "/navigation/cloud_body" or source.get("data_type") != "PointCloud2":
         raise Nav2ProfileError("local costmap must use the calibrated body cloud")
     if source.get("clearing") is not True or source.get("marking") is not True:

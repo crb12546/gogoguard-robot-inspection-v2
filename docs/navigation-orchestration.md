@@ -61,6 +61,7 @@ actuation/progress failure as a blocked path.
 | `TRANSIENT_CONTROL` | controller abort without route obstruction while localization and sensor time remain usable | hold zero output briefly, restamp and retry the unfinished MPPI route |
 | `LOCALIZATION_LOST` | fixed-map localization gate is stale, unusable or not tracking | `HOLDING`; cancel after grace period; resume MPPI suffix after stable recovery |
 | `PATH_OBSTRUCTED` | the footprint-inflated local costmap blocks consecutive samples of the recorded route ahead | compute one bounded local detour and give only that segment to RPP |
+| `COSTMAP_UNHEALTHY` | the post-clear costmap is stale, uses the wrong frame, excludes the robot or marks the robot cell lethal | refuse the patrol or stop it with the exact costmap reason; never authorize a detour |
 | `CONTROLLER_FAILED` | controller retry budget exhausted without obstruction or actuation-stall evidence | stop with the controller failure class; do not fabricate an obstacle |
 | `ACTUATION_STALL` | a fresh nonzero final command exists but measured pose displacement stays below the commissioned movement requirement | stop with an actuation diagnosis; retain command and pose evidence |
 | `SYSTEM_FAULT` | binding, process, transport or non-recoverable runtime gate failure | revoke motion authorization and require runtime recovery |
@@ -82,7 +83,7 @@ FOLLOWING -> RETRYING -> FOLLOWING              transient/unclassified abort
 FOLLOWING -> DETOURING                          verified obstruction
 DETOURING -> REJOINING -> FOLLOWING             local segment completes
 FOLLOWING -> COMPLETED                          route completes
-any moving state -> STOPPING -> READY            operator stop
+any state -> STOPPING -> RUNTIME_OFF             operator stop and remote-control release
 any moving state -> BLOCKED                      verified path obstruction only
 any moving state -> FAULT                        controller/actuation/system failure
 ```
@@ -103,7 +104,45 @@ accepted.
 - Humble `PoseProgressChecker` treats either 0.15 m translation or 0.15 rad
   rotation as progress, so RPP heading alignment is not timed out as a stall.
 - Obstruction confirmation is derived from the already footprint-inflated
-  local costmap along the recorded route, not from patrol age.
+  local costmap along the recorded route, not from patrol age. It must persist
+  across fresh costmap frames for the configured confirmation interval.
+
+## 3D localization and 2D obstacle ownership
+
+FAST-LIO and fixed-map registration own the full 3D pose chain. Nav2 owns a
+planar patrol and therefore consumes that pose through `map -> base_link`; the
+local costmap is also expressed in `map`. The local obstacle layer projects the
+current LiDAR cloud into that planar map and clears the robot footprint.
+
+The raw 3D odometry Z value is not a navigation-costmap height datum. A rolling
+VoxelLayer in `odom` previously placed the LiDAR ray origin outside its own
+vertical bounds as the registered map tilted, leaving stale lethal cells around
+the robot. The owned runtime now uses a planar `ObstacleLayer`, and its profile
+contract rejects a local costmap whose frame or plugin chain violates this
+boundary.
+
+Starting patrol is a synchronization barrier: clear the local costmap, wait for
+a newer frame, then require that frame to be fresh, in `map`, contain the robot
+and leave the robot cell non-lethal. A failed barrier does not submit a Nav2
+goal. The same non-blocking clear-and-new-frame barrier runs after localization
+recovers and before the unfinished route is submitted again.
+
+## Operator stop and control ownership
+
+The field-workstation control is **stop patrol and release remote control**,
+not merely cancel the active Nav2 action. It remains available during normal
+motion, `BLOCKED`, `FAULT` and concurrent start/recovery work. One request:
+
+1. invalidates older start or recovery operations;
+2. cancels the patrol and revokes motion authorization;
+3. terminates Nav2/localization runtime and the Unitree SDK velocity receiver;
+4. issues a final Unitree `StopMove`; and
+5. returns an idempotent receipt naming whether runtime, motion bridge and
+   remote-control ownership were released.
+
+After that receipt the handheld remote no longer competes with repeated SDK
+zero-velocity commands. Starting another patrol intentionally starts a new
+runtime generation and reacquires SDK control.
 
 ## Acceptance scenarios
 
@@ -119,8 +158,8 @@ runtime trace:
    `ACTUATION_STALL`, not `PATH_OBSTRUCTED`.
 7. Localization loss holds, cancels and resumes the route suffix without
    resetting route progress.
-8. Operator stop is idempotent and leaves no controller or motion bridge
-   orphan.
+8. Operator stop is idempotent, works from `FAULT`/`BLOCKED`, leaves no
+   controller or motion bridge orphan and confirms remote-control release.
 
 Historical incident replays are regression fixtures. Offline success never
 replaces the final clear-route and obstructed-route robot receipts.
@@ -131,10 +170,16 @@ The V2 branch now owns `go2_nav2_runtime` under `modules/navigation/ros`
 instead of reconstructing product behavior with build-time overlays. The
 Unitree receiver delivery limits are likewise an owned `device_io` source.
 The failure classifier, route-obstruction proof and controller handoff have
-offline replay tests, including the `map-8ddcf3f8c078` evidence. This code has
+offline replay tests, including the `map-8ddcf3f8c078` evidence. That code
 replaced `evidence-detour-r3` on the robot as
 `v2-edge-20260809-orchestration-r2`. Static sensor, service and motion-bridge
 startup receipts passed. A wrong-environment localization attempt correctly
-remained unauthorized and sent no patrol goal. The navigation slice is not
-field accepted until the operator selects a matching map and the acceptance
-scenarios above produce robot receipts.
+remained unauthorized and sent no patrol goal.
+
+The later `map-71b045489e8a` run exposed the 3D-odometry/2D-costmap mismatch and
+the incomplete operator-stop contract. The planar-costmap synchronization,
+temporal obstruction confirmation and stop-and-release correction described
+above are currently verified offline only and have **not** replaced
+`orchestration-r2` on the robot. The navigation slice is not field accepted
+until one new candidate image passes the acceptance scenarios and produces the
+robot receipts.

@@ -22,6 +22,7 @@ class ControllerMode(str, Enum):
 class FailureClass(str, Enum):
     TRANSIENT_CONTROL = "TRANSIENT_CONTROL"
     LOCALIZATION_LOST = "LOCALIZATION_LOST"
+    COSTMAP_UNHEALTHY = "COSTMAP_UNHEALTHY"
     PATH_OBSTRUCTED = "PATH_OBSTRUCTED"
     CONTROLLER_FAILED = "CONTROLLER_FAILED"
     ACTUATION_STALL = "ACTUATION_STALL"
@@ -43,6 +44,7 @@ class ControllerSuccessAction(str, Enum):
 @dataclass(frozen=True)
 class MotionSnapshot:
     window_s: float
+    observed_duration_s: Optional[float]
     translation_m: Optional[float]
     rotation_rad: Optional[float]
     mean_linear_command_mps: Optional[float]
@@ -59,6 +61,15 @@ class MotionSnapshot:
         required_rotation_rad: float = 0.15,
     ) -> bool:
         """Return true only when commands exist and neither commanded axis moved."""
+
+        # The configured window is a minimum observation period, not a label
+        # that can be attached to a sub-second sample. This prevents an early
+        # controller abort from being misreported as a hardware gait stall.
+        if (
+            self.observed_duration_s is None
+            or self.observed_duration_s + 0.05 < self.window_s
+        ):
+            return False
 
         commanded_linear = bool(
             self.mean_linear_command_mps is not None
@@ -95,6 +106,8 @@ class MotionSnapshot:
 class FailureEvidence:
     controller: ControllerMode
     localization_usable: bool
+    costmap_healthy: bool
+    costmap_reason: str
     route_obstructed: bool
     motion: MotionSnapshot
     mppi_retry_count: int
@@ -122,6 +135,12 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
             FailureClass.LOCALIZATION_LOST,
             RecoveryAction.HOLD_LOCALIZATION,
             "LOCALIZATION_LOST",
+        )
+    if not evidence.costmap_healthy:
+        return FailureDecision(
+            FailureClass.COSTMAP_UNHEALTHY,
+            RecoveryAction.STOP_FAULT,
+            evidence.costmap_reason or "COSTMAP_UNHEALTHY",
         )
     if evidence.route_obstructed:
         if evidence.controller == ControllerMode.DETOUR_RPP:
@@ -211,6 +230,12 @@ class MotionEvidenceTracker:
         cutoff = now - window_s
         poses = [value for value in self._poses if value[0] >= cutoff]
         commands = [value for value in self._commands if value[0] >= cutoff]
+        sample_times = [value[0] for value in poses] + [
+            value[0] for value in commands
+        ]
+        observed_duration = (
+            max(0.0, now - min(sample_times)) if sample_times else 0.0
+        )
         translation = None
         rotation = None
         if len(poses) >= 2:
@@ -238,6 +263,7 @@ class MotionEvidenceTracker:
                 mean_angular = sum(active_angular) / len(active_angular)
         return MotionSnapshot(
             window_s=window_s,
+            observed_duration_s=observed_duration,
             translation_m=translation,
             rotation_rad=rotation,
             mean_linear_command_mps=mean_linear,
@@ -255,6 +281,69 @@ class CostGrid(Protocol):
     def inside(self, cell: tuple[int, int]) -> bool: ...
 
     def cost(self, cell: tuple[int, int]) -> int: ...
+
+
+@dataclass(frozen=True)
+class CostmapHealth:
+    healthy: bool
+    reason: str
+    frame_id: str
+    age_s: Optional[float]
+    robot_cost: Optional[int]
+
+
+def evaluate_costmap_health(
+    grid: Optional[CostGrid],
+    *,
+    frame_id: str,
+    expected_frame: str,
+    age_s: Optional[float],
+    robot_xy: Optional[Sequence[float]],
+    timeout_s: float = 1.0,
+    lethal_cost: int = 253,
+) -> CostmapHealth:
+    """Validate the 2D navigation observation before it may own motion."""
+
+    if grid is None:
+        return CostmapHealth(False, "COSTMAP_MISSING", frame_id, age_s, None)
+    if frame_id != expected_frame:
+        return CostmapHealth(False, "COSTMAP_FRAME_INVALID", frame_id, age_s, None)
+    if age_s is None or not math.isfinite(age_s) or age_s > timeout_s:
+        return CostmapHealth(False, "COSTMAP_STALE", frame_id, age_s, None)
+    if robot_xy is None or len(robot_xy) < 2:
+        return CostmapHealth(False, "COSTMAP_ROBOT_POSE_MISSING", frame_id, age_s, None)
+    cell = grid.cell(float(robot_xy[0]), float(robot_xy[1]))
+    if not grid.inside(cell):
+        return CostmapHealth(False, "COSTMAP_ROBOT_OUTSIDE", frame_id, age_s, None)
+    robot_cost = int(grid.cost(cell))
+    if robot_cost >= int(lethal_cost):
+        return CostmapHealth(
+            False, "COSTMAP_ROBOT_OCCUPIED", frame_id, age_s, robot_cost
+        )
+    return CostmapHealth(True, "OK", frame_id, age_s, robot_cost)
+
+
+class ObstructionEvidenceTracker:
+    """Require obstruction to persist in healthy, fresh costmap frames."""
+
+    def __init__(self, *, confirmation_s: float = 0.30) -> None:
+        if confirmation_s <= 0.0:
+            raise ValueError("confirmation_s must be positive")
+        self.confirmation_s = float(confirmation_s)
+        self._blocked_since: Optional[float] = None
+
+    def reset(self) -> None:
+        self._blocked_since = None
+
+    def update(self, now: float, *, blocked: bool, source_healthy: bool) -> bool:
+        now = float(now)
+        if not source_healthy or not blocked:
+            self.reset()
+            return False
+        if self._blocked_since is None:
+            self._blocked_since = now
+            return False
+        return now - self._blocked_since >= self.confirmation_s
 
 
 def _segment_samples(

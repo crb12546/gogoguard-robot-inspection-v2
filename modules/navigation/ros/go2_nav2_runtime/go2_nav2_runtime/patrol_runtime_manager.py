@@ -39,9 +39,11 @@ from gogoguard_navigation.orchestration import (
     ControllerSuccessAction,
     FailureEvidence,
     MotionEvidenceTracker,
+    ObstructionEvidenceTracker,
     RecoveryAction,
     controller_success_action,
     decide_controller_failure,
+    evaluate_costmap_health,
     route_obstruction_evidence,
 )
 
@@ -116,6 +118,8 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("detour_attempt_limit", 2)
         self.declare_parameter("obstruction_cost_threshold", 65)
         self.declare_parameter("obstruction_min_samples", 2)
+        self.declare_parameter("obstruction_confirmation_s", 0.30)
+        self.declare_parameter("costmap_timeout_s", 1.0)
         self.declare_parameter("rejoin_lookahead_m", 2.0)
         self.declare_parameter(
             "runtime_trace_status_topic", "/go2/runtime/trace_status"
@@ -239,6 +243,12 @@ class PatrolRuntimeManager(Node):
         self.obstruction_min_samples = int(
             self.get_parameter("obstruction_min_samples").value
         )
+        self.obstruction_confirmation_s = float(
+            self.get_parameter("obstruction_confirmation_s").value
+        )
+        self.costmap_timeout_s = float(
+            self.get_parameter("costmap_timeout_s").value
+        )
         self.rejoin_lookahead_m = float(
             self.get_parameter("rejoin_lookahead_m").value
         )
@@ -287,6 +297,10 @@ class PatrolRuntimeManager(Node):
             raise RuntimeError("obstruction_cost_threshold is invalid")
         if not 1 <= self.obstruction_min_samples <= 10:
             raise RuntimeError("obstruction_min_samples is invalid")
+        if not 0.20 <= self.obstruction_confirmation_s <= 2.0:
+            raise RuntimeError("obstruction_confirmation_s is invalid")
+        if not 0.30 <= self.costmap_timeout_s <= 2.0:
+            raise RuntimeError("costmap_timeout_s is invalid")
         if not 0.5 <= self.rejoin_lookahead_m <= 6.0:
             raise RuntimeError("rejoin_lookahead_m is invalid")
         if not 0.30 <= self.runtime_trace_status_timeout_s <= 2.0:
@@ -392,6 +406,11 @@ class PatrolRuntimeManager(Node):
         self.local_costmap = None
         self.local_costmap_frame = ""
         self.local_costmap_received_at = 0.0
+        self.costmap_sequence = 0
+        self.last_obstruction_costmap_sequence = -1
+        self.costmap_refresh_baseline_sequence = None
+        self.costmap_refresh_started_at = None
+        self.costmap_refresh_future = None
         self.detour_attempt_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
@@ -399,6 +418,9 @@ class PatrolRuntimeManager(Node):
         self.mppi_retry_count = 0
         self.last_failure_class = None
         self.last_route_obstructed = False
+        self.obstruction_evidence = ObstructionEvidenceTracker(
+            confirmation_s=self.obstruction_confirmation_s
+        )
         self.motion_evidence = MotionEvidenceTracker(
             retention_s=max(12.0, self.progress_timeout_s + 2.0)
         )
@@ -537,11 +559,8 @@ class PatrolRuntimeManager(Node):
         result.poses = list(self.path.poses[start:])
         return result
 
-    def _clear_stale_costmap(self) -> None:
-        if self.clear_costmap_client.service_is_ready():
-            self.clear_costmap_client.call_async(ClearEntireCostmap.Request())
-
     def _costmap_callback(self, message: OccupancyGrid) -> None:
+        self.costmap_sequence += 1
         orientation = message.info.origin.orientation
         if not message.header.frame_id or abs(_yaw_from_quaternion(orientation)) > 1.0e-3:
             self.local_costmap = None
@@ -558,6 +577,58 @@ class PatrolRuntimeManager(Node):
         )
         self.local_costmap_frame = message.header.frame_id
         self.local_costmap_received_at = time.monotonic()
+
+    def _costmap_health(self):
+        robot_xy = None
+        if self.pose is not None and self.pose_frame == "map":
+            robot_xy = self.pose[:2]
+        return evaluate_costmap_health(
+            self.local_costmap,
+            frame_id=self.local_costmap_frame,
+            expected_frame="map",
+            age_s=monotonic_age(self.local_costmap_received_at),
+            robot_xy=robot_xy,
+            timeout_s=self.costmap_timeout_s,
+        )
+
+    def _reset_costmap_refresh(self) -> None:
+        self.costmap_refresh_baseline_sequence = None
+        self.costmap_refresh_started_at = None
+        self.costmap_refresh_future = None
+
+    def _resume_costmap_refresh(self, now: float) -> PatrolReadiness:
+        """Clear once and wait for a newer healthy map without blocking ROS callbacks."""
+
+        if self.costmap_refresh_started_at is None:
+            self.costmap_refresh_started_at = float(now)
+            self.costmap_refresh_baseline_sequence = self.costmap_sequence
+        elapsed = float(now) - self.costmap_refresh_started_at
+        if self.costmap_refresh_future is None:
+            if not self.clear_costmap_client.service_is_ready():
+                if elapsed >= 4.0:
+                    return PatrolReadiness(
+                        False, "FAULT", "COSTMAP_CLEAR_SERVICE_UNAVAILABLE"
+                    )
+                return PatrolReadiness(False, "RESUMING", "COSTMAP_CLEAR_WAITING")
+            self.costmap_refresh_future = self.clear_costmap_client.call_async(
+                ClearEntireCostmap.Request()
+            )
+            return PatrolReadiness(False, "RESUMING", "COSTMAP_CLEARING")
+        if not self.costmap_refresh_future.done():
+            if elapsed >= 4.0:
+                return PatrolReadiness(False, "FAULT", "COSTMAP_CLEAR_TIMEOUT")
+            return PatrolReadiness(False, "RESUMING", "COSTMAP_CLEARING")
+        try:
+            self.costmap_refresh_future.result()
+        except Exception:
+            return PatrolReadiness(False, "FAULT", "COSTMAP_CLEAR_FAILED")
+        baseline = int(self.costmap_refresh_baseline_sequence or 0)
+        health = self._costmap_health()
+        if self.costmap_sequence > baseline and health.healthy:
+            return PatrolReadiness(True, "READY", "OK")
+        if elapsed >= 4.0:
+            return PatrolReadiness(False, "FAULT", health.reason)
+        return PatrolReadiness(False, "RESUMING", "COSTMAP_REFRESHING")
 
     def _transform_xy(self, x: float, y: float, target: str, source: str):
         if target == source:
@@ -586,13 +657,13 @@ class PatrolRuntimeManager(Node):
             return route_xy, None
         return route_xy, rejoin_index
 
-    def _route_obstructed(self) -> bool:
-        """Use the inflated local costmap as the sole detour authorization."""
-        self.last_route_obstructed = False
+    def _route_obstructed_sample(self) -> bool:
+        """Read one spatial obstruction sample from a healthy costmap."""
+        health = self._costmap_health()
         if (
-            self.pose is None
+            not health.healthy
+            or self.pose is None
             or self.local_costmap is None
-            or monotonic_age(self.local_costmap_received_at) > 1.0
         ):
             return False
         route_xy, rejoin_index = self._route_and_rejoin()
@@ -607,13 +678,31 @@ class PatrolRuntimeManager(Node):
         ]
         if any(point is None for point in segment_in_grid):
             return False
-        self.last_route_obstructed = route_obstruction_evidence(
+        return route_obstruction_evidence(
             self.local_costmap,
             segment_in_grid,
             occupied_threshold=self.obstruction_cost_threshold,
             minimum_consecutive_samples=self.obstruction_min_samples,
         )
-        return self.last_route_obstructed
+
+    def _update_obstruction_evidence(self, now: float) -> None:
+        health = self._costmap_health()
+        if not health.healthy:
+            self.obstruction_evidence.reset()
+            self.last_route_obstructed = False
+            return
+        if self.costmap_sequence == self.last_obstruction_costmap_sequence:
+            return
+        self.last_obstruction_costmap_sequence = self.costmap_sequence
+        self.last_route_obstructed = self.obstruction_evidence.update(
+            now,
+            blocked=self._route_obstructed_sample(),
+            source_healthy=True,
+        )
+
+    def _route_obstructed(self) -> bool:
+        """Return only temporally confirmed obstruction evidence."""
+        return bool(self.last_route_obstructed)
 
     def _nav_path_from_points(self, points) -> Optional[NavPath]:
         if len(points) < 2:
@@ -638,7 +727,7 @@ class PatrolRuntimeManager(Node):
         if (
             self.pose is None
             or self.local_costmap is None
-            or monotonic_age(self.local_costmap_received_at) > 1.0
+            or not self._costmap_health().healthy
             or self.detour_attempt_count >= self.detour_attempt_limit
             or not self._route_obstructed()
         ):
@@ -741,7 +830,6 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason = "ROUTE_COMPLETE"
             self._finish_active_start_attempt("COMPLETED", self.runtime_reason)
             return True
-        self._clear_stale_costmap()
         now = self.get_clock().now().to_msg()
         path.header.stamp = now
         for pose in path.poses:
@@ -902,7 +990,7 @@ class PatrolRuntimeManager(Node):
             fastlio = self.fastlio_health.assess()
             if not fastlio.ready:
                 return PatrolReadiness(False, "DEGRADED", fastlio.reason)
-        return evaluate_runtime_gate(
+        readiness = evaluate_runtime_gate(
             expected_version=self.bundle.version_id,
             localization_status=self.localization_status,
             localization_age_s=monotonic_age(self.localization_received_at),
@@ -917,6 +1005,12 @@ class PatrolRuntimeManager(Node):
             robot_motion_age_s=monotonic_age(self.robot_motion_received_at),
             robot_motion_timeout_s=self.robot_state_timeout_s,
         )
+        if not readiness.ready:
+            return readiness
+        costmap = self._costmap_health()
+        if not costmap.healthy:
+            return PatrolReadiness(False, "FAULT", costmap.reason)
+        return readiness
 
     def _start_readiness(self) -> PatrolReadiness:
         if not self.runtime_binding_valid:
@@ -929,7 +1023,7 @@ class PatrolRuntimeManager(Node):
             if not fastlio.ready:
                 return PatrolReadiness(False, "POSITIONING", fastlio.reason)
         settings = self.bundle.patrol
-        return evaluate_readiness(
+        readiness = evaluate_readiness(
             expected_version=self.bundle.version_id,
             localization_status=self.localization_status,
             localization_age_s=monotonic_age(self.localization_received_at),
@@ -951,6 +1045,18 @@ class PatrolRuntimeManager(Node):
                 self.start_stationary_yaw_rate_rps
             ),
         )
+        if not readiness.ready:
+            return readiness
+        costmap = self._costmap_health()
+        if not costmap.healthy:
+            return PatrolReadiness(
+                False,
+                "FAULT",
+                costmap.reason,
+                readiness.start_distance_m,
+                readiness.start_yaw_error_deg,
+            )
+        return readiness
 
     def _runtime_trace_gate(self) -> PatrolReadiness:
         return evaluate_runtime_trace_gate(
@@ -989,7 +1095,6 @@ class PatrolRuntimeManager(Node):
         self.route_progress_index = 0
         self.localization_gate_failed_at = None
         self.localization_recovered_at = None
-        self._clear_stale_costmap()
         self.detour_attempt_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
@@ -997,6 +1102,9 @@ class PatrolRuntimeManager(Node):
         self.mppi_retry_count = 0
         self.last_failure_class = None
         self.last_route_obstructed = False
+        self.obstruction_evidence.reset()
+        self.last_obstruction_costmap_sequence = self.costmap_sequence
+        self._reset_costmap_refresh()
         self.motion_evidence = MotionEvidenceTracker(
             retention_s=max(12.0, self.progress_timeout_s + 2.0)
         )
@@ -1114,8 +1222,13 @@ class PatrolRuntimeManager(Node):
         self.goal_handle = None
         self.goal_request_pending = False
         if self.gate_cancel_reason:
-            self.runtime_state = "DEGRADED"
-            self.runtime_reason = self.gate_cancel_reason
+            cancel_reason = self.gate_cancel_reason
+            self.runtime_state = (
+                "HOLDING"
+                if cancel_reason in RECOVERABLE_LOCALIZATION_GATES
+                else "FAULT"
+            )
+            self.runtime_reason = cancel_reason
             self.gate_cancel_reason = ""
             if self.resume_pending:
                 # The final safety chain is already at zero. Keep the same
@@ -1153,6 +1266,7 @@ class PatrolRuntimeManager(Node):
                 )
                 return
             route_obstructed = self._route_obstructed()
+            costmap_health = self._costmap_health()
             decision = decide_controller_failure(
                 FailureEvidence(
                     controller=completed_controller,
@@ -1160,6 +1274,8 @@ class PatrolRuntimeManager(Node):
                         gate.ready
                         or gate.reason not in RECOVERABLE_LOCALIZATION_GATES
                     ),
+                    costmap_healthy=costmap_health.healthy,
+                    costmap_reason=costmap_health.reason,
                     route_obstructed=route_obstructed,
                     motion=self.motion_evidence.snapshot(
                         time.monotonic(), window_s=self.progress_timeout_s
@@ -1201,6 +1317,7 @@ class PatrolRuntimeManager(Node):
         del request
         self.stop_requested = True
         self.resume_pending = False
+        self._reset_costmap_refresh()
         self.runtime_state = "STOPPING"
         self.runtime_reason = "STOP_REQUESTED"
         if self.goal_handle is not None:
@@ -1219,6 +1336,8 @@ class PatrolRuntimeManager(Node):
         self.gate_cancel_reason = reason
         if self.goal_handle is not None:
             self.resume_pending = reason in RECOVERABLE_LOCALIZATION_GATES
+            if self.resume_pending:
+                self._reset_costmap_refresh()
         if self.goal_handle is not None:
             self.stop_requested = False
             self.goal_handle.cancel_goal_async()
@@ -1233,7 +1352,6 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason = "ROUTE_COMPLETE"
             self._finish_active_start_attempt("COMPLETED", self.runtime_reason)
             return
-        self._clear_stale_costmap()
         now = self.get_clock().now().to_msg()
         resume_path.header.stamp = now
         for pose in resume_path.poses:
@@ -1243,6 +1361,7 @@ class PatrolRuntimeManager(Node):
         goal.controller_id = "FollowPath"
         goal.goal_checker_id = "route_goal_checker"
         self.active_controller = ControllerMode.MPPI
+        self._reset_costmap_refresh()
         self.goal_request_pending = True
         self.runtime_state = "RESUMING"
         self.runtime_reason = "LOCALIZATION_RECOVERED_RESUMING_ROUTE"
@@ -1321,7 +1440,9 @@ class PatrolRuntimeManager(Node):
             self.runtime_binding_fault_at = now
 
     def _tick(self) -> None:
+        now = time.monotonic()
         self._verify_runtime_binding()
+        self._update_obstruction_evidence(now)
         gate = self._runtime_gate()
         accepted_goal = self.goal_handle is not None
         motion_authorized = accepted_goal and gate.ready and self.runtime_state == "PATROLLING"
@@ -1338,11 +1459,22 @@ class PatrolRuntimeManager(Node):
                 self._cancel_for_gate(gate.reason)
             motion_authorized = False
         elif self.resume_pending and not accepted_goal and not self.goal_request_pending:
-            if gate.ready:
+            costmap_only_gate = gate.reason.startswith("COSTMAP_")
+            if gate.ready or costmap_only_gate:
                 if self.localization_recovered_at is None:
                     self.localization_recovered_at = time.monotonic()
                 if time.monotonic() - self.localization_recovered_at >= self.localization_recovery_stable_s:
-                    self._request_resume()
+                    refresh = self._resume_costmap_refresh(now)
+                    if refresh.ready:
+                        self._request_resume()
+                    elif refresh.state == "FAULT":
+                        self.resume_pending = False
+                        self.runtime_state = "FAULT"
+                        self.runtime_reason = refresh.reason
+                        self._finish_active_start_attempt("FAILED", refresh.reason)
+                    else:
+                        self.runtime_state = refresh.state
+                        self.runtime_reason = refresh.reason
             elif gate.reason not in RECOVERABLE_LOCALIZATION_GATES:
                 self.resume_pending = False
                 self.runtime_state = "FAULT"
@@ -1397,6 +1529,7 @@ class PatrolRuntimeManager(Node):
         fastlio_health = self.fastlio_health.assess().as_dict()
         fastlio_health["required"] = self.require_fastlio_health
         trace_health = self._runtime_trace_gate()
+        costmap_health = self._costmap_health()
         motion_evidence = self.motion_evidence.snapshot(
             time.monotonic(), window_s=self.progress_timeout_s
         )
@@ -1452,8 +1585,31 @@ class PatrolRuntimeManager(Node):
             "mppiRetryCount": self.mppi_retry_count,
             "mppiRetryLimit": self.mppi_retry_limit,
             "routeObstructed": self.last_route_obstructed,
+            "costmapHealth": {
+                "healthy": costmap_health.healthy,
+                "reason": costmap_health.reason,
+                "sequence": self.costmap_sequence,
+                "frameId": costmap_health.frame_id,
+                "ageS": costmap_health.age_s,
+                "robotCost": costmap_health.robot_cost,
+            },
+            "costmapRefresh": {
+                "active": self.costmap_refresh_started_at is not None,
+                "baselineSequence": self.costmap_refresh_baseline_sequence,
+                "elapsedS": (
+                    monotonic_age(self.costmap_refresh_started_at)
+                    if self.costmap_refresh_started_at is not None
+                    else None
+                ),
+                "clearResponseReceived": (
+                    self.costmap_refresh_future.done()
+                    if self.costmap_refresh_future is not None
+                    else False
+                ),
+            },
             "motionEvidence": {
                 "windowS": motion_evidence.window_s,
+                "observedDurationS": motion_evidence.observed_duration_s,
                 "translationM": motion_evidence.translation_m,
                 "rotationRad": motion_evidence.rotation_rad,
                 "meanLinearCommandMps": motion_evidence.mean_linear_command_mps,
