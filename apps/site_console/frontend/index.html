@@ -54,7 +54,7 @@
           <div><span>固定地图定位</span><strong id="localizationState">—</strong><small id="localizationDetail">等待 VGICP</small></div>
           <div><span>路线</span><strong id="routeLength">—</strong><small id="routePoints">尚未生成</small></div>
           <div><span>任务状态</span><strong id="patrolState">—</strong><small id="patrolReason">尚未启动</small></div>
-          <div><span>最终速度</span><strong id="finalVelocity">0.00 m/s</strong><small id="motionAuthority">运动权关闭</small></div>
+          <div><span>实际下发速度</span><strong id="finalVelocity">0.00 m/s</strong><small id="motionAuthority">运动权关闭</small></div>
           <div><span>路线进度</span><strong id="routeProgress">0%</strong><small id="remainingRoute">尚未开始</small></div>
           <div><span>最近操作</span><strong id="operationState">无</strong><small id="operationMessage">点击后会在这里持续显示结果</small></div>
         </div>
@@ -77,10 +77,10 @@
         <summary><span>参数中心</span><small>速度、避障、定位与 MPPI；保存前会校验，可回滚</small></summary>
         <div class="parameter-note">日常只调整下面的常用参数。保存后需重启“定位与 Nav2”生效，正在巡检时不允许修改。</div>
         <div class="parameter-grid">
-          <label>直线速度 (m/s)<input id="straightSpeed" type="number" min="0.2" max="1" step="0.05"></label>
-          <label>局部绕行速度 (m/s)<input id="detourSpeed" type="number" min="0.24" max="0.8" step="0.05"></label>
-          <label>转弯角速度 (rad/s)<input id="turnSpeed" type="number" min="0.1" max="0.8" step="0.05"></label>
-          <label>侧向避障速度 (m/s)<input id="lateralSpeed" type="number" min="0.05" max="0.4" step="0.05"></label>
+          <label>目标直线巡航速度 (m/s)<input id="straightSpeed" type="number" min="0.2" max="0.6" step="0.05"></label>
+          <label>局部绕行速度 (m/s)<input id="detourSpeed" type="number" min="0.24" max="0.6" step="0.05"></label>
+          <label>转弯角速度 (rad/s)<input id="turnSpeed" type="number" min="0.1" max="0.5" step="0.05"></label>
+          <label>侧向避障速度 (m/s)<input id="lateralSpeed" type="number" min="0.05" max="0.2" step="0.05"></label>
           <label>减速区半宽 (m)<input id="slowHalfWidth" type="number" min="0.25" max="0.7" step="0.01"></label>
           <label>减速比例<input id="slowdownRatio" type="number" min="0.5" max="1" step="0.05"></label>
           <label>无运动进展超时 (秒)<input id="progressTimeout" type="number" min="2" max="12" step="0.5"></label>

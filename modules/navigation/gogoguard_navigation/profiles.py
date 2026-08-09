@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 
-PROFILE_SCHEMA = "gogoguard.navigation_profile.v2"
-LEGACY_PROFILE_SCHEMA = "gogoguard.navigation_profile.v1"
+PROFILE_SCHEMA = "gogoguard.navigation_profile.v3"
+LEGACY_PROFILE_SCHEMAS = {
+    "gogoguard.navigation_profile.v1",
+    "gogoguard.navigation_profile.v2",
+}
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": PROFILE_SCHEMA,
     "revision": 1,
@@ -47,7 +50,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "controller": {
         "frequencyHz": 15.0,
         "timeSteps": 56,
-        "batchSize": 700,
+        "batchSize": 1000,
         "iterationCount": 1,
     },
 }
@@ -75,9 +78,40 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     recovery = dict(value.get("recovery") or {})
     localization = dict(value.get("localization") or {})
     controller = dict(value.get("controller") or {})
-    schema = str(value.get("schema") or LEGACY_PROFILE_SCHEMA)
-    if schema not in {PROFILE_SCHEMA, LEGACY_PROFILE_SCHEMA}:
+    schema = str(value.get("schema") or "gogoguard.navigation_profile.v1")
+    if schema not in {PROFILE_SCHEMA, *LEGACY_PROFILE_SCHEMAS}:
         raise ProfileError("参数配置版本不支持")
+    legacy_physical_limits = schema in LEGACY_PROFILE_SCHEMAS
+
+    def physical_limit(raw: Any, maximum: float) -> Any:
+        if not legacy_physical_limits:
+            return raw
+        try:
+            return min(float(raw), maximum)
+        except (TypeError, ValueError):
+            return raw
+
+    def matches_number(raw: Any, expected: float) -> bool:
+        try:
+            return float(raw) == expected
+        except (TypeError, ValueError):
+            return False
+
+    # V1/V2 allowed values which the commissioned Unitree bridge could never
+    # execute. Preserve old profiles, but migrate those impossible requests to
+    # the real receiver limits. V3 rejects future out-of-range writes.
+    straight_speed = physical_limit(motion.get("straightSpeedMps"), 0.60)
+    detour_speed = physical_limit(motion.get("detourSpeedMps", 0.40), 0.60)
+    turn_speed = physical_limit(motion.get("turnSpeedRadps"), 0.50)
+    lateral_speed = physical_limit(motion.get("lateralSpeedMps"), 0.20)
+    batch_size = controller.get("batchSize")
+    if legacy_physical_limits and (
+        matches_number(controller.get("frequencyHz"), 15.0)
+        and matches_number(controller.get("timeSteps"), 56)
+        and matches_number(controller.get("batchSize"), 700)
+        and matches_number(controller.get("iterationCount"), 1)
+    ):
+        batch_size = 1000
     # V1 called the Nav2 progress watchdog an obstacle decision. Preserve the
     # saved value during migration, but give it only its real V2 meaning.
     legacy_progress_timeout = avoidance.get("blockedDecisionS", 5.0)
@@ -85,12 +119,12 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
         "schema": PROFILE_SCHEMA,
         "revision": int(value.get("revision") or 1),
         "motion": {
-            "straightSpeedMps": _finite(motion.get("straightSpeedMps"), "直线速度", 0.20, 1.00),
+            "straightSpeedMps": _finite(straight_speed, "目标直线巡航速度", 0.20, 0.60),
             "detourSpeedMps": _finite(
-                motion.get("detourSpeedMps", 0.40), "局部绕行速度", 0.24, 0.80
+                detour_speed, "局部绕行速度", 0.24, 0.60
             ),
-            "turnSpeedRadps": _finite(motion.get("turnSpeedRadps"), "转弯角速度", 0.10, 0.80),
-            "lateralSpeedMps": _finite(motion.get("lateralSpeedMps"), "侧向速度", 0.05, 0.40),
+            "turnSpeedRadps": _finite(turn_speed, "转弯角速度", 0.10, 0.50),
+            "lateralSpeedMps": _finite(lateral_speed, "侧向速度", 0.05, 0.20),
             "accelerationMps2": _finite(motion.get("accelerationMps2"), "加速度", 0.20, 2.00),
         },
         "avoidance": {
@@ -147,7 +181,7 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
         "controller": {
             "frequencyHz": _finite(controller.get("frequencyHz"), "MPPI 频率", 10.0, 30.0),
             "timeSteps": int(_finite(controller.get("timeSteps"), "MPPI 时域步数", 20, 80)),
-            "batchSize": int(_finite(controller.get("batchSize"), "MPPI 样本数", 200, 2000)),
+            "batchSize": int(_finite(batch_size, "MPPI 样本数", 200, 2000)),
             "iterationCount": int(_finite(controller.get("iterationCount"), "MPPI 迭代数", 1, 2)),
         },
     }

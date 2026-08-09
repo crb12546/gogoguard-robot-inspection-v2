@@ -289,6 +289,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         nav2_config = NAV2_CONFIG.read_text(encoding="utf-8")
         self.assertIn("controller_plugins: [FollowPath, DetourPath]", nav2_config)
         self.assertIn("vx_min: 0.20", nav2_config)
+        self.assertIn("cost_weight: 8.0", nav2_config)
         self.assertIn(
             "plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController",
             nav2_config,
@@ -325,6 +326,8 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn(
             '"DetourPath.rotate_to_heading_angular_vel": turn_speed', launch
         )
+        self.assertIn('"FollowPath.vx_std": forward_velocity_std', launch)
+        self.assertIn("speed * 0.50", launch)
         receiver = OWNED_RECEIVER.read_text(encoding="utf-8")
         self.assertIn("max_vx=0.600 max_vy=0.200", receiver)
         self.assertIn("pkt.vx, pkt.vy, pkt.vyaw, 0.60, 0.20, 0.5", receiver)

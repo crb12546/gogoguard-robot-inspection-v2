@@ -141,6 +141,11 @@ def _runtime_nodes(context):
     # The route owns geometry and start/end behavior. The active, versioned
     # robot profile owns commissioning speed and avoidance behavior.
     speed = straight_speed
+    # MPPI samples around the preceding solution. Keeping the old fixed 0.18
+    # distribution while raising the commissioned cruise request left nearly
+    # all samples in the historical 0.3 m/s basin. Scale exploration with the
+    # real Go2 speed range while retaining a bounded distribution.
+    forward_velocity_std = max(0.20, min(0.35, speed * 0.50))
     robot_id = LaunchConfiguration("robot_id").perform(context).strip()
     sensor_id = LaunchConfiguration("sensor_id").perform(context).strip()
     if runtime_source == "active":
@@ -401,6 +406,7 @@ def _runtime_nodes(context):
                 {
                     "controller_frequency": controller_frequency,
                     "FollowPath.vx_max": speed,
+                    "FollowPath.vx_std": forward_velocity_std,
                     "FollowPath.model_dt": 1.0 / controller_frequency,
                     "FollowPath.vy_max": lateral_speed,
                     "FollowPath.wz_max": turn_speed,
@@ -662,7 +668,7 @@ def generate_launch_description():
             DeclareLaunchArgument("localization_recovery_stable_s", default_value="0.5"),
             DeclareLaunchArgument("controller_frequency_hz", default_value="15.0"),
             DeclareLaunchArgument("mppi_time_steps", default_value="56"),
-            DeclareLaunchArgument("mppi_batch_size", default_value="700"),
+            DeclareLaunchArgument("mppi_batch_size", default_value="1000"),
             DeclareLaunchArgument("mppi_iteration_count", default_value="1"),
             DeclareLaunchArgument(
                 "runtime_binding_check_period_s",

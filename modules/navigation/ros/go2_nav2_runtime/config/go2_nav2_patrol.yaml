@@ -106,7 +106,11 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        # Field traces showed a 0.60 m/s limit settling around 0.32 m/s even
+        # on a clear route. Give route progress more authority while the
+        # collision critic and collision monitor keep their independent stop
+        # and slowdown ownership.
+        cost_weight: 8.0
         offset_from_furthest: 6
         threshold_to_consider: 1.2
       PathAngleCritic:

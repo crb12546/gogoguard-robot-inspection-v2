@@ -778,6 +778,25 @@ parameters. Record each result before calling the release field-accepted.
   and browser verification shows `map-799f6f04e11d` as the current selected and
   published map with no parse error.
 
+## 2026-08-09 cruise-speed contract correction (offline; deployment pending)
+
+- Three completed patrol traces on `map-799f6f04e11d` proved that the former
+  speed control was misleading. At the original 0.60 m/s setting, final mean
+  forward commands were 0.312--0.316 m/s with a 0.435 m/s maximum. Saving
+  0.90 m/s changed the final mean to only 0.326 m/s and the maximum to 0.471
+  m/s. The MPPI raw mean was 0.328 m/s and the post-collision final mean was
+  0.326 m/s, so collision handling did not cause the observed low speed.
+- Profile V2 also accepted commands the commissioned receiver can never
+  execute: 0.90 m/s forward, 0.40 m/s lateral and 0.60 rad/s yaw versus the
+  receiver's 0.60, 0.20 and 0.50 limits. Profile V3 aligns the UI, validation,
+  MPPI, smoother and receiver limits and migrates impossible V1/V2 values.
+- The offline correction treats 0.60 m/s as the clear-route cruise request,
+  scales MPPI forward sampling to 0.30 m/s standard deviation at that request,
+  raises the default batch from 700 to 1,000 within the existing compute
+  budget, and raises PathFollow progress authority from 5.0 to 8.0. StopZone,
+  SlowZone and collision thresholds are unchanged. Robot deployment and a
+  measured clear-route speed receipt are still required.
+
 ## Next experiment (supersedes all older paragraphs)
 
 Keep `planar-release-r4` fixed and collect only the remaining acceptance

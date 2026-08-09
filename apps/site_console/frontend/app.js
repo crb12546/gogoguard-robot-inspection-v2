@@ -459,7 +459,8 @@ function renderNavigation() {
   $('patrolReason').textContent = runtime.operatorMessage || runtime.reason || '尚未启动';
   $('finalVelocity').textContent = `${Number(command.vx || 0).toFixed(2)} m/s`;
   const controller = runtime.activeController || runtime.selectedController;
-  $('motionAuthority').textContent = `${runtime.motionAuthorized ? '运动权已打开' : '运动权关闭'}${controller ? ` · ${controller}` : ''}`;
+  const cruise = state.navigationProfile?.motion?.straightSpeedMps;
+  $('motionAuthority').textContent = `${runtime.motionAuthorized ? '运动权已打开' : '运动权关闭'}${controller ? ` · ${controller}` : ''}${cruise == null ? '' : ` · 目标 ${Number(cruise).toFixed(2)}`}`;
   $('routeProgress').textContent = `${Number(runtime.routeProgressPercent || 0).toFixed(0)}%`;
   $('remainingRoute').textContent = runtime.remainingRoutePointCount == null
     ? '尚未开始' : `剩余 ${runtime.remainingRoutePointCount} 个路径点`;
