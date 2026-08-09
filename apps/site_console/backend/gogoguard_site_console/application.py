@@ -66,6 +66,21 @@ class InspectionApplication:
     def camera_status(self) -> dict:
         return json_ready(self.camera.status())
 
+    def interaction_status(self) -> dict:
+        path = self.data_root / "interaction" / "status.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict) or value.get("schema") != "gogoguard.interaction_edge_status.v1":
+                raise ValueError("invalid interaction status schema")
+            return value
+        except FileNotFoundError:
+            return {
+                "schema": "gogoguard.interaction_edge_status.v1",
+                "enabled": False,
+                "message": "实时对话服务尚未启用",
+                "motionCommandsPermitted": False,
+            }
+
     def start_recording(self) -> dict:
         return json_ready(self.capture.start(self.site_id, self.robot_id))
 

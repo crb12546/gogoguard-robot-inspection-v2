@@ -7,6 +7,6 @@
   "entrypoints": [],
   "dependsOn": [],
   "consumes": [],
-  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle"],
-  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract"]
+  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle", "InteractionCapabilities", "InteractionSessionStatus", "ConversationWakeStatus"],
+  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract", "2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract"]
 }

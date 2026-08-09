@@ -1,6 +1,6 @@
 PYTHON ?= python3
 RUNTIME_ROOT ?= runtime-data
-PYTHONPATH_V2 = modules/contracts:modules/calibration:modules/device_io:modules/data_capture:modules/evidence:modules/transfer:modules/route:modules/navigation:services/map_factory:apps/site_console/backend:apps/field_workstation/backend
+PYTHONPATH_V2 = modules/contracts:modules/calibration:modules/device_io:modules/interaction:modules/data_capture:modules/evidence:modules/transfer:modules/route:modules/navigation:services/map_factory:services/interaction_edge:apps/site_console/backend:apps/field_workstation/backend
 
 .PHONY: demo workstation workstation-demo workstation-container test ui-smoke compile container-validate knowledge knowledge-check
 

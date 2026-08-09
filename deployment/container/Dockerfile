@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rosbag2 ros-humble-rosbag2-storage-mcap ros-humble-sensor-msgs-py \
     ros-humble-nav-msgs ros-humble-tf2-ros ros-humble-pcl-ros ros-humble-pcl-conversions \
     ros-humble-rmw-cyclonedds-cpp ros-humble-navigation2 ros-humble-nav2-bringup \
-    openssh-client rsync ca-certificates tini \
+    openssh-client rsync ca-certificates tini alsa-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Unitree's frozen ROS 2 interface package emits the vendor DDS IDL alongside
@@ -52,6 +52,10 @@ COPY --from=locked_robot_deps /unitree_go /opt/gogoguard/ros_ws/src/unitree_go
 COPY modules/navigation/ros/go2_nav2_runtime /opt/gogoguard/ros_ws/src/go2_nav2_runtime
 COPY modules/device_io/ros/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp \
     /tmp/gogoguard-owned/go2_sdk2_udp_receiver.cpp
+COPY modules/device_io/ros/go2_cmd_vel_bridge/src/go2_vui_control.cpp \
+    /tmp/gogoguard-owned/go2_vui_control.cpp
+COPY modules/device_io/ros/go2_cmd_vel_bridge/CMakeLists.txt \
+    /tmp/gogoguard-owned/go2_cmd_vel_bridge.CMakeLists.txt
 RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/livox_ros_driver2 /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/FAST_LIO /opt/gogoguard/ros_ws/src/fast_lio \
@@ -59,6 +63,10 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && cp -a third_party/locked_stack/src/go2_cmd_vel_bridge /opt/gogoguard/ros_ws/src/ \
     && install -m 0644 /tmp/gogoguard-owned/go2_sdk2_udp_receiver.cpp \
       /opt/gogoguard/ros_ws/src/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp \
+    && install -m 0644 /tmp/gogoguard-owned/go2_vui_control.cpp \
+      /opt/gogoguard/ros_ws/src/go2_cmd_vel_bridge/src/go2_vui_control.cpp \
+    && install -m 0644 /tmp/gogoguard-owned/go2_cmd_vel_bridge.CMakeLists.txt \
+      /opt/gogoguard/ros_ws/src/go2_cmd_vel_bridge/CMakeLists.txt \
     && cp -a third_party/locked_stack/src/go2_nav2_interfaces /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/go2_fastlio_patrol /opt/gogoguard/ros_ws/src/ \
     && cp -a third_party/locked_stack/src/go2_site_ops /opt/gogoguard/ros_ws/src/ \
@@ -80,6 +88,7 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && test -x install/lib/fast_lio/fastlio_mapping \
     && test -x install/lib/go2_map_manager/continuous_map_localizer \
     && test -x install/lib/go2_cmd_vel_bridge/go2_sdk2_udp_receiver \
+    && test -x install/lib/go2_cmd_vel_bridge/go2_vui_control \
     && test -x install/lib/go2_nav2_runtime/patrol_runtime_manager \
     && rm -rf build log /tmp/gogoguard-owned
 
@@ -113,13 +122,15 @@ COPY apps /opt/gogoguard/app/apps
 COPY services /opt/gogoguard/app/services
 COPY config /opt/gogoguard/app/config
 COPY deployment/container/edge-entrypoint /tmp/gogoguard-edge-entrypoint
+COPY deployment/container/interaction-requirements.txt /tmp/interaction-requirements.txt
 
-RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
+RUN python3 -m pip install --no-cache-dir -r /tmp/interaction-requirements.txt \
+    && python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
     && install -m 0755 /tmp/gogoguard-edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint \
     && install -D -m 0755 \
       third_party/locked_stack/scripts/patrol_performance_monitor.py \
       /home/unitree/go2_fastlio_ws/scripts/patrol_performance_monitor.py \
-    && rm /tmp/gogoguard-edge-entrypoint
+    && rm /tmp/gogoguard-edge-entrypoint /tmp/interaction-requirements.txt
 
 VOLUME ["/var/lib/gogoguard"]
 EXPOSE 8080 8889/tcp 8189/tcp 8189/udp

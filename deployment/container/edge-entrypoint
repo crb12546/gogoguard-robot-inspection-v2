@@ -11,6 +11,8 @@ readonly LOG_ROOT=/var/lib/gogoguard/runtime-logs
 readonly ROBOT_ID=${GOGOGUARD_ROBOT_ID:-LLYJ0001}
 readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP6B0035634}
 readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
+readonly INTERACTION_ENABLED=${GOGOGUARD_INTERACTION_ENABLED:-0}
+readonly INTERACTION_ALLOW_INSECURE_WS=${GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS:-0}
 mkdir -p "$LOG_ROOT"
 
 declare -a CHILD_PIDS=()
@@ -50,6 +52,24 @@ trap cleanup INT TERM EXIT
 setsid mediamtx "$APP_ROOT/config/robot/mediamtx.yml" \
   >"$LOG_ROOT/mediamtx.log" 2>&1 &
 CHILD_PIDS+=("$!")
+
+if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+  if [[ -z ${UNITREE_AES_128_KEY:-} ]]; then
+    echo "interaction enabled but UNITREE_AES_128_KEY is unavailable" >&2
+    exit 78
+  fi
+  interaction_args=(
+    --robot-id "$ROBOT_ID"
+    --hardware-config "$APP_ROOT/config/robot/interaction-hardware.json"
+    --persona-config "$APP_ROOT/config/robot/interaction-persona.json"
+  )
+  if [[ "$INTERACTION_ALLOW_INSECURE_WS" == "1" ]]; then
+    interaction_args+=(--allow-insecure-ws)
+  fi
+  setsid gogoguard-interaction-edge "${interaction_args[@]}" \
+    >"$LOG_ROOT/interaction.log" 2>&1 &
+  CHILD_PIDS+=("$!")
+fi
 
 setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -r __node:=livox_mapping_publisher \
