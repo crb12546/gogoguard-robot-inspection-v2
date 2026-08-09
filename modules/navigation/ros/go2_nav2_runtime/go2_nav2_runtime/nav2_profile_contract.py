@@ -211,6 +211,10 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     local = _mapping(local.get("ros__parameters"), "local costmap parameters")
     if local.get("global_frame") != "map" or local.get("robot_base_frame") != "base_link":
         raise Nav2ProfileError("local costmap frames must be map -> base_link")
+    if local.get("always_send_full_costmap") is not True:
+        raise Nav2ProfileError(
+            "local costmap must publish deterministic full-grid health frames"
+        )
     footprint = _footprint(local.get("footprint"))
     circumscribed_radius = max(math.hypot(x, y) for x, y in footprint)
     footprint_padding = _finite(local.get("footprint_padding"), "footprint_padding")

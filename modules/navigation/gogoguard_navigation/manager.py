@@ -19,6 +19,10 @@ SDK_RECEIVER = Path(
     "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/"
     "go2_sdk2_udp_receiver"
 )
+SDK_MOTION_PROBE = Path(
+    "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/"
+    "go2_sdk2_motion_probe"
+)
 UNITREE_SDK_LIBRARY_PATH = "/opt/gogoguard/deps/lib:/usr/local/lib"
 
 
@@ -507,10 +511,7 @@ class NavigationManager:
             try:
                 probe = subprocess.run(
                     [
-                        "ros2",
-                        "run",
-                        "go2_cmd_vel_bridge",
-                        "go2_sdk2_motion_probe",
+                        str(SDK_MOTION_PROBE),
                         "--iface",
                         "eth0",
                         "stop",
@@ -519,6 +520,11 @@ class NavigationManager:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=12,
+                    # The Unitree SDK2 receiver and one-shot probe must use
+                    # the exact same paired native-library boundary.  Going
+                    # through `ros2 run` inherits ROS libraries first and can
+                    # abort in ChannelFactory before StopMove is sent.
+                    env=self._receiver_environment(),
                 )
                 probe_returncode = probe.returncode
             except (OSError, subprocess.TimeoutExpired):

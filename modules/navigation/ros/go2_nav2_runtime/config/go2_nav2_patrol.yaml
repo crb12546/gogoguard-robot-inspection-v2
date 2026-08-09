@@ -167,7 +167,11 @@ local_costmap:
       footprint: "[[0.40, 0.20], [0.40, -0.20], [-0.33, -0.20], [-0.33, 0.20]]"
       footprint_padding: 0.03
       track_unknown_space: false
-      always_send_full_costmap: false
+      # The patrol health gate consumes /local_costmap/costmap as a heartbeat.
+      # With incremental publishing a static scene emits one full grid and then
+      # looks stale even though the costmap thread is healthy. This grid is only
+      # 75 x 75 cells, so a deterministic 2 Hz full snapshot is inexpensive.
+      always_send_full_costmap: true
       plugins: [obstacle_layer, inflation_layer]
       obstacle_layer:
         # Navigation owns a 2D obstacle surface. The complete 3D body cloud is

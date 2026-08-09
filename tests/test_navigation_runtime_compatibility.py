@@ -11,7 +11,11 @@ from pathlib import Path
 from unittest import mock
 
 from gogoguard_navigation import NavigationManager
-from gogoguard_navigation.manager import DEFAULT_PROFILE, UNITREE_SDK_LIBRARY_PATH
+from gogoguard_navigation.manager import (
+    DEFAULT_PROFILE,
+    SDK_MOTION_PROBE,
+    UNITREE_SDK_LIBRARY_PATH,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -172,6 +176,33 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             resume_branch.index("self._request_resume()"),
         )
 
+    def test_idle_costmap_startup_wait_is_not_a_terminal_fault(self) -> None:
+        tree = ast.parse(RUNTIME_MANAGER.read_text(encoding="utf-8"))
+        method = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_start_readiness"
+        )
+        readiness_calls = [
+            node
+            for node in ast.walk(method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "PatrolReadiness"
+        ]
+        self.assertTrue(
+            any(
+                len(call.args) >= 3
+                and isinstance(call.args[1], ast.Constant)
+                and call.args[1].value == "POSITIONING"
+                and isinstance(call.args[2], ast.Attribute)
+                and isinstance(call.args[2].value, ast.Name)
+                and call.args[2].value.id == "costmap"
+                and call.args[2].attr == "reason"
+                for call in readiness_calls
+            )
+        )
+
     def test_operator_stop_is_idempotent_and_reports_remote_release(self) -> None:
         manager = NavigationManager.__new__(NavigationManager)
         manager._lock = threading.Lock()
@@ -207,6 +238,39 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
 
         self.assertEqual(environment["LD_LIBRARY_PATH"], UNITREE_SDK_LIBRARY_PATH)
         self.assertNotIn("/opt/ros/humble/lib", environment["LD_LIBRARY_PATH"])
+
+    @mock.patch("gogoguard_navigation.manager.subprocess.run")
+    def test_stop_probe_bypasses_ros2_and_uses_paired_sdk_libraries(
+        self, run
+    ) -> None:
+        class Process:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+        run.return_value.returncode = 0
+        manager = NavigationManager.__new__(NavigationManager)
+        manager._lock = threading.Lock()
+        manager._process = Process()
+        manager._receiver_process = Process()
+        manager._log_handle = None
+        manager._receiver_log_handle = None
+        manager._last_runtime_exit = None
+        manager._last_receiver_exit = None
+        manager.log_root = ROOT
+        manager._terminate_process = lambda process, **kwargs: 0
+
+        result = manager.stop_runtime()
+
+        self.assertTrue(result["stopMoveConfirmed"])
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], str(SDK_MOTION_PROBE))
+        self.assertNotIn("ros2", command)
+        self.assertEqual(
+            run.call_args.kwargs["env"]["LD_LIBRARY_PATH"],
+            UNITREE_SDK_LIBRARY_PATH,
+        )
 
     def test_motion_bridge_prepares_balance_posture_before_nav2(self) -> None:
         source = (
@@ -247,6 +311,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         )
         self.assertGreaterEqual(detour_speed * slowdown_ratio, 0.20)
         self.assertIn("global_frame: map", nav2_config)
+        self.assertIn("always_send_full_costmap: true", nav2_config)
         self.assertIn("plugins: [obstacle_layer, inflation_layer]", nav2_config)
         self.assertIn("plugin: nav2_costmap_2d::ObstacleLayer", nav2_config)
         self.assertNotIn("nav2_costmap_2d::VoxelLayer", nav2_config)

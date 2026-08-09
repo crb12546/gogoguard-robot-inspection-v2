@@ -1051,7 +1051,12 @@ class PatrolRuntimeManager(Node):
         if not costmap.healthy:
             return PatrolReadiness(
                 False,
-                "FAULT",
+                # A local costmap is created asynchronously after Nav2 enters
+                # the active lifecycle state.  While the runtime is idle this
+                # is recoverable startup readiness, not a terminal patrol
+                # fault.  The active-motion gate above remains fail-closed and
+                # still turns a lost/stale costmap into FAULT while driving.
+                "POSITIONING",
                 costmap.reason,
                 readiness.start_distance_m,
                 readiness.start_yaw_error_deg,
