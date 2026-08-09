@@ -177,9 +177,11 @@ startup receipts passed. A wrong-environment localization attempt correctly
 remained unauthorized and sent no patrol goal.
 
 The later `map-71b045489e8a` run exposed the 3D-odometry/2D-costmap mismatch and
-the incomplete operator-stop contract. The planar-costmap synchronization,
-temporal obstruction confirmation and stop-and-release correction described
-above are currently verified offline only and have **not** replaced
-`orchestration-r2` on the robot. The navigation slice is not field accepted
-until one new candidate image passes the acceptance scenarios and produces the
-robot receipts.
+the incomplete operator-stop contract. Those corrections now run on the robot
+as `v2-edge-20260809-planar-release-r4`. Static acceptance proved continuous
+full local-costmap publication in `map`, automatic idle readiness recovery and
+zero commands before authorization. A real patrol followed MPPI to 76.7%, then
+correctly stopped at an operator-confirmed table-created dead end after bounded
+A* found no path back to the route. Final stop terminated both control
+processes and confirmed Unitree `StopMove` plus remote-control release. A
+passable-obstacle detour/rejoin and localization-loss resume remain pending.

@@ -125,14 +125,14 @@ Updated: 2026-08-09
 
 ## Current deployed release
 
-- Active V2 implementation commit: `a95a3c571d8917446a22a6f1b2b0fedbc4d81d95`.
+- Active V2 implementation commit: `3cf679716ce177e1e91064474852da0d8ddfa3d9`.
 - Robot image config digest:
-  `sha256:e646d5541cffdb16e9f7d2987b74f89cceacc63985437118029153ccca841260`
+  `sha256:15e2b7c6951ea27ea4131bfbec4fe35d5302b9750ecafe700bf25665d6d785a1`
 - Robot service: `enabled`, `active`, live status at port 8080
-- Active image: `gogoguard-robot-inspection:v2-edge-20260809-orchestration-r2`; robot
+- Active image: `gogoguard-robot-inspection:v2-edge-20260809-planar-release-r4`; robot
   runtime no longer mounts cloud SSH material and its map worker is `none`.
 - The active release archive SHA-256 is
-  `f1b6a77cfa7f6233fbb30600e563af9a752f0a307e812f3fea0859fe79493088`.
+  `83b4cc8e0ce2d9d0feff31a804fe3cfc64d53fd139ac838d044ae5b37918d7a2`.
   The corrected host service uses the commissioned robot's Docker-compatible
   `docker stop -t 15` form, treats Docker's normal stop exit 143 as success,
   starts only after the NTP gate, and remains enabled across reboots.
@@ -692,7 +692,7 @@ blocks or faults, wait for the evidence bundle to seal and inspect its point
 cloud, local costmap, planner search, commands and camera window before changing
 parameters. Record each result before calling the release field-accepted.
 
-## 2026-08-09 planar-costmap and control-release correction (offline verified; not deployed)
+## 2026-08-09 planar-costmap and control-release correction (deployed; field verified)
 
 - The latest matching-map patrol did not fail because the route was proven
   blocked. MPPI first commanded about 0.409 m/s and then reported
@@ -725,27 +725,46 @@ parameters. Record each result before calling the release field-accepted.
   `StopMove`, and returns a structured release receipt. This addresses the
   field symptom in which repeated SDK zero commands competed with the handheld
   remote after a failed patrol.
-- Offline receipts: 77 unit/integration tests pass, including initial and
+- Final receipts: 79 unit/integration tests pass, including initial and
   localization-resume costmap barriers,
   frame/robot-cell health, temporal obstruction, short-abort classification,
-  independent stop control lane and idempotent release receipt. Python compile,
+  recoverable idle costmap startup, paired-SDK StopMove, independent stop
+  control lane and idempotent release receipt. Python compile,
   UI smoke, container contract validation, knowledge validation and diff checks
   pass. The Linux/ARM64 image built all ten ROS 2 packages and passed in-image
   Python imports, the strict Nav2 profile validator and installed
-  planar-costmap/resume-runtime checks. The single local
-  candidate is `gogoguard-robot-inspection:v2-edge-20260809-planar-release-r1`,
-  manifest-list/image ID
-  `sha256:77b8f49da398824b355135fb88cc93e5bcf55a92b5aa33d6537d5588d23b5700`
-  (1,171,239,282 virtual bytes). The robot still runs
-  `v2-edge-20260809-orchestration-r2`; none of these corrections has been
-  deployed or physically accepted yet.
+  planar-costmap/resume-runtime checks. The deployed image is
+  `gogoguard-robot-inspection:v2-edge-20260809-planar-release-r4`, with local
+  manifest-list digest
+  `sha256:63aece679c19b1e34cf2243356da37deb081bbdb8823b2ad87e8edb298c5a390`,
+  robot config digest
+  `sha256:15e2b7c6951ea27ea4131bfbec4fe35d5302b9750ecafe700bf25665d6d785a1`
+  and release archive SHA-256
+  `83b4cc8e0ce2d9d0feff31a804fe3cfc64d53fd139ac838d044ae5b37918d7a2`.
+- Static field receipt: localization reached `TRACKING` with approximately
+  0.89 confidence; the planar `map` costmap stayed healthy and advanced from
+  sequence 8 to 14 in three seconds; the robot cell cost was zero and the
+  final command remained exactly zero before patrol authorization.
+- Dynamic field receipt: `map-71b045489e8a` followed MPPI continuously from
+  about 12% to 76.7% route progress with localization usable and a healthy
+  costmap. It then reported `PATH_OBSTRUCTED` and revoked motion authority.
+  The operator confirmed the room layout had changed: a table now created a
+  real dead end where the recorded route previously passed. Bounded A* ran in
+  2.12 ms but found no executable path back to the route, so stopping rather
+  than submitting `DetourPath` was the correct outcome.
+- Control-release receipt: runtime and SDK motion bridge both exited with code
+  zero. The original one-shot receipt aborted because `ros2 run` mixed ROS and
+  the paired Unitree native-library boundary. The release now invokes the
+  installed SDK probe directly with the same library path as the receiver; a
+  robot-side probe and the final workstation stop both returned
+  `stopMoveConfirmed=true` and `remoteControlReleased=true`.
 
 ## Next experiment (supersedes all older paragraphs)
 
-Build and deploy exactly one correction image. Before permitting motion, verify
-`map -> base_link`, a fresh `map` local costmap and a traversable robot cell.
-Then collect, in order: a stationary start receipt, a clear-route MPPI run, one
-real obstacle with temporally confirmed detour and MPPI rejoin, an operator stop
-from an active patrol, an operator stop from `FAULT`, and immediate handheld
-remote movement after the release receipt. Do not tune speed or clearance until
-the planar costmap is visually consistent with the physical scene.
+Keep `planar-release-r4` fixed and collect only the remaining acceptance
+receipts: one obstacle that leaves a physically passable side corridor and
+therefore exercises A* -> `DetourPath` -> MPPI rejoin; localization-loss route
+resume; and handheld-remote movement immediately after a stop from an active
+patrol and from `FAULT`. The terminal dead-end stop and normal MPPI travel are
+already field verified; do not weaken obstacle thresholds to make an actually
+sealed path appear passable.
