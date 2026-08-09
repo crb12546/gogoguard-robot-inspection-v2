@@ -211,7 +211,17 @@ boundaries and receipts to distinguish them.
   acceleration/deceleration 0.90 m/s2. The 1,172,021,760-byte immutable
   release archive has SHA-256
   `2bbda1667274637db28c291411d948c156219da37ea9db1fecb850cd11f15448`.
-  The release has not connected to or been installed on the robot.
+  The archive passed SHA-256 on the robot and was installed successfully.
+- `complete-r1` is now the active enabled robot release. The running ARM64
+  image/config ID is
+  `sha256:2e704e529849848bd31ec795c093fc0974973a474d6ba27f35a9c7dd94917183`.
+  Static startup reported LiDAR 10.0 Hz, IMU 98.8 Hz and odometry 10.0 Hz with
+  no new service-log errors. The API exposes profile V5 revision 4 with
+  target/headroom/detour/turn/lateral values 0.60/0.90/0.40/0.40/0.20 and
+  acceleration/deceleration 0.90/0.90 m/s2. Candidate
+  `map-799f6f04e11d` remains selected. Nav2 and the Unitree motion bridge are
+  stopped and UDP 5005 is unbound, so this is a static deployment receipt, not
+  a motion or route-completion receipt.
 - Evidence was synchronized to
   `workstation-data/field-runs/20260809-105714-continuous-r1` and 52 Mac-side
   IncidentBundles passed all 364 file hashes. The bundles exposed a separate
