@@ -60,18 +60,10 @@ def _runtime_nodes(context):
     )
     target_cruise = float(LaunchConfiguration("target_cruise_mps").perform(context))
     max_forward = float(LaunchConfiguration("max_forward_mps").perform(context))
-    detour_speed = float(LaunchConfiguration("detour_speed_mps").perform(context))
     turn_speed = float(LaunchConfiguration("turn_speed_radps").perform(context))
     lateral_speed = float(LaunchConfiguration("lateral_speed_mps").perform(context))
     acceleration = float(LaunchConfiguration("acceleration_mps2").perform(context))
     deceleration = float(LaunchConfiguration("deceleration_mps2").perform(context))
-    stop_front = float(LaunchConfiguration("stop_zone_front_m").perform(context))
-    stop_rear = float(LaunchConfiguration("stop_zone_rear_m").perform(context))
-    stop_half_width = float(LaunchConfiguration("stop_zone_half_width_m").perform(context))
-    slow_front = float(LaunchConfiguration("slow_zone_front_m").perform(context))
-    slow_rear = float(LaunchConfiguration("slow_zone_rear_m").perform(context))
-    slow_half_width = float(LaunchConfiguration("slow_zone_half_width_m").perform(context))
-    slowdown_ratio = float(LaunchConfiguration("slowdown_ratio").perform(context))
     progress_timeout_s = float(
         LaunchConfiguration("progress_timeout_s").perform(context)
     )
@@ -111,12 +103,24 @@ def _runtime_nodes(context):
             "candidate.runtime_profile": LaunchConfiguration(
                 "candidate_runtime_profile"
             ).perform(context).strip(),
+            "candidate.allowed_area_mask": LaunchConfiguration(
+                "candidate_allowed_area_mask"
+            ).perform(context).strip(),
+            "candidate.allowed_area_mask_image": LaunchConfiguration(
+                "candidate_allowed_area_mask_image"
+            ).perform(context).strip(),
             "candidate.localization_map_hash": LaunchConfiguration(
                 "localization_map_hash"
             ).perform(context).strip(),
             "candidate.route_hash": LaunchConfiguration("route_hash").perform(context).strip(),
             "candidate.runtime_profile_hash": LaunchConfiguration(
                 "runtime_profile_hash"
+            ).perform(context).strip(),
+            "candidate.allowed_area_mask_hash": LaunchConfiguration(
+                "allowed_area_mask_hash"
+            ).perform(context).strip(),
+            "candidate.allowed_area_mask_image_hash": LaunchConfiguration(
+                "allowed_area_mask_image_hash"
             ).perform(context).strip(),
         }
         bundle = load_candidate_runtime_bundle(
@@ -125,9 +129,19 @@ def _runtime_nodes(context):
             localization_map_path=candidate_parameters["candidate.localization_map"],
             route_path=candidate_parameters["candidate.route"],
             runtime_profile_path=candidate_parameters["candidate.runtime_profile"],
+            allowed_area_mask_path=candidate_parameters["candidate.allowed_area_mask"],
+            allowed_area_mask_image_path=candidate_parameters[
+                "candidate.allowed_area_mask_image"
+            ],
             localization_map_hash=candidate_parameters["candidate.localization_map_hash"],
             route_hash=candidate_parameters["candidate.route_hash"],
             runtime_profile_hash=candidate_parameters["candidate.runtime_profile_hash"],
+            allowed_area_mask_hash=candidate_parameters[
+                "candidate.allowed_area_mask_hash"
+            ],
+            allowed_area_mask_image_hash=candidate_parameters[
+                "candidate.allowed_area_mask_image_hash"
+            ],
         )
     else:
         raise RuntimeError("runtime_source must be active or candidate")
@@ -136,6 +150,8 @@ def _runtime_nodes(context):
     map_manager_share = Path(get_package_share_directory("go2_map_manager"))
     nav2_config = str(nav2_share / "config" / "go2_nav2_patrol.yaml")
     validate_nav2_profile(Path(nav2_config))
+    if bundle.allowed_area_mask_path is None:
+        raise RuntimeError("runtime has no versioned allowed-area mask")
     localization_config = str(
         map_manager_share / "config" / "continuous_map_localizer.yaml"
     )
@@ -393,6 +409,41 @@ def _runtime_nodes(context):
             remappings=common_tf_remaps,
         ),
         Node(
+            package="nav2_map_server",
+            executable="map_server",
+            name="allowed_area_mask_server",
+            output="screen",
+            respawn=True,
+            respawn_delay=2.0,
+            parameters=[
+                nav2_config,
+                {
+                    "yaml_filename": str(bundle.allowed_area_mask_path),
+                    "use_sim_time": use_sim_time,
+                },
+            ],
+            remappings=common_tf_remaps,
+        ),
+        Node(
+            package="nav2_map_server",
+            executable="costmap_filter_info_server",
+            name="allowed_area_filter_info_server",
+            output="screen",
+            respawn=True,
+            respawn_delay=2.0,
+            parameters=[nav2_config, {"use_sim_time": use_sim_time}],
+        ),
+        Node(
+            package="nav2_planner",
+            executable="planner_server",
+            name="planner_server",
+            output="screen",
+            respawn=True,
+            respawn_delay=2.0,
+            parameters=[nav2_config, {"use_sim_time": use_sim_time}],
+            remappings=common_tf_remaps,
+        ),
+        Node(
             package="nav2_controller",
             executable="controller_server",
             name="controller_server",
@@ -408,8 +459,6 @@ def _runtime_nodes(context):
                     "FollowPath.model_dt": 1.0 / controller_frequency,
                     "FollowPath.vy_max": lateral_speed,
                     "FollowPath.wz_max": turn_speed,
-                    "DetourPath.desired_linear_vel": detour_speed,
-                    "DetourPath.rotate_to_heading_angular_vel": turn_speed,
                     "FollowPath.time_steps": mppi_time_steps,
                     "FollowPath.batch_size": mppi_batch_size,
                     "FollowPath.iteration_count": mppi_iterations,
@@ -455,18 +504,7 @@ def _runtime_nodes(context):
             respawn_delay=2.0,
             parameters=[
                 nav2_config,
-                {
-                    "StopZone.points": [
-                        stop_front, stop_half_width, stop_front, -stop_half_width,
-                        -stop_rear, -stop_half_width, -stop_rear, stop_half_width,
-                    ],
-                    "SlowZone.points": [
-                        slow_front, slow_half_width, slow_front, -slow_half_width,
-                        -slow_rear, -slow_half_width, -slow_rear, slow_half_width,
-                    ],
-                    "SlowZone.slowdown_ratio": slowdown_ratio,
-                    "use_sim_time": use_sim_time,
-                },
+                {"use_sim_time": use_sim_time},
             ],
             remappings=common_tf_remaps,
         ),
@@ -482,6 +520,9 @@ def _runtime_nodes(context):
                     "attempt_respawn_reconnection": True,
                     "use_sim_time": use_sim_time,
                     "node_names": [
+                        "allowed_area_mask_server",
+                        "allowed_area_filter_info_server",
+                        "planner_server",
                         "controller_server",
                         "velocity_smoother",
                         "collision_monitor",
@@ -631,9 +672,13 @@ def generate_launch_description():
             DeclareLaunchArgument("candidate_localization_map", default_value=""),
             DeclareLaunchArgument("candidate_route", default_value=""),
             DeclareLaunchArgument("candidate_runtime_profile", default_value=""),
+            DeclareLaunchArgument("candidate_allowed_area_mask", default_value=""),
+            DeclareLaunchArgument("candidate_allowed_area_mask_image", default_value=""),
             DeclareLaunchArgument("localization_map_hash", default_value=""),
             DeclareLaunchArgument("route_hash", default_value=""),
             DeclareLaunchArgument("runtime_profile_hash", default_value=""),
+            DeclareLaunchArgument("allowed_area_mask_hash", default_value=""),
+            DeclareLaunchArgument("allowed_area_mask_image_hash", default_value=""),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("hardware_output_enabled", default_value="true"),
             DeclareLaunchArgument("sdk_receiver_enabled", default_value="true"),
@@ -646,18 +691,10 @@ def generate_launch_description():
             DeclareLaunchArgument("localization_status_timeout_s", default_value="0.60"),
             DeclareLaunchArgument("target_cruise_mps", default_value="0.60"),
             DeclareLaunchArgument("max_forward_mps", default_value="0.90"),
-            DeclareLaunchArgument("detour_speed_mps", default_value="0.40"),
             DeclareLaunchArgument("turn_speed_radps", default_value="0.40"),
             DeclareLaunchArgument("lateral_speed_mps", default_value="0.20"),
             DeclareLaunchArgument("acceleration_mps2", default_value="0.90"),
             DeclareLaunchArgument("deceleration_mps2", default_value="0.90"),
-            DeclareLaunchArgument("stop_zone_front_m", default_value="0.55"),
-            DeclareLaunchArgument("stop_zone_rear_m", default_value="0.38"),
-            DeclareLaunchArgument("stop_zone_half_width_m", default_value="0.27"),
-            DeclareLaunchArgument("slow_zone_front_m", default_value="1.00"),
-            DeclareLaunchArgument("slow_zone_rear_m", default_value="0.55"),
-            DeclareLaunchArgument("slow_zone_half_width_m", default_value="0.30"),
-            DeclareLaunchArgument("slowdown_ratio", default_value="0.85"),
             DeclareLaunchArgument("progress_timeout_s", default_value="5.0"),
             DeclareLaunchArgument("replan_interval_s", default_value="0.75"),
             DeclareLaunchArgument("obstruction_cost_threshold", default_value="65"),

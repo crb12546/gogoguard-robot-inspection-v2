@@ -9,11 +9,13 @@ required = {
     "index.html": [
         "trajectory", "cloud", "cameraFrame", "recordButton", "app.js",
         "巡检操作向导", "参数中心", "诊断中心", "progressTimeout",
-        "detourSpeed", "maxForwardSpeed", "acceleration", "deceleration",
+        "maxForwardSpeed", "acceleration", "deceleration",
         "replanInterval", "obstructionCost",
         "obstructionConfirmation", "停止巡检并释放遥控权",
         "发布所选地图与路线到机器狗", "自动清理并恢复",
         "研发事故记录", "incidentTimeline", "diagnosticMode",
+        "巡检地图工作台", "workspaceMap", "startGlimEditor",
+        "editRoute", "editAllowedArea", "saveWorkspace",
     ],
     "app.js": [
         "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
@@ -21,7 +23,7 @@ required = {
         "/api/v1/navigation/runtime/recover",
         "/api/v1/navigation/diagnostics", "/api/v1/navigation/profile",
         "mapSelectionExplicit", "candidateJobId",
-        "巡检请求已提交", "规划绕障中", "LOCAL_DETOUR_ACCEPTED",
+        "巡检请求已提交", "规划绕障中", "NAV2_GLOBAL_PATH_USING_MPPI",
         "/api/v1/incidents", "/api/v1/diagnostics/profile", "drawIncidentPlan",
         "save-map-name", "fmtLocalTime", "运行旧地图",
         "profile.remaining_patrols <= 1 ? 'next1' : 'next3'",
@@ -33,11 +35,15 @@ required = {
         "profile.avoidance.obstructionConfirmationS",
         "DETOURING", "REJOINING", "RETRYING", "RECOVERING",
         "SEARCHING_PATH", "activeController",
+        "/navigation-workspace", "/glim-editor/start", "/glim-editor/publish",
+        "robotRadiusM", "allowedArea", "candidateGeneration >= 5",
+        "candidate.workspace_hash === state.navigationWorkspace.workspaceHash",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",
         "[hidden]", "@media",
         ".incident-lab", ".incident-views",
+        ".map-workbench", ".workspace-legend", ".allowed-area-swatch",
     ],
 }
 for name, needles in required.items():
@@ -50,4 +56,10 @@ for name, needles in required.items():
             raise SystemExit(f"{path}: missing {needle}")
 if "使用当前地图与录制路线" in (root / "index.html").read_text(encoding="utf-8"):
     raise SystemExit("site console still exposes the retired ambiguous action")
+retired = ("detourSpeed", "stopZoneLength", "slowZoneLength", "SlowZone", "DetourPath")
+for name in ("index.html", "app.js"):
+    content = (root / name).read_text(encoding="utf-8")
+    for needle in retired:
+        if needle in content:
+            raise SystemExit(f"{root / name}: still exposes retired {needle}")
 print("site console UI contract: ok")

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from gogoguard_contracts import RecordingSession, RecordingState, json_ready
 from gogoguard_evidence import EventJournal
-from gogoguard_map_factory import MapJobManager
+from gogoguard_map_factory import GlimEditorManager, MapJobManager
+from gogoguard_route import NavigationWorkspaceStore, validate_workspace
 
 from .robot_client import RobotClient, RobotConnectionError
 
@@ -32,6 +33,10 @@ class FieldWorkstationApplication:
         )
         self.journal = EventJournal(self.data_root / "events" / "workstation.jsonl")
         self.maps = MapJobManager(self.data_root, map_worker, self.journal, cloud)
+        self.glim_editor = GlimEditorManager(
+            self.data_root, self.maps, map_worker, cloud
+        )
+        self.navigation_workspaces = NavigationWorkspaceStore(self.data_root)
         self.catalog_path = self.data_root / "catalog.json"
         self._catalog_lock = threading.Lock()
         self._catalog = self._load_catalog()
@@ -55,6 +60,7 @@ class FieldWorkstationApplication:
         self._incident_stop.set()
         if self._incident_thread and self._incident_thread is not threading.current_thread():
             self._incident_thread.join(timeout=2)
+        self.glim_editor.close()
         self.journal.append("workstation.stopped", site_id=self.site_id)
 
     def status(self) -> dict:
@@ -169,6 +175,46 @@ class FieldWorkstationApplication:
 
         return json_ready(self.maps.retry(job_id, session, source_resolver))
 
+    def navigation_workspace(self, job_id: str) -> dict:
+        self.maps.get(job_id)
+        return self.navigation_workspaces.get(job_id)
+
+    def update_navigation_workspace(self, job_id: str, payload: dict) -> dict:
+        self.maps.get(job_id)
+        value = self.navigation_workspaces.update(job_id, payload)
+        self.journal.append(
+            "map.navigation_workspace_updated",
+            job_id=job_id,
+            revision=value["revision"],
+            workspace_hash=value["workspaceHash"],
+            ready=value["ready"],
+        )
+        return value
+
+    def glim_editor_status(self, job_id: str) -> dict:
+        return self.glim_editor.status(job_id)
+
+    def start_glim_editor(self, job_id: str) -> dict:
+        value = self.glim_editor.start(job_id)
+        self.journal.append(
+            "map.editor_started",
+            job_id=job_id,
+            editor_session_id=value.get("sessionId"),
+        )
+        return value
+
+    def publish_glim_editor(self, job_id: str) -> dict:
+        value = self.glim_editor.publish(job_id)
+        new_job_id = str(value["mapJob"]["job_id"])
+        parent_label = str(self.map_job(job_id).get("label") or job_id)
+        value["mapJob"] = self.update_map_label(
+            new_job_id, f"{parent_label}（GLIM已清理）"
+        )
+        return value
+
+    def stop_glim_editor(self, job_id: str) -> dict:
+        return self.glim_editor.stop(job_id)
+
     def navigation_status(self) -> dict:
         return self.robot.get("api/v1/navigation")
 
@@ -176,6 +222,7 @@ class FieldWorkstationApplication:
         job = self.map_job(job_id)
         if job.get("state") != "complete":
             raise RuntimeError("only a completed GLIM map can be deployed")
+        validate_workspace(self.navigation_workspaces.get(job_id), require_ready=True)
         self.robot.deploy_map(job, Path(str(job["artifact_root"])))
         return self.robot.post(
             "api/v1/navigation/prepare",

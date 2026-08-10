@@ -118,6 +118,18 @@ class EdgeTransferTest(unittest.TestCase):
             }
             for name, value in values.items():
                 (artifacts / name).write_bytes(value)
+            workspace = artifacts.parent / "navigation-workspace.json"
+            workspace.write_text(
+                json.dumps(
+                    {
+                        "schema": "gogoguard.navigation_workspace.v1",
+                        "mapJobId": JOB_ID,
+                        "route": [[0.0, 0.0], [1.0, 0.0]],
+                        "allowedArea": [[-1.0, -1.0], [2.0, -1.0], [2.0, 1.0]],
+                    }
+                ),
+                encoding="utf-8",
+            )
             committed = client.deploy_map(
                 {
                     "job_id": JOB_ID,
@@ -130,6 +142,38 @@ class EdgeTransferTest(unittest.TestCase):
             )
             self.assertEqual(committed["stage"], "deployed_to_robot")
             self.assertTrue((self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply").is_file())
+            self.assertEqual(
+                (
+                    self.root
+                    / "map-jobs"
+                    / JOB_ID
+                    / "navigation-workspace.json"
+                ).read_text(encoding="utf-8"),
+                workspace.read_text(encoding="utf-8"),
+            )
+
+            immutable_map = self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply"
+            immutable_receipt = (immutable_map.stat().st_ino, digest(immutable_map.read_bytes()))
+            workspace.write_text('{"revision":2}\n', encoding="utf-8")
+            updated = client.deploy_map(
+                {
+                    "job_id": JOB_ID,
+                    "session_id": SESSION_ID,
+                    "created_at": "2026-08-06T01:02:03+00:00",
+                    "updated_at": "2026-08-06T01:03:03+00:00",
+                    "metrics": {"worker": "cloud-glim"},
+                },
+                artifacts,
+            )
+            self.assertEqual(updated["stage"], "deployed_to_robot")
+            self.assertEqual(
+                (self.root / "map-jobs" / JOB_ID / "navigation-workspace.json").read_text(encoding="utf-8"),
+                '{"revision":2}\n',
+            )
+            self.assertEqual(
+                (immutable_map.stat().st_ino, digest(immutable_map.read_bytes())),
+                immutable_receipt,
+            )
 
             # Repeated selection is a no-op transfer and remains successful.
             repeated = client.deploy_map(

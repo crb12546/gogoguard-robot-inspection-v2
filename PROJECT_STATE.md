@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## New-task handoff — start here
 
@@ -23,11 +23,11 @@ teleoperation remain later or parallel slices.
 | Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active | Long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
-| Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts | Manual map quality approval/correction is not a complete workflow |
-| Map and route assets | Maps have versions/history/labels; recorded trajectories create map-bound generation-3 routes and can be published back to the robot | No independent graphical route editor; route editing/version comparison is incomplete |
-| Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols | The latest long-route patrol exposed false in-zone relocalization followed by recovery-zone lockout; correction and repeatability acceptance are pending |
-| Navigation and motion | Nav2/MPPI has completed real routes; real dead-end stopping and remote-control release are verified | Sustained cruise speed, passable detour/rejoin and repeatability remain commissioning work |
-| Field workstation and UI | The Mac page is the working delivery console for mapping, history, publication, patrol, parameters and diagnostics | It is an engineering/field UI, not a finished operator product; several workflows still need simplification |
+| Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
+| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area, and has published a real generation-5 Nav2 keepout candidate | Route/version comparison and publication progress feedback remain operator-UX work |
+| Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
+| Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
+| Field workstation and UI | The Mac page is the working delivery console and includes the GLIM/map/route/allowed-area preparation workflow at `http://127.0.0.1:8080/` | It remains an engineering/field UI rather than a finished operator product |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
 | Inspection actions/evidence | Camera live preview works | Checkpoint photo/video actions and versioned inspection evidence are not implemented |
 | Mission/task system | Boundary is designed | Mission state machine, checkpoint orchestration and result aggregation are not implemented |
@@ -101,8 +101,9 @@ these decisions and lessons when continuing in a new conversation:
    progress and direct-upload problems led to resumable robot -> Mac transfer,
    Mac -> cloud orchestration and immutable map return. GLIM has produced real
    maps, Mac displays 2D/3D assets and history, and selected map/route candidates
-   can be published to the robot. Manual map correction and independent route
-   authoring are still incomplete.
+   can be published to the robot. On 2026-08-10 the official GLIM editor became
+   an isolated cloud tool opened from the Mac, and independent blue-route plus
+   green-allowed-area editing became part of the workstation.
 8. **Localization and patrol moved through real failures, not a demo.** Early
    runs exposed non-convergence, incorrect initial assumptions, narrow-door
    interpretation, stale selected maps, duplicate/orphan processes, misleading
@@ -113,10 +114,10 @@ these decisions and lessons when continuing in a new conversation:
 9. **Obstacle handling was redesigned after patch-by-patch tuning failed.**
    Logs showed that controller abort, localization loss, actuation stall and
    true obstruction had been conflated. V2 now classifies them separately,
-   requires healthy temporal costmap evidence, bounds A* detours, gives RPP only
-   the local segment and returns route ownership to MPPI. A real changed-room
-   table formed a sealed dead end; stopping was correctly verified. A passable
-   detour/rejoin is still not field-accepted.
+   requires healthy temporal costmap evidence and keeps one MPPI controller for
+   both the blue route and SmacPlanner2D bypasses. A real changed-room table
+   formed a sealed dead end; stopping was correctly verified. A passable
+   bypass/rejoin is still not field-accepted.
 10. **Debugging became a first-class development capability.** The Mac gained
     parameter views, operation receipts, incident synchronization/replay and
     layered runtime evidence; the robot records raw/smoothed/collision/final
@@ -159,20 +160,207 @@ boundaries and receipts to distinguish them.
 - Active product worktree: this repository on branch
   `agent/three-end-field-workstation`. It contains local commits not yet pushed
   to `origin/agent/three-end-field-workstation`; do not claim GitHub is current.
-- Robot release: code commit
-  `a615ab9a32fa46dbb73a4f6fc30db6cce2de8054`, image
-  `gogoguard-robot-inspection:v2-edge-20260809-cruise-r1`, config digest
-  `sha256:593a5336f355277e72b513e006a34a61e335b4dc94ae3468c48b52c92a016ab1`.
-  `gogoguard-edge.service` is enabled and active.
-- Latest read-only live check found sensors online and one navigation
-  supervisor. Nav2 and the Unitree motion bridge were stopped, so the robot had
-  no V2 motion authorization. The currently selected candidate was
-  `map-8ddcf3f8c078`; always re-read live state because the operator can change
-  the selected map between tasks.
-- Active navigation profile is schema V3 revision 3: straight/detour/yaw/
-  lateral limits `0.60/0.60/0.50/0.20`, acceleration `0.90`, MPPI batch 1,000.
-  StopZone, SlowZone and collision thresholds were not weakened by the speed
-  correction.
+- Last verified robot release is
+  `gogoguard-robot-inspection:v2-edge-20260810-v6-r4`, built from the local
+  worktree at HEAD `d0e29173c7f33f2cff1e89390195a1fa955c07ca` plus the
+  documented uncommitted V6 change set. The enabled service is active with
+  sensors online; Nav2, patrol runtime and the Unitree motion bridge are
+  stopped and UDP 5005 is unbound. Always re-read live robot state before
+  deployment or motion because the operator can change it between tasks.
+- The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
+  deployed and has received an operator-accepted physical patrol. The selected
+  robot candidate is
+  generation 5 for `map-6855ba54ae11`, bound to saved workspace revision 4 and
+  its green allowed area. The KeepoutFilter assets were generated and verified; starting the
+  runtime and completing further physical patrols remain explicit operator
+  actions.
+- The commissioned Mac workstation was restarted from this worktree and is
+  listening on `http://127.0.0.1:8080/`. New navigation-workspace and
+  GLIM-editor status APIs return valid JSON. `map-799f6f04e11d` workspace
+  revision 6 saved successfully and was published to the robot as a matching
+  generation-5 candidate.
+- Alibaba Cloud has the official GLIM editor launcher and exporter with hashes
+  `b73d22d8c75654ee931df5f962063378688f81a9b20490701c29aa87cb2fdb78`
+  and `4e571d1816adad1e5438dffe18a3f14223e83021d90028c1ce727a08ed1907d9`.
+  A real dump loaded in the editor, both VNC services bound only to cloud
+  loopback, noVNC worked through a Mac SSH tunnel, and the export probe created
+  PLY/JSON/SVG/build artifacts. Probe sessions were stopped and removed.
+
+### 2026-08-10 map/localization/navigation simplification
+
+- The map preparation workflow is now explicit: optionally clean transient
+  people/cars with the official GLIM editor, then save one blue patrol route
+  and one green allowed polygon. The original GLIM artifact is immutable;
+  publishing a cleaned result creates a new child map version.
+- Workspace validation rejects self-crossing green polygons, a route outside
+  the green area, and a route closer to the boundary than the single 0.48 m
+  robot radius. Candidate preparation produces a standard PGM/YAML keepout
+  mask consumed by both local and global Nav2 costmaps.
+- Fixed-map localization remains VGICP. Recovery candidates are compared with
+  the last trusted `map -> odom` anchor; one plausible but wrong match can no
+  longer recenter the search immediately. Three mutually consistent recovery
+  candidates are required before committing a new anchor.
+- Runtime navigation has one controller plugin, `FollowPath` using MPPI. A
+  temporally verified occupied route asks Nav2 `SmacPlanner2D` for a path to a
+  future point on the blue route; the same MPPI executes that path. The old
+  custom A* -> RPP runtime handoff and layered stop/slow rectangles are retired.
+- If Smac cannot yet find a path, the dog holds zero velocity and retries at
+  the configured cadence until a path appears, runtime health is lost, or the
+  operator explicitly stops. Collision Monitor retains one visible 0.48 m
+  emergency circle; the Unitree receiver retains only authorization,
+  freshness, finite/range and hardware-limit checks.
+- Offline receipt: 100 Python unit/integration tests pass; Python compilation,
+  UI smoke, cloud/robot deployment-contract checks, JSON validation, generated
+  knowledge validation, JavaScript syntax, shell syntax, diff whitespace and a
+  clean VGICP patch dry run all pass. A browser loaded the live Mac page with
+  no console warnings/errors and verified the workbench layout after the
+  history panel was bounded. This is an implementation/static receipt, not a
+  robot deployment or physical patrol receipt.
+- Robot static deployment receipt: Linux/ARM64 release
+  `gogoguard-robot-inspection:v2-edge-20260810-v6-r1` was packaged as a
+  1,172,066,816-byte archive with SHA-256
+  `96ccafcc27fd14a31b0e6aefddfe4f48202ce3fda800b193f20fa026d42f5f45`,
+  verified on both Mac and robot, installed and activated. The running image
+  config digest is
+  `sha256:2c2ab1d140b92bd1e9efd88c8d769b20edcb157ca41934482ea9b742f2cb83ed`.
+  Startup reported LiDAR 9.9 Hz, IMU 57.7 Hz and odometry 10.9 Hz with one
+  navigation supervisor. Patrol runtime and motion bridge remained stopped,
+  final command remained null and UDP 5005 remained unbound; no physical
+  motion was authorized or commanded.
+- First V6 field start was blocked before motion because the selected
+  generation-4 candidate had no `allowed_area_mask`. The operator then drew a
+  green area, but saving failed with `EACCES`: the new workspace store had
+  incorrectly placed mutable `navigation-workspace.json` inside the deliberately
+  read-only GLIM `artifacts` directory. The correction stores workspace state
+  in the writable map-job root, reads the old location for compatibility, and
+  regression-tests a read-only artifact directory. Runtime preflight now
+  rejects an old candidate before starting the Unitree bridge and tells the
+  operator to save and republish instead of exposing a raw missing-key error.
+  The Mac UI now treats a map as published only when candidate generation is
+  at least 5 and its workspace hash matches the saved blue/green workspace, so
+  the old same-map generation-4 candidate can no longer hide the republish
+  action. Robot map publication includes the separately stored workspace in
+  the checksummed import bundle, allowing the deployed V6 compatibility reader
+  to prepare the generation-5 mask without making the Mac GLIM artifacts
+  writable.
+- The next field publish exposed a second ownership error: immutable GLIM map
+  files for `map-799f6f04e11d` had already been committed on the robot, while a
+  newer mutable `navigation-workspace.json` remained in the staging area. The
+  edge importer rejected that revision with `immutable staged artifact already
+  exists with different content`. The corrected transfer contract keeps PLY,
+  map JSON, overview and GLIM build metadata immutable but permits the
+  separately named operator workspace to advance atomically. Repeated deploys
+  update only that workspace; tests prove the committed map PLY inode and hash
+  remain unchanged.
+- Static deployment receipt for that correction: Linux/ARM64 release
+  `gogoguard-robot-inspection:v2-edge-20260810-v6-r2` was packaged as a
+  1,172,071,424-byte archive with SHA-256
+  `9d2e10c46568d0b20007371cb4294eae5f9a021460634ded1ce374b23beed3b2`,
+  verified on Mac and robot, installed and activated. The running image config
+  digest is
+  `sha256:c03956afae5004147c0825cc4870f0881a0e05c3df06c2ab300e4199d595d15a`.
+  Startup reported LiDAR 10.5 Hz, IMU 66.0 Hz and odometry 9.6 Hz with one
+  supervisor. Runtime and motion bridge remained stopped, the final command
+  remained null and UDP 5005 remained unbound.
+- Publication receipt: `map-799f6f04e11d` workspace revision 5 and workspace
+  hash `826e1b06f15d1e21adf1b7aa5c4608c315e327e5d26dff335ae522d1ab2bd976`
+  produced a generation-5 candidate with 24 route points, a 9.645 m route and
+  PGM/YAML/JSON allowed-area-mask artifacts. The robot import descriptor
+  includes the 1,696-byte workspace with file SHA-256
+  `5ab102e14fedf4b812ffe6672d650856c4fe2d6442d49f8e586ce93c494b3b07`.
+  No navigation or movement command was issued.
+- The operator subsequently saved workspace revision 6 and started the runtime.
+  The allowed-area mask server loaded its 176 x 226 PGM at 0.10 m/cell,
+  KeepoutFilter and SmacPlanner2D configured, and VGICP tracked the exact map at
+  about 0.87 confidence. Nav2 then failed while configuring MPPI CostCritic:
+  the V6 simplification had replaced the local polygon footprint with the one
+  0.48 m `robot_radius`, but retained `consider_footprint: true`. Humble rejects
+  that contradictory radius-only/polygon-check combination. The lifecycle
+  manager therefore aborted before FollowPath activation and no costmap frame
+  existed; the later `COSTMAP_MISSING` patrol gate was the correct downstream
+  symptom, not the cause. Both patrol requests remained unauthorized and sent
+  no route.
+- The V6-r3 correction sets CostCritic to consume the inflation-expanded
+  circular costmap, keeps one 0.48 m robot radius and one 0.48 m emergency
+  circle, and makes the strict Nav2 profile validator reject both polygon mode
+  and a second footprint property. An isolated ARM64 ROS lifecycle receipt
+  configured `controller_server`, MPPI and its sole `FollowPath` plugin
+  successfully and reached `inactive`; the original fatal error was absent.
+  This validates configuration without connecting a Unitree motion receiver.
+- Static deployment receipt for the correction: Linux/ARM64 release
+  `gogoguard-robot-inspection:v2-edge-20260810-v6-r3` was packaged as a
+  1,172,071,936-byte archive with SHA-256
+  `71008bdba3f0c9a70e9fec9a94bad84a016c588d0609404d54dc0897f5217d62`,
+  verified on Mac and robot, installed and activated. The running image config
+  digest is
+  `sha256:36bac21cf840ac47985f8bb3853bdf09c1031f215cd4628a14dbe1dff7f636bb`.
+  Startup reported LiDAR 9.8 Hz, IMU 74.2 Hz and odometry 9.8 Hz. Runtime and
+  motion bridge remained stopped, UDP 5005 remained unbound and no real-robot
+  runtime or patrol start was issued after deployment.
+
+### 2026-08-10 V6-r4 latest-cloud localization correction
+
+- The operator published generation 5 of `map-6855ba54ae11`, workspace
+  revision 4, with a 318.781 m route, 722 raw waypoints, a 2181 x 3225
+  allowed-area mask and a 2,104,686-point fixed map. The selected robot asset
+  matched the Mac selection; this was not a stale-map or publication failure.
+- Live evidence showed VGICP repeatedly finding the placed pose with 0.93--0.95
+  inlier ratio, 0.033--0.043 fitness MSE and only 0.009--0.021 m correction.
+  Recovery nevertheless cycled from two accepted confirmations to
+  `stale_input` and zero confirmations. Large-map recovery registration took
+  about 1.18--1.31 seconds while the accepted input-age limit remained 0.35
+  seconds, so the single-threaded callback replayed queued clouds after each
+  expensive registration. Restarting or resetting localization reproduced the
+  same scheduler defect and could not correct it.
+- The owned V2 localization patch now configures the cloud subscription as
+  sensor QoS with `KeepLast(1)`. A stale queued frame is discarded before
+  time-aligned odometry lookup, initial evidence accumulation or VGICP work;
+  the discard updates diagnostic status but does not call the localization
+  failure state machine and does not clear an existing recovery-confirmation
+  cluster. The three required candidates therefore remain independent fresh
+  frames, while the protection against the earlier 3.58 m false jump remains.
+- Offline receipt: 102 tests pass; Python compilation, container-contract,
+  generated-knowledge and diff checks pass; the owned patch applies cleanly to
+  the frozen stack. The complete Linux/ARM64 image compiled all ten ROS
+  packages, including `go2_map_manager`, and an in-image check verified the
+  latest-only QoS, stale-discard status field and sealed V2 quality profile.
+- Static deployment receipt: release
+  `gogoguard-robot-inspection:v2-edge-20260810-v6-r4` has local manifest-list
+  digest
+  `sha256:b8ca1b65ede57fa0f7ca2cfefa3c1490b905717aa3681d245128fa4e9081269c`.
+  Its 1,172,074,496-byte archive passed SHA-256 on Mac and robot with digest
+  `a5e9a391da62974e741b577a198d48e5599a4fa15d70f2b35161b02b795d9e19`;
+  the running robot config digest is
+  `sha256:76aaf66dd2234694e564d9777a122d7c1051d1636f02616a67195aa7dbc33d56`.
+  The service is active and enabled with LiDAR 10.0 Hz, IMU 42.9 Hz and
+  odometry 10.0 Hz. Exactly one navigation supervisor is present; Nav2 and the
+  Unitree motion bridge remain stopped, UDP 5005 is unbound and no movement or
+  localization-start command was issued after deployment. Real fresh-three-
+  frame localization remains the next operator-authorized receipt.
+
+### 2026-08-10 V6-r4 operator field acceptance
+
+- The operator subsequently ran the V6-r4 candidate and reported the run as
+  satisfactory, authorizing this navigation/map revision as the release
+  baseline for the next combined inspection and realtime-interaction phase.
+- Mac-synchronized production IncidentBundles cover route progress from 0.6%
+  through approximately 32% on runtime instance
+  `a9fe102280064f3486a4d4477a85f81c`, map `map-6855ba54ae11` and route
+  `route-6855ba54ae11-workspace-r4`. They show multiple short
+  `LOCALIZATION_NOT_TRACKING` or `LOCALIZATION_POSE_STALE` holds followed by
+  automatic continuation, with `resumeCount` increasing to at least 6. This
+  is direct evidence that the old queued-cloud behavior no longer clears the
+  recovery cluster into a permanent lockout.
+- Those synchronized bundles are partial, contain only one sampled decision
+  each and do not include the final runtime trace. They independently prove
+  recovery behavior only through the retained 32% window; they do not prove a
+  100% 318 m route completion. The release decision therefore records the
+  operator's full-run acceptance separately from the bounded machine evidence
+  instead of overstating the retained receipt.
+- No additional navigation parameter change is justified by this acceptance.
+  The V6 mobility implementation is frozen as the integration baseline;
+  realtime dialogue, checkpoint actions and platform judgment must be added as
+  separate modules and must not take ownership of `cmd_vel`.
 
 ### Latest verified patrol and current diagnosis
 
@@ -346,15 +534,16 @@ boundaries and receipts to distinguish them.
 
 ### Development roadmap and current priorities
 
-1. **P0 — finish the repeatable mobility loop.** Explain and correct MPPI's
-   low clear-route output from trajectory/critic evidence; field-accept a
-   physically passable A* -> DetourPath -> MPPI rejoin; field-accept
-   localization-loss resume and remote-control release from active patrol and
-   `FAULT`. Do not weaken obstacle safety to solve a controller-speed issue.
-2. **P1 — make maps and routes real operator assets.** Add a clear map quality
-   review/approval workflow, expose useful pre/post-GLIM artifacts, support an
-   independent graphical route editor with validation, and make select/load/
-   rename/version/rollback semantics unambiguous in the workstation.
+1. **P0 — promote and field-accept the simplified mobility loop.** After a safe
+   stationary deployment, verify the three-candidate VGICP recovery anchor,
+   one-MPPI clear route, a physically passable Smac bypass/rejoin, continuous
+   no-path retry and operator stop/release. Do not weaken the one emergency
+   circle or receiver limits to solve controller speed.
+2. **P1 — use the new map assets on a real site.** Clean one GLIM map when
+   needed, draw and save its green allowed area, review the blue route and
+   publish the resulting immutable child/candidate. Then improve version
+   comparison and approval wording from operator feedback rather than adding
+   more map layers speculatively.
 3. **P2 — build actual inspection execution.** Implement checkpoint actions,
    photo/video evidence, inspection result contracts, and the mission state
    machine that composes route travel with those actions. Keep algorithm
@@ -1216,3 +1405,27 @@ segments still average only about 0.36--0.38 m/s before changing another
 parameter; do not attribute the measured limit to collision handling. The
 terminal dead-end stop and normal MPPI travel are already field verified; do
 not weaken obstacle thresholds to make an actually sealed path appear passable.
+
+## Next experiment (2026-08-10; supersedes all older paragraphs)
+
+Freeze V6-r4 as the operator-accepted mobility baseline and integrate the
+preserved realtime-dialogue branch without changing navigation ownership. The
+next product slice is one combined, contract-driven checkpoint inspection:
+
+1. merge and statically verify the independent `interaction` module with its
+   default-disabled activation policy;
+2. define explicit `mission`, `inspection`, `device_io`, `interaction` and
+   platform boundaries, including capability declaration and unsupported
+   hardware behavior;
+3. prove one checkpoint sequence: navigation reaches the configured point,
+   mission requests a true stop and receives its receipt, inspection captures
+   the configured views, the platform stores/judges the evidence, and only a
+   platform continue request can resume the remaining route; and
+4. accept patrol and interaction first in separate zero-motion/static checks,
+   then concurrently while retaining localization, command, media and thermal
+   evidence.
+
+Passable-obstacle/rejoin and a complete retained full-route trace remain useful
+mobility repeatability receipts, but they are no longer blockers for freezing
+the user-accepted V6 release baseline. Do not add another controller, safety
+layer or direct interaction-to-motion path as a shortcut.

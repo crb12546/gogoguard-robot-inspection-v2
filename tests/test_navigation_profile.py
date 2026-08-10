@@ -20,8 +20,8 @@ class NavigationProfileTest(unittest.TestCase):
         self.assertEqual(profile["motion"]["accelerationMps2"], 0.90)
         self.assertEqual(profile["motion"]["decelerationMps2"], 0.90)
         self.assertEqual(profile["motion"]["turnSpeedRadps"], 0.40)
-        self.assertEqual(profile["avoidance"]["slowZoneHalfWidthM"], 0.30)
-        self.assertEqual(profile["motion"]["detourSpeedMps"], 0.40)
+        self.assertNotIn("detourSpeedMps", profile["motion"])
+        self.assertNotIn("slowZoneHalfWidthM", profile["avoidance"])
         self.assertEqual(profile["recovery"]["progressTimeoutS"], 5.0)
         self.assertEqual(profile["recovery"]["replanIntervalS"], 0.75)
         self.assertEqual(profile["controller"]["batchSize"], 1000)
@@ -38,10 +38,10 @@ class NavigationProfileTest(unittest.TestCase):
             "accelerationMps2": 0.9,
         }
         migrated = validate_profile(legacy)
-        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v5")
+        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v6")
         self.assertEqual(migrated["motion"]["targetCruiseMps"], 0.9)
         self.assertEqual(migrated["motion"]["maxForwardMps"], 0.9)
-        self.assertEqual(migrated["motion"]["detourSpeedMps"], 0.7)
+        self.assertNotIn("detourSpeedMps", migrated["motion"])
         self.assertEqual(migrated["motion"]["turnSpeedRadps"], 0.6)
         self.assertEqual(migrated["motion"]["lateralSpeedMps"], 0.2)
         self.assertEqual(migrated["controller"]["batchSize"], 1000)
@@ -65,8 +65,8 @@ class NavigationProfileTest(unittest.TestCase):
             }
         )
         migrated = validate_profile(legacy)
-        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v5")
-        self.assertEqual(migrated["motion"]["detourSpeedMps"], 0.40)
+        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v6")
+        self.assertNotIn("detourSpeedMps", migrated["motion"])
         self.assertEqual(migrated["motion"]["turnSpeedRadps"], 0.40)
         self.assertEqual(migrated["motion"]["accelerationMps2"], 0.90)
         self.assertEqual(migrated["motion"]["decelerationMps2"], 0.90)
@@ -82,9 +82,13 @@ class NavigationProfileTest(unittest.TestCase):
             "map_version": "map-aaaaaaaaaaaa",
             "route": "/maps/route.json",
             "runtime_profile": "/maps/runtime_profile.json",
+            "allowed_area_mask": "/maps/allowed-area-mask.yaml",
+            "allowed_area_mask_image": "/maps/allowed-area-mask.pgm",
             "localization_map_hash": "map-hash",
             "route_hash": "route-hash",
             "runtime_profile_hash": "profile-hash",
+            "allowed_area_mask_hash": "mask-hash",
+            "allowed_area_mask_image_hash": "mask-image-hash",
         }
         arguments = NavigationManager._launch_arguments(
             candidate,
@@ -106,16 +110,21 @@ class NavigationProfileTest(unittest.TestCase):
         legacy.pop("recovery")
         legacy["avoidance"]["blockedDecisionS"] = 3.5
         migrated = validate_profile(legacy)
-        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v5")
+        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v6")
         self.assertEqual(migrated["recovery"]["progressTimeoutS"], 3.5)
         self.assertNotIn("blockedDecisionS", migrated["avoidance"])
 
-    def test_invalid_slow_zone_cannot_be_saved(self):
+    def test_v5_safety_rectangles_are_discarded_during_migration(self):
         profile = validate_profile(DEFAULT_PROFILE)
-        profile["avoidance"]["slowZoneHalfWidthM"] = 0.25
-        profile["avoidance"]["stopZoneHalfWidthM"] = 0.30
-        with self.assertRaisesRegex(ProfileError, "减速区"):
-            validate_profile(profile)
+        profile["schema"] = "gogoguard.navigation_profile.v5"
+        profile["avoidance"].update(
+            {"stopZoneFrontM": 0.55, "slowZoneFrontM": 1.0, "slowdownRatio": 0.85}
+        )
+        migrated = validate_profile(profile)
+        self.assertEqual(migrated["schema"], "gogoguard.navigation_profile.v6")
+        self.assertNotIn("stopZoneFrontM", migrated["avoidance"])
+        self.assertNotIn("slowZoneFrontM", migrated["avoidance"])
+        self.assertNotIn("slowdownRatio", migrated["avoidance"])
 
     def test_mppi_compute_budget_is_bounded(self):
         profile = validate_profile(DEFAULT_PROFILE)

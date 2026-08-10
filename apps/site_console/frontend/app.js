@@ -6,6 +6,11 @@ const state = {
   mapSelectionExplicit: false,
   editingMapId: null,
   mapArtifact: null,
+  glimEditor: null,
+  navigationWorkspace: null,
+  savedNavigationWorkspace: null,
+  workspaceEditMode: null,
+  workspaceTransform: null,
   navigation: null,
   live: null,
   camera: null,
@@ -89,10 +94,10 @@ const operationMessageText = operation => {
 const patrolStepStateText = runtime => {
   const labels = {
     STARTING: '请求确认中',
-    PATROLLING: runtime.reason === 'LOCAL_DETOUR_ACCEPTED' ? '绕障中' : '巡检中',
+    PATROLLING: runtime.reason === 'NAV2_GLOBAL_PATH_USING_MPPI' ? '绕障中' : '巡检中',
     REPLANNING: '规划绕障中',
-    DETOURING: '提交局部绕行中',
-    REJOINING: '交还 MPPI 中',
+    DETOURING: 'MPPI 执行绕行中',
+    REJOINING: '恢复蓝色路线中',
     RETRYING: 'MPPI 自动重试中',
     RECOVERING: '自动恢复中',
     SEARCHING_PATH: '持续寻路中',
@@ -328,11 +333,234 @@ async function showResult(job, {explicit = false} = {}) {
   document.querySelector('.map-review').style.display = 'grid';
   $('overview').src = job.overview_url;
   state.mapArtifact = await api(job.point_cloud_url);
+  state.navigationWorkspace = await api(
+    `/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/navigation-workspace`,
+  );
+  try {
+    state.glimEditor = await api(
+      `/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/glim-editor`,
+    );
+  } catch (_) {
+    state.glimEditor = {state: 'unavailable'};
+  }
+  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.workspaceEditMode = null;
   const mapName = job.label ? `${job.label} · ${job.job_id}` : job.job_id;
   $('resultMeta').textContent = `${mapName} · ${job.metrics?.point_count || state.mapArtifact.points.length} 点 · ${job.metrics?.worker || 'cloud-glim'}`;
   redrawResult();
+  drawWorkspace();
+  renderWorkspaceControls();
   renderMapHistory();
   drawNavigation();
+}
+
+function workspaceBounds() {
+  const points = (state.mapArtifact?.points || []).map(point => [point[0], point[1]]);
+  const route = state.navigationWorkspace?.route || [];
+  const area = state.navigationWorkspace?.allowedArea || [];
+  const all = points.concat(route, area);
+  if (!all.length) return null;
+  const minX = Math.min(...all.map(point => point[0]));
+  const maxX = Math.max(...all.map(point => point[0]));
+  const minY = Math.min(...all.map(point => point[1]));
+  const maxY = Math.max(...all.map(point => point[1]));
+  return {minX, maxX, minY, maxY};
+}
+
+function drawWorkspace() {
+  const canvas = $('workspaceMap');
+  const [context, width, height] = sizeCanvas(canvas);
+  context.fillStyle = '#07111f';
+  context.fillRect(0, 0, width, height);
+  const bounds = workspaceBounds();
+  if (!bounds) {
+    state.workspaceTransform = null;
+    return;
+  }
+  const padding = 42;
+  const spanX = Math.max(bounds.maxX - bounds.minX, 1.0);
+  const spanY = Math.max(bounds.maxY - bounds.minY, 1.0);
+  const scale = Math.min((width - 2 * padding) / spanX, (height - 2 * padding) / spanY);
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+  const worldToCanvas = point => [
+    offsetX + (point[0] - bounds.minX) * scale,
+    height - offsetY - (point[1] - bounds.minY) * scale,
+  ];
+  state.workspaceTransform = {bounds, scale, offsetX, offsetY, height};
+  const area = state.navigationWorkspace?.allowedArea || [];
+  if (area.length >= 2) {
+    context.beginPath();
+    area.forEach((point, index) => {
+      const value = worldToCanvas(point);
+      index ? context.lineTo(...value) : context.moveTo(...value);
+    });
+    if (area.length >= 3) context.closePath();
+    context.fillStyle = '#4ade8026';
+    context.fill();
+    context.strokeStyle = '#4ade80';
+    context.lineWidth = 3;
+    context.stroke();
+  }
+  context.fillStyle = '#94a3b87d';
+  const points = state.mapArtifact?.points || [];
+  for (let index = 0; index < points.length; index += 2) {
+    const point = worldToCanvas(points[index]);
+    context.fillRect(point[0], point[1], 1.5, 1.5);
+  }
+  const route = state.navigationWorkspace?.route || [];
+  if (route.length) {
+    context.strokeStyle = '#22d3ee';
+    context.lineWidth = 3;
+    context.beginPath();
+    route.forEach((point, index) => {
+      const value = worldToCanvas(point);
+      index ? context.lineTo(...value) : context.moveTo(...value);
+    });
+    context.stroke();
+    context.fillStyle = '#a5f3fc';
+    route.forEach(point => {
+      const value = worldToCanvas(point);
+      context.beginPath(); context.arc(value[0], value[1], 3.5, 0, Math.PI * 2); context.fill();
+    });
+  }
+}
+
+function recordedWorkspaceRoute() {
+  const raw = (state.mapArtifact?.trajectory || []).map(point => [Number(point[0]), Number(point[1])]);
+  if (raw.length < 2) return [];
+  const sampled = [raw[0]];
+  for (const point of raw.slice(1)) {
+    const last = sampled[sampled.length - 1];
+    if (Math.hypot(point[0] - last[0], point[1] - last[1]) >= 0.4) sampled.push(point);
+  }
+  const last = raw[raw.length - 1];
+  const sampledLast = sampled[sampled.length - 1];
+  if (Math.hypot(last[0] - sampledLast[0], last[1] - sampledLast[1]) >= 0.1) sampled.push(last);
+  return sampled;
+}
+
+function renderWorkspaceControls() {
+  const workspace = state.navigationWorkspace;
+  const editing = Boolean(state.workspaceEditMode);
+  $('workspaceBadge').textContent = !workspace
+    ? '请先选地图'
+    : workspace.ready ? `可发布 · 版本 ${workspace.revision}` : '等待绿色允许范围';
+  $('workspaceBadge').className = workspace?.ready ? 'online' : '';
+  $('workspaceHelp').textContent = state.workspaceEditMode === 'route'
+    ? '请在地图上依次点击路线点；机器狗会按蓝线前进，需要时再由 Nav2 绕行。'
+    : state.workspaceEditMode === 'area'
+      ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。蓝线与边界至少留出 0.48 m。'
+      : workspace?.ready
+        ? '已准备好：路线和允许范围会随地图一起发布，任何修改都会生成新版本。'
+        : '蓝色录制路线已就绪；再画一块绿色允许范围即可发布。';
+  for (const id of ['editRoute', 'restoreRecordedRoute', 'editAllowedArea']) $(id).disabled = !workspace || editing;
+  $('undoWorkspacePoint').disabled = !editing;
+  $('cancelWorkspaceEdit').disabled = !editing;
+  $('saveWorkspace').disabled = !workspace;
+  const editor = state.glimEditor || {state: 'not_started'};
+  const editorActive = editor.state === 'active';
+  $('startGlimEditor').hidden = editorActive;
+  $('openGlimEditor').hidden = !editorActive || !editor.url;
+  $('publishGlimEditor').hidden = !['active', 'tunnel_closed'].includes(editor.state);
+  $('stopGlimEditor').hidden = !['active', 'tunnel_closed'].includes(editor.state);
+  $('startGlimEditor').disabled = !workspace;
+  $('glimEditorState').textContent = editorActive
+    ? '官方 GLIM 清图工作台已打开。删除临时人车后，务必点 File -> Save map 并选择 SAVED_MAP，再回来生成新版本。'
+    : editor.state === 'published'
+      ? `清理结果已生成新地图 ${editor.publishedJobId || ''}，原地图未修改。`
+      : editor.state === 'tunnel_closed'
+        ? '云端编辑会话还在，但 Mac 浏览器通道已断开；可直接导出已保存的结果。'
+        : '需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。';
+}
+
+async function startGlimEditor() {
+  if (!state.latestMapJob) return;
+  $('workspaceError').textContent = '';
+  const editorWindow = window.open('about:blank', 'gogoguard-glim-editor');
+  try {
+    state.glimEditor = await post(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/glim-editor/start`,
+    );
+    renderWorkspaceControls();
+    if (editorWindow) editorWindow.location = state.glimEditor.url;
+    else window.open(state.glimEditor.url, '_blank', 'noopener');
+  } catch (error) {
+    if (editorWindow) editorWindow.close();
+    $('workspaceError').textContent = friendlyError(error);
+  }
+}
+
+function openGlimEditor() {
+  if (state.glimEditor?.url) window.open(state.glimEditor.url, '_blank', 'noopener');
+}
+
+async function publishGlimEditor() {
+  if (!state.latestMapJob) return;
+  $('workspaceError').textContent = '';
+  $('publishGlimEditor').disabled = true;
+  $('glimEditorState').textContent = '正在云端导出清理后的点云并生成新地图版本，请等待……';
+  try {
+    const result = await post(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/glim-editor/publish`,
+    );
+    await refreshMapJobs();
+    const created = state.mapJobs.find(item => item.job_id === result.mapJob.job_id) || result.mapJob;
+    await showResult(created, {explicit: true});
+  } catch (error) {
+    $('workspaceError').textContent = friendlyError(error);
+    $('publishGlimEditor').disabled = false;
+  }
+}
+
+async function stopGlimEditor() {
+  if (!state.latestMapJob) return;
+  try {
+    state.glimEditor = await post(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/glim-editor/stop`,
+    );
+    renderWorkspaceControls();
+  } catch (error) {
+    $('workspaceError').textContent = friendlyError(error);
+  }
+}
+
+function workspaceCanvasPoint(event) {
+  const transform = state.workspaceTransform;
+  if (!transform) return null;
+  const bounds = $('workspaceMap').getBoundingClientRect();
+  const x = event.clientX - bounds.left;
+  const y = event.clientY - bounds.top;
+  return [
+    transform.bounds.minX + (x - transform.offsetX) / transform.scale,
+    transform.bounds.minY + (transform.height - transform.offsetY - y) / transform.scale,
+  ];
+}
+
+async function saveNavigationWorkspace() {
+  if (!state.latestMapJob || !state.navigationWorkspace) return;
+  $('workspaceError').textContent = '';
+  $('saveWorkspace').disabled = true;
+  try {
+    const payload = {
+      route: state.navigationWorkspace.route,
+      allowedArea: state.navigationWorkspace.allowedArea,
+      routeSource: state.navigationWorkspace.routeSource,
+      robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
+    };
+    state.navigationWorkspace = await post(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-workspace`,
+      payload,
+    );
+    state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+    state.workspaceEditMode = null;
+    $('workspaceHelp').textContent = '已保存；这一版路线和允许范围会与地图绑定。';
+    drawWorkspace();
+    renderWorkspaceControls();
+  } catch (error) {
+    $('workspaceError').textContent = friendlyError(error);
+    renderWorkspaceControls();
+  }
 }
 
 function renderMapHistory() {
@@ -392,10 +620,13 @@ function drawNavigation() {
   context.fillStyle = '#07111f';
   context.fillRect(0, 0, width, height);
   const points = state.mapArtifact?.points || [];
-  const route = state.navigation?.route || [];
+  const route = state.navigation?.route?.length
+    ? state.navigation.route
+    : state.navigationWorkspace?.route || [];
+  const allowedArea = state.navigationWorkspace?.allowedArea || [];
   const pose = state.navigation?.localization_pose;
   if (!points.length && !route.length) return;
-  const all = points.map(point => [point[0], point[1]]).concat(route);
+  const all = points.map(point => [point[0], point[1]]).concat(route, allowedArea);
   if (pose) all.push([pose.x, pose.y]);
   const minX = Math.min(...all.map(point => point[0]));
   const maxX = Math.max(...all.map(point => point[0]));
@@ -407,6 +638,16 @@ function drawNavigation() {
     (height - padding * 2) / Math.max(maxY - minY, 0.1),
   );
   const xy = point => [padding + (point[0] - minX) * scale, height - padding - (point[1] - minY) * scale];
+  if (allowedArea.length >= 3) {
+    context.beginPath();
+    allowedArea.forEach((point, index) => {
+      const value = xy(point);
+      index ? context.lineTo(...value) : context.moveTo(...value);
+    });
+    context.closePath();
+    context.fillStyle = '#4ade801f'; context.fill();
+    context.strokeStyle = '#4ade80'; context.lineWidth = 2.5; context.stroke();
+  }
   context.fillStyle = '#64748b99';
   for (let index = 0; index < points.length; index += 2) {
     const point = xy(points[index]); context.fillRect(point[0], point[1], 1.5, 1.5);
@@ -435,7 +676,16 @@ function renderNavigation() {
   const runtimeRunning = Boolean(navigation.runtime_process?.running);
   const motionBridgeRunning = Boolean(navigation.motion_bridge?.running);
   const selectedJobId = state.latestMapJob?.job_id;
-  const assetReady = Boolean(candidate && selectedJobId && candidate.map_job_id === selectedJobId);
+  const workspaceReady = Boolean(state.navigationWorkspace?.ready && !state.workspaceEditMode);
+  const candidateGeneration = Number(candidate?.candidate_generation || 0);
+  const assetReady = Boolean(
+    candidate
+    && selectedJobId
+    && candidate.map_job_id === selectedJobId
+    && candidateGeneration >= 5
+    && state.navigationWorkspace?.workspaceHash
+    && candidate.workspace_hash === state.navigationWorkspace.workspaceHash
+  );
   const runtimeMapId = runtime.mapVersion || localization.mapVersion;
   const runtimeMatchesCandidate = Boolean(
     runtimeRunning && candidate && runtimeMapId && runtimeMapId === candidate.map_version
@@ -471,7 +721,7 @@ function renderNavigation() {
 
   $('assetStepState').textContent = assetReady
     ? (runtimeRunning && !runtimeMatchesCandidate ? '已发布，待切换' : '已发布')
-    : (selectedJobId ? '待发布' : '未选择');
+    : (selectedJobId ? (workspaceReady ? '待发布' : '待保存绿色范围') : '未选择');
   $('assetStep').classList.toggle('done', assetReady);
   $('runtimeStepState').textContent = runtimeRunning
     ? (!runtimeMatchesCandidate ? '运行旧地图' : (localization.usable ? '定位可用' : '定位中'))
@@ -481,7 +731,8 @@ function renderNavigation() {
   $('patrolStep').classList.toggle('done', runtime.state === 'COMPLETED');
 
   let guidance = '请从历史中选择一张可用地图。';
-  if (selectedJobId && !assetReady) guidance = '下一步：将所选地图和当时录制的路线发布到机器狗。';
+  if (selectedJobId && !workspaceReady) guidance = '下一步：先在上方工作台画出并保存绿色允许范围。';
+  else if (selectedJobId && !assetReady) guidance = '下一步：将所选地图、蓝色路线和绿色允许范围重新发布到机器狗。';
   else if (assetReady && !runtimeRunning) guidance = '地图已在机器狗上。下一步：启动定位与 Nav2。';
   else if (assetReady && runtimeRunning && !runtimeMatchesCandidate) guidance = `新地图已经发布，但 Nav2 仍运行 ${runtimeMapId || '上一张地图'}。下一步：切换到所选地图并重启 Nav2。`;
   else if (runtimeRunning && !localization.usable) guidance = '正在地图中定位，请让机器狗站稳等待；无需重复点击。';
@@ -489,12 +740,12 @@ function renderNavigation() {
   if (runtime.state === 'STARTING') guidance = '开始请求正在由 Nav2 确认；这还不代表整条路线已经完成。';
   if (runtime.state === 'PATROLLING') guidance = '巡检正在进行；地图上会显示位置和路线进度。需要中断或改用遥控器时，点击“停止巡检并释放遥控权”。';
   if (runtime.state === 'REPLANNING') guidance = '原路线局部受阻，正在根据当前代价地图规划绕行并接回前方路线。';
-  if (runtime.state === 'DETOURING') guidance = '代价地图已确认原路线前方被占用，正只向 RPP 提交到重入点的局部绕行路径。';
-  if (runtime.state === 'REJOINING') guidance = 'RPP 已到达重入点，正将未完成的录制路线交还 MPPI。';
+  if (runtime.state === 'DETOURING') guidance = 'Nav2 已找到绕行路径，仍由同一个 MPPI 控制机器狗接回蓝色路线。';
+  if (runtime.state === 'REJOINING') guidance = '已接回蓝色路线，MPPI 继续完成剩余巡检。';
   if (runtime.state === 'RETRYING') guidance = '原路线前方没有确认障碍，正从当前进度自动重试 MPPI，不会误入绕行。';
   if (runtime.state === 'RECOVERING') guidance = '控制或代价地图短暂中断，任务和当前进度已保留，系统会持续自动恢复。';
   if (runtime.state === 'SEARCHING_PATH') guidance = '原路线已确认受阻，系统会按固定频率不断重新寻路，只有操作员停止才会结束。';
-  if (runtime.state === 'PATROLLING' && runtime.reason === 'LOCAL_DETOUR_ACCEPTED') guidance = '已找到绕行路径：机器狗会先对准绕行方向，再以有效步态接回原路线。';
+  if (runtime.state === 'PATROLLING' && runtime.reason === 'NAV2_GLOBAL_PATH_USING_MPPI') guidance = '已找到绕行路径：同一个 MPPI 会沿 Nav2 规划结果接回蓝色路线。';
   if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；需要遥控机器狗时先点击“停止巡检并释放遥控权”，需要继续测试时再启动定位与 Nav2。`;
@@ -507,7 +758,7 @@ function renderNavigation() {
 
   $('prepareNavigation').hidden = assetReady || !selectedJobId;
   $('prepareNavigationHelp').hidden = $('prepareNavigation').hidden;
-  $('prepareNavigation').disabled = !selectedJobId || operationBusy;
+  $('prepareNavigation').disabled = !selectedJobId || !workspaceReady || operationBusy;
   $('startRuntime').hidden = !assetReady || runtimeRunning;
   $('startRuntimeHelp').hidden = $('startRuntime').hidden;
   $('startRuntime').disabled = !candidate || operationBusy;
@@ -557,17 +808,11 @@ function fillProfile(profile) {
   $('maxForwardSpeed').value = profile.motion.maxForwardMps;
   $('acceleration').value = profile.motion.accelerationMps2;
   $('deceleration').value = profile.motion.decelerationMps2;
-  $('detourSpeed').value = profile.motion.detourSpeedMps;
   $('turnSpeed').value = profile.motion.turnSpeedRadps;
   $('lateralSpeed').value = profile.motion.lateralSpeedMps;
-  $('slowHalfWidth').value = profile.avoidance.slowZoneHalfWidthM;
-  $('slowdownRatio').value = profile.avoidance.slowdownRatio;
   $('progressTimeout').value = profile.recovery.progressTimeoutS;
   $('dropoutGrace').value = profile.localization.dropoutGraceS;
   $('rejoinLookahead').value = profile.avoidance.rejoinLookaheadM;
-  $('stopFront').value = profile.avoidance.stopZoneFrontM;
-  $('stopHalfWidth').value = profile.avoidance.stopZoneHalfWidthM;
-  $('slowFront').value = profile.avoidance.slowZoneFrontM;
   $('localizationTimeout').value = profile.localization.statusTimeoutS;
   $('recoveryStable').value = profile.localization.recoveryStableS;
   $('controllerFrequency').value = profile.controller.frequencyHz;
@@ -592,17 +837,11 @@ async function saveProfile() {
   profile.motion.maxForwardMps = Number($('maxForwardSpeed').value);
   profile.motion.accelerationMps2 = Number($('acceleration').value);
   profile.motion.decelerationMps2 = Number($('deceleration').value);
-  profile.motion.detourSpeedMps = Number($('detourSpeed').value);
   profile.motion.turnSpeedRadps = Number($('turnSpeed').value);
   profile.motion.lateralSpeedMps = Number($('lateralSpeed').value);
-  profile.avoidance.slowZoneHalfWidthM = Number($('slowHalfWidth').value);
-  profile.avoidance.slowdownRatio = Number($('slowdownRatio').value);
   profile.recovery.progressTimeoutS = Number($('progressTimeout').value);
   profile.localization.dropoutGraceS = Number($('dropoutGrace').value);
   profile.avoidance.rejoinLookaheadM = Number($('rejoinLookahead').value);
-  profile.avoidance.stopZoneFrontM = Number($('stopFront').value);
-  profile.avoidance.stopZoneHalfWidthM = Number($('stopHalfWidth').value);
-  profile.avoidance.slowZoneFrontM = Number($('slowFront').value);
   profile.localization.statusTimeoutS = Number($('localizationTimeout').value);
   profile.localization.recoveryStableS = Number($('recoveryStable').value);
   profile.controller.frequencyHz = Number($('controllerFrequency').value);
@@ -886,6 +1125,64 @@ $('resetMapView').addEventListener('click', () => {
   Object.assign(state.views.result, {yaw: 0.7, pitch: 0.55, zoom: 18});
   redrawResult();
 });
+$('editRoute').addEventListener('click', () => {
+  if (!state.navigationWorkspace) return;
+  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.navigationWorkspace.route = [];
+  state.navigationWorkspace.routeSource = 'edited';
+  state.workspaceEditMode = 'route';
+  $('workspaceError').textContent = '';
+  drawWorkspace(); renderWorkspaceControls();
+});
+$('restoreRecordedRoute').addEventListener('click', () => {
+  if (!state.navigationWorkspace) return;
+  const route = recordedWorkspaceRoute();
+  if (route.length < 2) {
+    $('workspaceError').textContent = '当前地图没有可用的录制路线';
+    return;
+  }
+  state.navigationWorkspace.route = route;
+  state.navigationWorkspace.routeSource = 'recorded';
+  $('workspaceError').textContent = '';
+  drawWorkspace(); renderWorkspaceControls();
+});
+$('editAllowedArea').addEventListener('click', () => {
+  if (!state.navigationWorkspace) return;
+  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.navigationWorkspace.allowedArea = [];
+  state.workspaceEditMode = 'area';
+  $('workspaceError').textContent = '';
+  drawWorkspace(); renderWorkspaceControls();
+});
+$('undoWorkspacePoint').addEventListener('click', () => {
+  if (!state.workspaceEditMode || !state.navigationWorkspace) return;
+  const key = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
+  state.navigationWorkspace[key].pop();
+  drawWorkspace();
+});
+$('cancelWorkspaceEdit').addEventListener('click', () => {
+  if (!state.savedNavigationWorkspace) return;
+  state.navigationWorkspace = structuredClone(state.savedNavigationWorkspace);
+  state.workspaceEditMode = null;
+  $('workspaceError').textContent = '';
+  drawWorkspace(); renderWorkspaceControls();
+});
+$('saveWorkspace').addEventListener('click', saveNavigationWorkspace);
+$('startGlimEditor').addEventListener('click', startGlimEditor);
+$('openGlimEditor').addEventListener('click', openGlimEditor);
+$('publishGlimEditor').addEventListener('click', publishGlimEditor);
+$('stopGlimEditor').addEventListener('click', stopGlimEditor);
+$('workspaceMap').addEventListener('click', event => {
+  if (!state.workspaceEditMode || !state.navigationWorkspace) return;
+  const point = workspaceCanvasPoint(event);
+  if (!point) return;
+  const key = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
+  const values = state.navigationWorkspace[key];
+  const last = values[values.length - 1];
+  if (last && Math.hypot(point[0] - last[0], point[1] - last[1]) < 0.02) return;
+  values.push(point.map(value => Number(value.toFixed(3))));
+  drawWorkspace();
+});
 async function handleMapClick(event) {
   const row = event.target.closest('[data-map-job]');
   if (!row) return;
@@ -1000,6 +1297,7 @@ attachCloudControls($('incidentCloud'), state.views.incident, renderIncidentFram
 addEventListener('resize', () => {
   renderLive();
   redrawResult();
+  drawWorkspace();
   drawNavigation();
   renderIncidentFrame();
 });

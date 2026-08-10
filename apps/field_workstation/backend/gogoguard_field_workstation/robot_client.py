@@ -214,12 +214,22 @@ class RobotClient:
 
     def deploy_map(self, job: dict, artifact_root: Path) -> dict:
         artifact_root = Path(artifact_root)
+        sources = {
+            path.name: path
+            for path in artifact_root.iterdir()
+            if path.is_file() and not path.name.startswith(".")
+        }
+        workspace_path = artifact_root.parent / "navigation-workspace.json"
+        if workspace_path.is_file():
+            # The Mac keeps operator-edited blue/green workspace state outside
+            # immutable GLIM artifacts. The robot map-import bundle still
+            # carries that file so both the deployed V6 legacy reader and the
+            # corrected reader can prepare a generation-5 candidate.
+            sources[workspace_path.name] = workspace_path
         files = []
-        for path in sorted(artifact_root.iterdir()):
-            if not path.is_file() or path.name.startswith("."):
-                continue
+        for name, path in sorted(sources.items()):
             files.append(
-                {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
+                {"name": name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
             )
 
         remote_files: dict[str, dict] = {}
@@ -242,7 +252,7 @@ class RobotClient:
                 and str(remote.get("sha256", "")) == item["sha256"]
             ):
                 continue
-            path = artifact_root / item["name"]
+            path = sources[item["name"]]
             self._put_file(
                 f"api/v1/edge/map-imports/{job['job_id']}/artifacts/{quote(path.name, safe='')}",
                 path,

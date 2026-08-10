@@ -94,6 +94,25 @@ class NavigationManager:
         with self._lock:
             return dict(self._candidate) if self._candidate else None
 
+    @staticmethod
+    def _validate_runtime_candidate(candidate: dict[str, Any]) -> None:
+        required = {
+            "allowed_area_mask",
+            "allowed_area_mask_image",
+            "allowed_area_mask_hash",
+            "allowed_area_mask_image_hash",
+        }
+        missing = sorted(key for key in required if not candidate.get(key))
+        try:
+            generation = int(candidate.get("candidate_generation") or 0)
+        except (TypeError, ValueError):
+            generation = 0
+        if generation < 5 or missing:
+            raise RuntimeError(
+                "当前地图与路线是旧版本，还没有绿色允许范围；"
+                "请在 Mac 工作台保存绿色区域后，重新点击“发布所选地图与路线到机器狗”"
+            )
+
     def status(self) -> dict[str, Any]:
         candidate = self._loaded_candidate()
         runtime: dict[str, Any] = {}
@@ -141,9 +160,13 @@ class NavigationManager:
             f"candidate_localization_map:={candidate['localization_map']}",
             f"candidate_route:={candidate['route']}",
             f"candidate_runtime_profile:={candidate['runtime_profile']}",
+            f"candidate_allowed_area_mask:={candidate['allowed_area_mask']}",
+            f"candidate_allowed_area_mask_image:={candidate['allowed_area_mask_image']}",
             f"localization_map_hash:={candidate['localization_map_hash']}",
             f"route_hash:={candidate['route_hash']}",
             f"runtime_profile_hash:={candidate['runtime_profile_hash']}",
+            f"allowed_area_mask_hash:={candidate['allowed_area_mask_hash']}",
+            f"allowed_area_mask_image_hash:={candidate['allowed_area_mask_image_hash']}",
             "hardware_output_enabled:=true",
             "sdk_receiver_enabled:=false",
             "sdk_interface:=eth0",
@@ -152,18 +175,10 @@ class NavigationManager:
             f"sensor_id:={sensor_id}",
             f"target_cruise_mps:={motion['targetCruiseMps']}",
             f"max_forward_mps:={motion['maxForwardMps']}",
-            f"detour_speed_mps:={motion['detourSpeedMps']}",
             f"turn_speed_radps:={motion['turnSpeedRadps']}",
             f"lateral_speed_mps:={motion['lateralSpeedMps']}",
             f"acceleration_mps2:={motion['accelerationMps2']}",
             f"deceleration_mps2:={motion['decelerationMps2']}",
-            f"stop_zone_front_m:={avoidance['stopZoneFrontM']}",
-            f"stop_zone_rear_m:={avoidance['stopZoneRearM']}",
-            f"stop_zone_half_width_m:={avoidance['stopZoneHalfWidthM']}",
-            f"slow_zone_front_m:={avoidance['slowZoneFrontM']}",
-            f"slow_zone_rear_m:={avoidance['slowZoneRearM']}",
-            f"slow_zone_half_width_m:={avoidance['slowZoneHalfWidthM']}",
-            f"slowdown_ratio:={avoidance['slowdownRatio']}",
             f"rejoin_lookahead_m:={avoidance['rejoinLookaheadM']}",
             f"obstruction_cost_threshold:={avoidance['obstructionCostThreshold']}",
             f"obstruction_min_samples:={avoidance['obstructionMinSamples']}",
@@ -270,6 +285,7 @@ class NavigationManager:
         if not SAFE_ID.fullmatch(candidate_id):
             raise ValueError("invalid navigation candidate id")
         candidate = self.routes.get(candidate_id)
+        self._validate_runtime_candidate(candidate)
         already_running = False
         stale_generation = bool(
             (self._process and self._process.poll() is not None)

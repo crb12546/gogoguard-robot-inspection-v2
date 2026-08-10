@@ -11,6 +11,24 @@ checks = {
     installer: ["sha256sum --check", "docker load --input", "wait-clock-sync", "systemctl daemon-reload", "Service is not started or enabled"],
     cloud_adapter: ["/opt/go2/jobs/map-", "run_pipeline prepare-session", "run_pipeline run-session", "run_pipeline produce-review-artifacts", "overview.svg", "map.json"],
 }
+cloud_editor = cloud_adapter.parent / "gogoguard-glim-editor"
+cloud_exporter = cloud_adapter.parent / "export_glim_artifact.py"
+checks[cloud_editor] = [
+    "install/lib/glim_ros/map_editor",
+    "install/lib/glim_ros/offline_viewer",
+    "working-map",
+    "SAVED_MAP",
+    "x11vnc",
+    "websockify",
+    "127.0.0.1",
+    "systemd-run",
+]
+checks[cloud_exporter] = [
+    "parent_map_job_id",
+    "official-glim-map-editor",
+    "map.ply",
+    "glim-build.json",
+]
 for path, needles in checks.items():
     if not path.is_file():
         raise SystemExit(f"missing deployment file: {path}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import os
 import re
@@ -39,6 +40,11 @@ NAV2_CONFIG = (
     / "modules/navigation/ros/go2_nav2_runtime/config"
     / "go2_nav2_patrol.yaml"
 )
+NAV2_PROFILE_CONTRACT = (
+    ROOT
+    / "modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime"
+    / "nav2_profile_contract.py"
+)
 NAV2_LAUNCH = (
     ROOT
     / "modules/navigation/ros/go2_nav2_runtime/launch"
@@ -58,6 +64,30 @@ LOCALIZATION_V2_PATCH = ROOT / (
 
 
 class NavigationRuntimeCompatibilityTest(unittest.TestCase):
+    def test_circular_costmap_rejects_mppi_polygon_footprint_mode(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "test_nav2_profile_contract", NAV2_PROFILE_CONTRACT
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if module.yaml is None:
+            contract = NAV2_PROFILE_CONTRACT.read_text(encoding="utf-8")
+            self.assertIn('cost_critic.get("consider_footprint") is not False', contract)
+            return
+
+        metrics = module.validate_nav2_profile(NAV2_CONFIG)
+        self.assertEqual(metrics["robotRadiusM"], 0.48)
+        invalid = NAV2_CONFIG.read_text(encoding="utf-8").replace(
+            "consider_footprint: false", "consider_footprint: true", 1
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary) / "nav2.yaml"
+            candidate.write_text(invalid, encoding="utf-8")
+            with self.assertRaisesRegex(module.Nav2ProfileError, "circular robot"):
+                module.validate_nav2_profile(candidate)
+
     def test_trace_recorder_does_not_overwrite_rclpy_node_handle(self) -> None:
         tree = ast.parse(TRACE_RECORDER.read_text(encoding="utf-8"))
         assignments = []
@@ -247,6 +277,15 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertTrue(result["runtimeStopped"])
         self.assertTrue(result["motionBridgeStopped"])
 
+    def test_late_planner_callback_cannot_resurrect_an_operator_stop(self) -> None:
+        runtime_manager = RUNTIME_MANAGER.read_text(encoding="utf-8")
+        recovery = runtime_manager.split("def _schedule_recovery", 1)[1].split(
+            "def _continuation_goal_response_callback", 1
+        )[0]
+        self.assertIn("if self.stop_requested:", recovery)
+        self.assertIn('self.recovery_pending = ""', recovery)
+        self.assertIn('self.runtime_reason = "STOPPED"', recovery)
+
     def test_motion_bridge_uses_the_paired_unitree_dds_prefix(self) -> None:
         manager = NavigationManager.__new__(NavigationManager)
         with tempfile.TemporaryDirectory() as temporary:
@@ -312,50 +351,49 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         )
         self.assertIn("0.10 <= settings.speed_limit_mps <= 0.60", runtime_core)
         nav2_config = NAV2_CONFIG.read_text(encoding="utf-8")
-        self.assertIn("controller_plugins: [FollowPath, DetourPath]", nav2_config)
+        self.assertIn("controller_plugins: [FollowPath]", nav2_config)
         self.assertIn("vx_min: 0.20", nav2_config)
         self.assertIn("cost_weight: 8.0", nav2_config)
         self.assertIn(
-            "plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController",
+            "plugin: nav2_smac_planner/SmacPlanner2D",
             nav2_config,
         )
-        self.assertIn("desired_linear_vel: 0.40", nav2_config)
-        self.assertIn("use_rotate_to_heading: true", nav2_config)
-        detour_speed = float(
-            re.search(
-                r"DetourPath:.*?desired_linear_vel:\s*([0-9.]+)",
-                nav2_config,
-                re.DOTALL,
-            ).group(1)
-        )
-        slowdown_ratio = float(
-            re.search(
-                r"SlowZone:.*?slowdown_ratio:\s*([0-9.]+)",
-                nav2_config,
-                re.DOTALL,
-            ).group(1)
-        )
-        self.assertGreaterEqual(detour_speed * slowdown_ratio, 0.20)
+        self.assertIn("width: 24", nav2_config)
+        self.assertIn("height: 24", nav2_config)
+        self.assertGreaterEqual(nav2_config.count("filters: [keepout_filter]"), 2)
+        self.assertIn("plugin: nav2_costmap_2d::KeepoutFilter", nav2_config)
+        self.assertIn("robot_radius: 0.48", nav2_config)
+        self.assertIn("consider_footprint: false", nav2_config)
+        self.assertNotRegex(nav2_config, r"(?m)^\s+footprint:")
+        self.assertIn("polygons: [SafetyEnvelope]", nav2_config)
+        self.assertNotIn("DetourPath", nav2_config)
+        self.assertNotIn("SlowZone", nav2_config)
+        self.assertNotIn("FootprintApproach", nav2_config)
         self.assertIn("global_frame: map", nav2_config)
         self.assertIn("always_send_full_costmap: true", nav2_config)
         self.assertIn("plugins: [obstacle_layer, inflation_layer]", nav2_config)
         self.assertIn("plugin: nav2_costmap_2d::ObstacleLayer", nav2_config)
         self.assertIn("min_obstacle_height: 0.05", nav2_config)
         self.assertIn("min_height: 0.05", nav2_config)
-        self.assertGreaterEqual(nav2_config.count("max_points: 8"), 3)
+        self.assertEqual(nav2_config.count("max_points: 8"), 1)
         self.assertNotIn("nav2_costmap_2d::VoxelLayer", nav2_config)
         self.assertNotIn("origin_z:", nav2_config)
         runtime_manager = RUNTIME_MANAGER.read_text(encoding="utf-8")
-        self.assertIn('goal.controller_id = "DetourPath"', runtime_manager)
+        self.assertIn('goal.controller_id = "FollowPath"', runtime_manager)
+        self.assertIn("ComputePathToPose", runtime_manager)
+        self.assertIn("_try_global_replan", runtime_manager)
+        self.assertIn("ControllerMode.DETOUR_MPPI", runtime_manager)
         self.assertIn("route_obstruction_evidence", runtime_manager)
         self.assertIn("_request_mppi_suffix", runtime_manager)
+        self.assertNotIn("plan_detour_diagnostic", runtime_manager)
         self.assertNotIn("detour_in_map[:-1]", runtime_manager)
         launch = NAV2_LAUNCH.read_text(encoding="utf-8")
-        self.assertIn(
-            '"DetourPath.rotate_to_heading_angular_vel": turn_speed', launch
-        )
+        self.assertIn('executable="planner_server"', launch)
+        self.assertIn('executable="map_server"', launch)
+        self.assertIn('executable="costmap_filter_info_server"', launch)
         self.assertIn('"FollowPath.vx_std": forward_velocity_std', launch)
         self.assertIn("target_cruise * 0.50", launch)
+        self.assertNotIn("DetourPath", launch)
         self.assertNotIn("VelocityDeadbandCritic", nav2_config)
         self.assertNotIn("VelocityDeadbandCritic", launch)
         receiver = OWNED_RECEIVER.read_text(encoding="utf-8")
@@ -392,6 +430,29 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("local_map.radius_m: 32.0", patch)
         self.assertIn("max_scan_range: 24.0", patch)
         self.assertIn("GO2_VGICP_ORIN_V2", patch)
+        self.assertIn("recovery.confirmation_count: 3", patch)
+        self.assertIn(
+            "enforce_jump_limit = has_transform_ || recovery_search_active_",
+            patch,
+        )
+        self.assertIn("recovery_confirmation_pending", patch)
+        self.assertIn("pending_recovery_map_from_odom_", patch)
+
+    def test_localization_v2_drops_stale_cloud_backlog_without_resetting_recovery(self) -> None:
+        patch = LOCALIZATION_V2_PATCH.read_text(encoding="utf-8")
+        self.assertIn("cloud_qos.keep_last(1)", patch)
+        self.assertIn("cloud_topic_, cloud_qos", patch)
+        self.assertIn("staleInputDiscardCount", patch)
+
+        freshness_gate = patch.index(
+            "+    if (queued_input_age_s > thresholds_.max_input_age_s) {"
+        )
+        odometry_lookup = patch.index("     OdomSample odom;", freshness_gate)
+        stale_branch = patch[freshness_gate:odometry_lookup]
+        self.assertIn('last_assessment_.reason = "stale_input"', stale_branch)
+        self.assertIn("publish_status();", stale_branch)
+        self.assertNotIn("state_machine_.observe", stale_branch)
+        self.assertNotIn("recovery_confirmation_count_seen_ = 0", stale_branch)
 
     def test_runtime_exit_reaps_its_motion_bridge(self) -> None:
         class Process:
@@ -455,14 +516,19 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         receiver = Process(None, 999998)
         runtime = Process(1, 999999)
         candidate = {
+            "candidate_generation": 5,
             "candidate_id": "map-123456789abc",
             "map_version": "map-123456789abc",
             "localization_map": "/tmp/map.pcd",
             "route": "/tmp/route.json",
             "runtime_profile": "/tmp/runtime_profile.json",
+            "allowed_area_mask": "/tmp/allowed-area-mask.yaml",
+            "allowed_area_mask_image": "/tmp/allowed-area-mask.pgm",
             "localization_map_hash": "a",
             "route_hash": "b",
             "runtime_profile_hash": "c",
+            "allowed_area_mask_hash": "d",
+            "allowed_area_mask_image_hash": "e",
         }
 
         class Routes:
@@ -505,6 +571,15 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertEqual(manager._last_runtime_exit, 1)
         self.assertEqual(manager._last_receiver_exit, -2)
 
+    def test_old_candidate_is_rejected_before_motion_bridge_start(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "重新点击"):
+            NavigationManager._validate_runtime_candidate(
+                {
+                    "candidate_generation": 4,
+                    "candidate_id": "map-123456789abc",
+                }
+            )
+
     def test_mppi_forward_samples_clear_the_commissioned_gait_deadband(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")
         self.assertIn("vx_min: 0.20", config)
@@ -526,13 +601,12 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertLess(socket_bind, ready_banner)
         self.assertIn("return 8;", source[startup_stop:socket_bind])
 
-    def test_slow_zone_preserves_a_passable_corridor_and_effective_gait(self) -> None:
+    def test_one_visible_safety_envelope_replaces_layered_rectangles(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")
-        self.assertIn(
-            "points: [1.00, 0.30, 1.00, -0.30, -0.55, -0.30, -0.55, 0.30]",
-            config,
-        )
-        self.assertIn("slowdown_ratio: 0.85", config)
+        self.assertIn("polygons: [SafetyEnvelope]", config)
+        self.assertIn("radius: 0.48", config)
+        self.assertNotIn("action_type: slowdown", config)
+        self.assertNotIn("type: polygon", config)
 
     def test_diagnostics_names_a_blocked_patrol_instead_of_runnable(self) -> None:
         manager = NavigationManager.__new__(NavigationManager)

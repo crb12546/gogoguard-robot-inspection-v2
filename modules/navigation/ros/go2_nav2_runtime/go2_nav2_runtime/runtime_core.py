@@ -143,6 +143,8 @@ class RuntimeBundle:
     initialization_yaw_rad: float
     initialization_yaw_tolerance_deg: float
     localization_quality: LocalizationQualityProfile
+    allowed_area_mask_path: Optional[Path] = None
+    allowed_area_mask_image_path: Optional[Path] = None
     calibration_bundle_path: Optional[Path] = None
     calibration_hash: str = ""
     robot_id: str = ""
@@ -709,6 +711,16 @@ def load_runtime_bundle(
     profile_path = store.resolve_artifact(version_id, "runtime_profile")
     calibration_path = store.resolve_artifact(version_id, "calibration_bundle")
     try:
+        allowed_area_mask_path = store.resolve_artifact(
+            version_id, "allowed_area_mask"
+        )
+        allowed_area_mask_image_path = store.resolve_artifact(
+            version_id, "allowed_area_mask_image"
+        )
+    except (KeyError, OSError, ValueError):
+        allowed_area_mask_path = None
+        allowed_area_mask_image_path = None
+    try:
         calibration_payload = json.loads(calibration_path.read_text(encoding="utf-8"))
         calibration = ReleaseCalibrationBundle.from_dict(calibration_payload)
     except (OSError, ValueError) as exc:
@@ -743,6 +755,8 @@ def load_runtime_bundle(
         initialization_yaw_rad=initialization_yaw,
         initialization_yaw_tolerance_deg=initialization_yaw_tolerance,
         localization_quality=localization_quality,
+        allowed_area_mask_path=allowed_area_mask_path,
+        allowed_area_mask_image_path=allowed_area_mask_image_path,
         calibration_bundle_path=calibration_path,
         calibration_hash=calibration.digest,
         robot_id=calibration.robot_id,
@@ -757,9 +771,13 @@ def load_candidate_runtime_bundle(
     localization_map_path: Path,
     route_path: Path,
     runtime_profile_path: Path,
+    allowed_area_mask_path: Path,
+    allowed_area_mask_image_path: Path,
     localization_map_hash: str,
     route_hash: str,
     runtime_profile_hash: str,
+    allowed_area_mask_hash: str,
+    allowed_area_mask_image_hash: str,
 ) -> RuntimeBundle:
     """Load an unactivated candidate only when all release bindings match."""
     site_id = str(site_id).strip()
@@ -770,11 +788,13 @@ def load_candidate_runtime_bundle(
         Path(localization_map_path),
         Path(route_path),
         Path(runtime_profile_path),
+        Path(allowed_area_mask_path),
+        Path(allowed_area_mask_image_path),
     ]
     if any(path.is_symlink() or not path.is_file() for path in raw_paths):
         raise RuntimeContractError("CANDIDATE_ARTIFACT_UNAVAILABLE")
     paths = [path.resolve() for path in raw_paths]
-    map_path, route_path, profile_path = paths
+    map_path, route_path, profile_path, mask_path, mask_image_path = paths
     try:
         route_payload = json.loads(route_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -783,11 +803,15 @@ def load_candidate_runtime_bundle(
         "localizationMapHash": _sha256_file(map_path),
         "routeHash": _sha256_json(route_payload),
         "runtimeProfileHash": _sha256_file(profile_path),
+        "allowedAreaMaskHash": _sha256_file(mask_path),
+        "allowedAreaMaskImageHash": _sha256_file(mask_image_path),
     }
     expected = {
         "localizationMapHash": str(localization_map_hash).strip().lower(),
         "routeHash": str(route_hash).strip().lower(),
         "runtimeProfileHash": str(runtime_profile_hash).strip().lower(),
+        "allowedAreaMaskHash": str(allowed_area_mask_hash).strip().lower(),
+        "allowedAreaMaskImageHash": str(allowed_area_mask_image_hash).strip().lower(),
     }
     for name in actual:
         if len(expected[name]) != 64 or actual[name] != expected[name]:
@@ -806,6 +830,8 @@ def load_candidate_runtime_bundle(
             actual["localizationMapHash"]
             + actual["routeHash"]
             + actual["runtimeProfileHash"]
+            + actual["allowedAreaMaskHash"]
+            + actual["allowedAreaMaskImageHash"]
         ).encode("ascii")
     ).hexdigest()
     return RuntimeBundle(
@@ -822,6 +848,8 @@ def load_candidate_runtime_bundle(
         initialization_yaw_rad=initialization_yaw,
         initialization_yaw_tolerance_deg=initialization_yaw_tolerance,
         localization_quality=localization_quality,
+        allowed_area_mask_path=mask_path,
+        allowed_area_mask_image_path=mask_image_path,
     )
 
 

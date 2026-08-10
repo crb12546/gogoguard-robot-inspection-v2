@@ -55,6 +55,11 @@ The Mac catalog and artifacts persist under `workstation-data/`.
 The operator flow, button meanings, recovery path and current default
 parameters are documented in [docs/FIELD_WORKSTATION_GUIDE.md](docs/FIELD_WORKSTATION_GUIDE.md).
 
+For a product-level, plain-language explanation of the complete inspection
+flow, the algorithms behind each capability, current limitations, the 3D/stair
+roadmap and the distinction between mature components and our orchestration,
+start with [docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md](docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md).
+
 ## Verify
 
 ```bash

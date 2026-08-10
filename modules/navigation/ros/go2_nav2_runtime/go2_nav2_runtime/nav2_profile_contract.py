@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Sequence
 
 try:
     import yaml
@@ -48,44 +47,6 @@ def _positive_int(value: Any, label: str) -> int:
     return integer
 
 
-def _points(value: Any, label: str) -> Tuple[Tuple[float, float], ...]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise Nav2ProfileError("%s must be a flat coordinate list" % label)
-    if len(value) < 6 or len(value) % 2:
-        raise Nav2ProfileError("%s must contain at least three x/y pairs" % label)
-    numbers = tuple(_finite(item, label) for item in value)
-    return tuple(zip(numbers[0::2], numbers[1::2]))
-
-
-def _bounds(points: Sequence[Tuple[float, float]]) -> Tuple[float, float, float, float]:
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
-    return min(xs), max(xs), min(ys), max(ys)
-
-
-def _footprint(value: Any) -> Tuple[Tuple[float, float], ...]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (TypeError, ValueError) as exc:
-            raise Nav2ProfileError("local_costmap footprint is invalid JSON") from exc
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise Nav2ProfileError("local_costmap footprint must be a point list")
-    points = []
-    for item in value:
-        if not isinstance(item, Sequence) or len(item) != 2:
-            raise Nav2ProfileError("local_costmap footprint points must be [x, y]")
-        points.append(
-            (
-                _finite(item[0], "footprint.x"),
-                _finite(item[1], "footprint.y"),
-            )
-        )
-    if len(points) < 3:
-        raise Nav2ProfileError("local_costmap footprint needs at least three points")
-    return tuple(points)
-
-
 def load_nav2_profile(path: Path) -> Mapping[str, Any]:
     if yaml is None:
         raise Nav2ProfileError(
@@ -110,22 +71,15 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     controller = _mapping(controller.get("ros__parameters"), "controller parameters")
     follow = _mapping(controller.get("FollowPath"), "FollowPath")
     plugins = controller.get("controller_plugins")
-    if not isinstance(plugins, Sequence) or set(plugins) != {
-        "FollowPath",
-        "DetourPath",
-    }:
-        raise Nav2ProfileError(
-            "controller ownership requires FollowPath and DetourPath only"
-        )
+    if not isinstance(plugins, Sequence) or list(plugins) != ["FollowPath"]:
+        raise Nav2ProfileError("controller ownership requires one MPPI FollowPath")
     if follow.get("plugin") != "nav2_mppi_controller::MPPIController":
         raise Nav2ProfileError("FollowPath must use the Humble MPPI controller")
     if follow.get("motion_model") != "Omni":
         raise Nav2ProfileError("FollowPath motion_model must be Omni")
     progress = _mapping(controller.get("progress_checker"), "progress_checker")
     if progress.get("plugin") != "nav2_controller::PoseProgressChecker":
-        raise Nav2ProfileError(
-            "progress checker must count RPP heading rotation as progress"
-        )
+        raise Nav2ProfileError("progress checker must count heading rotation as progress")
     required_movement_angle = _positive(
         progress.get("required_movement_angle"),
         "progress_checker.required_movement_angle",
@@ -175,8 +129,12 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if not isinstance(critics, Sequence) or not required_critics.issubset(set(critics)):
         raise Nav2ProfileError("MPPI profile is missing collision/path critics")
     cost_critic = _mapping(follow.get("CostCritic"), "FollowPath.CostCritic")
-    if cost_critic.get("enabled") is not True or cost_critic.get("consider_footprint") is not True:
-        raise Nav2ProfileError("CostCritic must collision-check the real footprint")
+    if cost_critic.get("enabled") is not True:
+        raise Nav2ProfileError("CostCritic must remain enabled")
+    if cost_critic.get("consider_footprint") is not False:
+        raise Nav2ProfileError(
+            "the circular robot contract requires CostCritic to use the inflation-expanded costmap"
+        )
     if cost_critic.get("inflation_layer_name") != "inflation_layer":
         raise Nav2ProfileError("CostCritic must bind the configured inflation layer")
     path_align = _mapping(follow.get("PathAlignCritic"), "FollowPath.PathAlignCritic")
@@ -189,22 +147,6 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError("PathAngleCritic must remain enabled for fixed routes")
     if path_angle.get("forward_preference") is not True:
         raise Nav2ProfileError("PathAngleCritic must prefer forward route progress")
-    detour = _mapping(controller.get("DetourPath"), "DetourPath")
-    if (
-        detour.get("plugin")
-        != "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-    ):
-        raise Nav2ProfileError("DetourPath must use Regulated Pure Pursuit")
-    detour_speed = _positive(
-        detour.get("desired_linear_vel"), "DetourPath.desired_linear_vel"
-    )
-    if detour_speed < 0.24:
-        raise Nav2ProfileError("DetourPath falls below the commissioned Go2 gait")
-    if detour.get("use_rotate_to_heading") is not True:
-        raise Nav2ProfileError("DetourPath must rotate before forward recovery")
-    if detour.get("allow_reversing") is not False:
-        raise Nav2ProfileError("DetourPath must not authorize reverse driving")
-
     local = _mapping(profile.get("local_costmap"), "local_costmap")
     local = _mapping(local.get("local_costmap"), "local_costmap.local_costmap")
     local = _mapping(local.get("ros__parameters"), "local costmap parameters")
@@ -214,24 +156,16 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError(
             "local costmap must publish deterministic full-grid health frames"
         )
-    footprint = _footprint(local.get("footprint"))
-    circumscribed_radius = max(math.hypot(x, y) for x, y in footprint)
-    footprint_padding = _finite(local.get("footprint_padding"), "footprint_padding")
-    if footprint_padding < 0.0:
-        raise Nav2ProfileError("footprint_padding must be non-negative")
-    padded_footprint = tuple(
-        (
-            x + math.copysign(footprint_padding, x) if x != 0.0 else x,
-            y + math.copysign(footprint_padding, y) if y != 0.0 else y,
+    robot_radius = _positive(local.get("robot_radius"), "local_costmap.robot_radius")
+    if not math.isclose(robot_radius, 0.48, rel_tol=0.0, abs_tol=1.0e-9):
+        raise Nav2ProfileError("local costmap must use the one 0.48m robot radius")
+    if "footprint" in local:
+        raise Nav2ProfileError(
+            "local costmap must not define a second polygon footprint beside robot_radius"
         )
-        for x, y in footprint
-    )
-    effective_footprint_radius = max(
-        math.hypot(x, y) for x, y in padded_footprint
-    )
     inflation = _mapping(local.get("inflation_layer"), "inflation_layer")
     inflation_radius = _positive(inflation.get("inflation_radius"), "inflation_radius")
-    clearance_envelope = inflation_radius - effective_footprint_radius
+    clearance_envelope = inflation_radius - robot_radius
     if clearance_envelope + 1.0e-9 < 0.15:
         raise Nav2ProfileError(
             "inflation radius must cover the padded robot footprint plus 0.15m preference margin"
@@ -252,6 +186,11 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError(
             "local costmap must use the planar obstacle layer before inflation"
         )
+    if local.get("filters") != ["keepout_filter"]:
+        raise Nav2ProfileError("local MPPI must consume the allowed-area mask")
+    local_keepout = _mapping(local.get("keepout_filter"), "local keepout_filter")
+    if local_keepout.get("plugin") != "nav2_costmap_2d::KeepoutFilter":
+        raise Nav2ProfileError("local allowed area must use Nav2 KeepoutFilter")
     obstacle = _mapping(local.get("obstacle_layer"), "obstacle_layer")
     if obstacle.get("plugin") != "nav2_costmap_2d::ObstacleLayer":
         raise Nav2ProfileError("local obstacle owner must be the 2D ObstacleLayer")
@@ -260,6 +199,38 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError("local costmap must use the calibrated body cloud")
     if source.get("clearing") is not True or source.get("marking") is not True:
         raise Nav2ProfileError("body cloud must both clear and mark the rolling costmap")
+
+    planner = _mapping(profile.get("planner_server"), "planner_server")
+    planner = _mapping(planner.get("ros__parameters"), "planner parameters")
+    if planner.get("planner_plugins") != ["GridBased"]:
+        raise Nav2ProfileError("one GridBased global planner is required")
+    grid_planner = _mapping(planner.get("GridBased"), "GridBased planner")
+    if grid_planner.get("plugin") != "nav2_smac_planner/SmacPlanner2D":
+        raise Nav2ProfileError("large bypasses must use Nav2 SmacPlanner2D")
+    if grid_planner.get("allow_unknown") is not False:
+        raise Nav2ProfileError("global planning must remain inside observed free space")
+
+    global_costmap = _mapping(profile.get("global_costmap"), "global_costmap")
+    global_costmap = _mapping(
+        global_costmap.get("global_costmap"), "global_costmap.global_costmap"
+    )
+    global_costmap = _mapping(
+        global_costmap.get("ros__parameters"), "global costmap parameters"
+    )
+    global_radius = _positive(
+        global_costmap.get("robot_radius"), "global_costmap.robot_radius"
+    )
+    if not math.isclose(global_radius, robot_radius, rel_tol=0.0, abs_tol=1.0e-9):
+        raise Nav2ProfileError("local and global costmaps must share one robot radius")
+    global_width = _positive(global_costmap.get("width"), "global_costmap.width")
+    global_height = _positive(global_costmap.get("height"), "global_costmap.height")
+    if min(global_width, global_height) < 20.0:
+        raise Nav2ProfileError("global costmap is too small to see around a 7m obstacle")
+    if global_costmap.get("filters") != ["keepout_filter"]:
+        raise Nav2ProfileError("global planning must consume the allowed-area mask")
+    keepout = _mapping(global_costmap.get("keepout_filter"), "keepout_filter")
+    if keepout.get("plugin") != "nav2_costmap_2d::KeepoutFilter":
+        raise Nav2ProfileError("allowed area must use the standard Nav2 KeepoutFilter")
 
     collision = _mapping(profile.get("collision_monitor"), "collision_monitor")
     collision = _mapping(collision.get("ros__parameters"), "collision monitor parameters")
@@ -273,27 +244,20 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if collision_source.get("type") != "pointcloud" or collision_source.get("topic") != "/navigation/cloud_body":
         raise Nav2ProfileError("collision monitor must use the calibrated body cloud")
 
-    stop_zone = _mapping(collision.get("StopZone"), "StopZone")
-    slow_zone = _mapping(collision.get("SlowZone"), "SlowZone")
-    approach_zone = _mapping(collision.get("FootprintApproach"), "FootprintApproach")
-    for name, zone in (("StopZone", stop_zone), ("SlowZone", slow_zone)):
-        if "min_points" in zone:
-            raise Nav2ProfileError("%s uses non-Humble min_points" % name)
-        max_points = zone.get("max_points")
-        if not isinstance(max_points, int) or isinstance(max_points, bool) or max_points < 0:
-            raise Nav2ProfileError("%s.max_points must be a non-negative integer" % name)
-        if not 3 <= max_points <= 12:
-            raise Nav2ProfileError(
-                "%s must require between four and thirteen coherent points" % name
-            )
-    approach_max_points = approach_zone.get("max_points")
-    if (
-        not isinstance(approach_max_points, int)
-        or isinstance(approach_max_points, bool)
-        or not 3 <= approach_max_points <= 12
-    ):
+    if collision.get("polygons") != ["SafetyEnvelope"]:
+        raise Nav2ProfileError("collision monitor must expose one safety envelope")
+    safety_envelope = _mapping(
+        collision.get("SafetyEnvelope"), "SafetyEnvelope"
+    )
+    if safety_envelope.get("type") != "circle":
+        raise Nav2ProfileError("SafetyEnvelope must be circular")
+    safety_radius = _positive(safety_envelope.get("radius"), "SafetyEnvelope.radius")
+    if not math.isclose(safety_radius, robot_radius, rel_tol=0.0, abs_tol=1.0e-9):
+        raise Nav2ProfileError("collision monitor and costmaps must share one radius")
+    max_points = safety_envelope.get("max_points")
+    if not isinstance(max_points, int) or isinstance(max_points, bool) or not 3 <= max_points <= 12:
         raise Nav2ProfileError(
-            "FootprintApproach must require between four and thirteen coherent points"
+            "SafetyEnvelope must require between four and thirteen coherent points"
         )
     collision_min_height = _finite(
         collision_source.get("min_height"), "collision mid360_body.min_height"
@@ -302,34 +266,9 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError(
             "collision source must reject the calibrated floor-return band"
         )
-    if stop_zone.get("action_type") != "stop" or slow_zone.get("action_type") != "slowdown":
-        raise Nav2ProfileError("collision zones have incorrect actions")
-    stop_bounds = _bounds(_points(stop_zone.get("points"), "StopZone.points"))
-    slow_bounds = _bounds(_points(slow_zone.get("points"), "SlowZone.points"))
-    if not (
-        slow_bounds[0] <= stop_bounds[0]
-        and slow_bounds[1] >= stop_bounds[1]
-        and slow_bounds[2] <= stop_bounds[2]
-        and slow_bounds[3] >= stop_bounds[3]
-    ):
-        raise Nav2ProfileError("SlowZone must fully contain StopZone")
-    if slow_bounds[1] < 1.0:
-        raise Nav2ProfileError("SlowZone must begin intervention before one metre")
-    slow_lateral_half_width = max(abs(slow_bounds[2]), abs(slow_bounds[3]))
-    if slow_lateral_half_width > 0.55 + 1.0e-9:
-        raise Nav2ProfileError(
-            "SlowZone lateral envelope must not latch on passable side walls"
-        )
-    slowdown_ratio = _positive(
-        slow_zone.get("slowdown_ratio"), "SlowZone.slowdown_ratio"
-    )
-    if slowdown_ratio < 0.65 or slowdown_ratio > 0.90:
-        raise Nav2ProfileError(
-            "SlowZone slowdown ratio must stay inside the commissioned gait envelope"
-        )
+    if safety_envelope.get("action_type") != "stop":
+        raise Nav2ProfileError("SafetyEnvelope must be an emergency stop boundary")
     prediction_distance = time_steps * model_dt * vx_max
-    if prediction_distance + 1.0e-9 < slow_bounds[1]:
-        raise Nav2ProfileError("MPPI prediction horizon does not reach the slowdown zone")
 
     smoother = _mapping(profile.get("velocity_smoother"), "velocity_smoother")
     smoother = _mapping(smoother.get("ros__parameters"), "velocity smoother parameters")
@@ -352,17 +291,14 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         "predictionTimeS": time_steps * model_dt,
         "predictionDistanceM": prediction_distance,
         "lateralAuthorityMps": vy_max,
-        "detourSpeedMps": detour_speed,
         "requiredMovementAngleRad": required_movement_angle,
-        "circumscribedRadiusM": circumscribed_radius,
-        "effectiveFootprintRadiusM": effective_footprint_radius,
+        "robotRadiusM": robot_radius,
         "inflationRadiusM": inflation_radius,
         "inflationClearanceEnvelopeM": clearance_envelope,
         "inflationCostScalingFactor": inflation_cost_scaling,
-        "slowZoneFrontM": slow_bounds[1],
-        "slowZoneLateralHalfWidthM": slow_lateral_half_width,
-        "slowdownRatio": slowdown_ratio,
-        "stopZoneFrontM": stop_bounds[1],
+        "globalCostmapWidthM": global_width,
+        "globalCostmapHeightM": global_height,
+        "safetyEnvelopeRadiusM": safety_radius,
         "batchSize": batch_size,
         "iterationCount": iteration_count,
         "rolloutStatesPerSecond": rollout_states_per_second,

@@ -11,9 +11,11 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from .workspace import NavigationWorkspaceStore, validate_workspace, write_keepout_mask
+
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 4
+CANDIDATE_GENERATION = 5
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -131,6 +133,7 @@ class RouteManager:
     def __init__(self, data_root: Path, *, site_id: str) -> None:
         self.data_root = Path(data_root)
         self.site_id = site_id
+        self.workspaces = NavigationWorkspaceStore(self.data_root)
         self.root = self.data_root / "navigation" / "candidates"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -148,6 +151,10 @@ class RouteManager:
             destination.mkdir(parents=True, exist_ok=True)
             source_map_json_hash = _file_hash(map_json)
             source_ply_hash = _file_hash(map_ply)
+            workspace = validate_workspace(
+                self.workspaces.get(job_id), require_ready=True
+            )
+            workspace_hash = workspace["workspaceHash"]
             candidate_path = destination / "candidate.json"
             if candidate_path.is_file():
                 try:
@@ -155,6 +162,13 @@ class RouteManager:
                     existing_paths = {
                         "localization_map_hash": Path(existing["localization_map"]),
                         "runtime_profile_hash": Path(existing["runtime_profile"]),
+                        "allowed_area_mask_hash": Path(existing["allowed_area_mask"]),
+                        "allowed_area_mask_image_hash": Path(
+                            existing["allowed_area_mask_image"]
+                        ),
+                        "allowed_area_mask_metadata_hash": Path(
+                            existing["allowed_area_mask_metadata"]
+                        ),
                     }
                     route_path = Path(existing["route"])
                     route_payload = json.loads(route_path.read_text(encoding="utf-8"))
@@ -170,6 +184,7 @@ class RouteManager:
                         and
                         existing.get("source_ply_sha256") == source_ply_hash
                         and existing.get("source_map_json_sha256") == source_map_json_hash
+                        and existing.get("workspace_hash") == workspace_hash
                         and artifacts_unchanged
                     ):
                         return existing
@@ -183,11 +198,17 @@ class RouteManager:
                 raise ValueError("map PLY changed while preparing navigation")
             pcd_path = destination / "map.pcd"
             point_count = _write_binary_pcd(pcd_path, points)
-            planar = _route_points(artifact.get("trajectory") or [])
-            route_id = f"route-{job_id[4:]}-recorded"
+            planar = [(float(item[0]), float(item[1])) for item in workspace["route"]]
+            route_id = f"route-{job_id[4:]}-workspace-r{workspace['revision']}"
             route = _route_payload(route_id, planar)
             route_path = destination / "route.json"
             _atomic_json(route_path, route)
+            mask_pgm_path, mask_yaml_path, mask_metadata = write_keepout_mask(
+                workspace,
+                points,
+                destination,
+            )
+            mask_metadata_path = destination / "allowed-area-mask.json"
             first = route["waypoints"][0]
             profile = {
                 "schema": "go2.runtime_profile.v1",
@@ -207,6 +228,10 @@ class RouteManager:
                 "navigation": {
                     "controllerProfileId": "go2-nav2-mppi-omni-v1",
                     "collisionProfileId": "go2-mid360-collision-v1",
+                    "plannerProfileId": "go2-nav2-smac-2d-v1",
+                    "allowedAreaMaskArtifact": "allowed_area_mask",
+                    "allowedAreaWorkspaceHash": workspace_hash,
+                    "robotRadiusM": workspace["robotRadiusM"],
                 },
                 "patrol": {
                     "loopMode": "once",
@@ -235,12 +260,25 @@ class RouteManager:
                 "point_count": point_count,
                 "source_ply_sha256": source_ply_hash,
                 "source_map_json_sha256": source_map_json_hash,
+                "workspace_hash": workspace_hash,
+                "workspace_revision": workspace["revision"],
                 "localization_map": str(pcd_path),
                 "route": str(route_path),
                 "runtime_profile": str(profile_path),
+                "allowed_area_mask": str(mask_yaml_path),
+                "allowed_area_mask_image": str(mask_pgm_path),
+                "allowed_area_mask_metadata": str(mask_metadata_path),
                 "localization_map_hash": _file_hash(pcd_path),
                 "route_hash": _canonical_hash(route),
                 "runtime_profile_hash": _file_hash(profile_path),
+                "allowed_area_mask_hash": _file_hash(mask_yaml_path),
+                "allowed_area_mask_image_hash": _file_hash(mask_pgm_path),
+                "allowed_area_mask_metadata_hash": _file_hash(mask_metadata_path),
+                "allowed_area_mask_dimensions": {
+                    "width": mask_metadata["width"],
+                    "height": mask_metadata["height"],
+                    "resolutionM": mask_metadata["resolutionM"],
+                },
             }
             _atomic_json(candidate_path, metadata)
             return metadata

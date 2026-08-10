@@ -12,6 +12,7 @@ from typing import BinaryIO
 SAFE_SESSION = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9]{8}$")
 SAFE_MAP_JOB = re.compile(r"^map-[A-Za-z0-9]{12}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+NAVIGATION_WORKSPACE = "navigation-workspace.json"
 REQUIRED_MAP_ARTIFACTS = {"map.json", "map.ply", "overview.svg", "glim-build.json"}
 
 
@@ -116,7 +117,8 @@ class EdgeArtifactExchange:
                         raise TransferContractError("artifact upload ended before Content-Length")
                     remaining -= len(chunk)
                 return {"name": artifact_name, "bytes": content_length, "sha256": expected_sha256}
-            raise TransferContractError("immutable staged artifact already exists with different content")
+            if artifact_name != NAVIGATION_WORKSPACE:
+                raise TransferContractError("immutable staged artifact already exists with different content")
         temporary = target.with_name(f".{target.name}.part")
         digest = hashlib.sha256()
         remaining = content_length
@@ -159,6 +161,15 @@ class EdgeArtifactExchange:
             for path in sorted(root.iterdir())
             if path.is_file() and not path.name.startswith(".")
         ]
+        workspace = self.map_jobs_root / job_id / NAVIGATION_WORKSPACE
+        if state == "committed" and workspace.is_file():
+            files.append(
+                {
+                    "name": workspace.name,
+                    "bytes": workspace.stat().st_size,
+                    "sha256": _sha256(workspace),
+                }
+            )
         return {
             "schema": "gogoguard.edge_map_import.v1",
             "job_id": job_id,
@@ -183,28 +194,48 @@ class EdgeArtifactExchange:
         staging_artifacts = staging_root / "artifacts"
         final_root = self.map_jobs_root / job_id
         final_artifacts = final_root / "artifacts"
-        verification_root = final_artifacts if final_artifacts.is_dir() else staging_artifacts
+        final_exists = final_artifacts.is_dir()
         for item in files:
             name = str(item.get("name", ""))
             self._validate_artifact_name(name)
-            path = verification_root / name
+            staged_path = staging_artifacts / name
+            final_path = final_artifacts / name
+            if name == NAVIGATION_WORKSPACE:
+                committed_workspace = final_root / NAVIGATION_WORKSPACE
+                path = staged_path if staged_path.is_file() else committed_workspace
+            else:
+                path = final_path if final_exists else staged_path
             if not path.is_file():
                 raise TransferContractError(f"map artifact is missing: {name}")
             if path.stat().st_size != int(item.get("bytes", -1)):
                 raise TransferContractError(f"map artifact size mismatch: {name}")
             if _sha256(path) != str(item.get("sha256", "")):
                 raise TransferContractError(f"map artifact hash mismatch: {name}")
+        verification_root = final_artifacts if final_exists else staging_artifacts
         artifact = _json(verification_root / "map.json")
         if artifact.get("source") != "cloud-glim":
             raise TransferContractError("navigation accepts only cloud GLIM maps")
 
-        if final_artifacts.exists():
+        staged_workspace = staging_artifacts / NAVIGATION_WORKSPACE
+        workspace_source = staged_workspace if staged_workspace.is_file() else None
+        if final_exists:
             # A repeated or resumed deployment can leave a verified staging
-            # copy behind. The committed immutable version is authoritative.
+            # copy behind. Immutable GLIM files stay authoritative, while the
+            # separately stored operator workspace may advance revisions.
+            if workspace_source is not None:
+                workspace_target = final_root / NAVIGATION_WORKSPACE
+                workspace_temporary = final_root / f".{NAVIGATION_WORKSPACE}.tmp"
+                shutil.copyfile(workspace_source, workspace_temporary)
+                os.replace(workspace_temporary, workspace_target)
             shutil.rmtree(staging_root, ignore_errors=True)
         else:
             final_root.mkdir(parents=True, exist_ok=True)
+            staged_workspace_root = staging_root / NAVIGATION_WORKSPACE
+            if workspace_source is not None:
+                os.replace(workspace_source, staged_workspace_root)
             os.replace(staging_artifacts, final_artifacts)
+            if staged_workspace_root.is_file():
+                os.replace(staged_workspace_root, final_root / NAVIGATION_WORKSPACE)
             shutil.rmtree(staging_root, ignore_errors=True)
 
         job = {

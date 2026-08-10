@@ -17,3 +17,11 @@ returns `map.json`, `map.ply`, `overview.svg`, and the GLIM build receipt under
 emits `GOGOGUARD_PROGRESS <percent> <stage> <message>` markers; the Mac
 workstation forwards those real cloud stages to the browser instead of showing
 a fixed percentage.
+
+`gogoguard-glim-editor` adds an isolated review session around GLIM's official
+`map_editor`. Each session copies the immutable source dump, runs as the
+unprivileged `go2mapping` user, and binds x11vnc/noVNC only to cloud loopback.
+The Mac workstation creates an SSH local forward and opens the returned
+`127.0.0.1` URL. After the operator saves into `SAVED_MAP`, the adapter uses
+GLIM `offline_viewer --export_path` to create a new immutable map version; it
+never overwrites the original map job.

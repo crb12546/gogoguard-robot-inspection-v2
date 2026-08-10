@@ -52,10 +52,12 @@ to produce monotonic progress. A transient localization dropout first enters
 stable localization window, clears stale local costmap data and resends only
 the unfinished route suffix. Nav2 MPPI and Collision Monitor own local obstacle
 avoidance. A FollowPath failure is classified before recovery: a clear route
-gets a bounded MPPI suffix retry, persistent command without measured motion
+gets a bounded MPPI suffix retry, persistent command without measured movement
 is an actuation fault, and only consecutive occupied samples on the recorded
-route authorize a bounded A* detour. RPP owns only the short current-to-anchor
-detour; after it succeeds, MPPI receives the unfinished recorded-route suffix.
+route authorize a SmacPlanner2D bypass to a future route point. The bypass and
+the recorded route both use the same MPPI controller; there is no second RPP
+controller or controller handoff. If Smac cannot yet find a path, the runtime
+holds zero output and retries until the space clears or the operator stops.
 Only verified route obstruction can report `BLOCKED`. The final Unitree bridge
 only validates authorization, command
 freshness, finite values and absolute hardware limits; it is not a duplicate

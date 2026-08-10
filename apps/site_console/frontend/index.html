@@ -36,11 +36,39 @@
       <article class="panel result-panel"><div class="panel-title"><div><span>当前选中地图</span><small id="resultMeta">还没有结果</small></div><div class="layer-switches"><label><input id="showMapPoints" type="checkbox" checked>点云</label><label><input id="showMapRoute" type="checkbox" checked>GLIM 轨迹</label><button id="resetMapView" class="mini-button">重置 3D</button></div></div><div id="resultEmpty" class="empty">选择一张历史地图后，这里同时显示 2D 概览和可旋转、缩放的 3D 点云。</div><div class="map-review"><figure><figcaption>2D 俯视概览</figcaption><img id="overview" alt="地图概览"></figure><figure><figcaption>3D 点云 · 拖动旋转 · 滚轮缩放</figcaption><canvas id="resultCloud"></canvas></figure></div></article>
       <article class="panel history"><div class="panel-title"><div><span>现场资产历史</span><small>录制、地图与路线按版本保留</small></div></div><h3>可用地图版本</h3><div id="maps"></div><h3>建图处理任务</h3><div id="mapTasks"></div><h3>录制包</h3><div id="sessions"></div></article>
     </section>
+    <section class="map-workbench">
+      <article class="panel map-workbench-canvas-panel">
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>灰色是地图，蓝色是要走的路，绿色是允许进入的范围</small></div><b id="workspaceBadge">请先选地图</b></div>
+        <canvas id="workspaceMap"></canvas>
+        <div class="workspace-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>巡检路线</span><span><i class="allowed-area-swatch"></i>允许范围</span></div>
+      </article>
+      <article class="panel map-workbench-controls">
+        <div class="panel-title"><div><span>准备巡检材料</span><small>只需要确认一条路线和一块允许范围</small></div></div>
+        <div class="workbench-explanation">地图上偶然的人和车由 3D 清理工具处理。这里不再叠加多套“安全形状”，绿色边界是唯一的业务禁入线，机器狗自身半径为 0.48 m。</div>
+        <div class="glim-editor-actions">
+          <strong>1. 需要时先清理 3D 地图</strong>
+          <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
+          <div><button id="publishGlimEditor" hidden>已保存，生成新地图版本</button><button id="stopGlimEditor" class="secondary" hidden>关闭清图会话</button></div>
+          <small id="glimEditorState">需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。</small>
+        </div>
+        <strong class="workspace-step-title">2. 确认蓝色路线和绿色允许范围</strong>
+        <div class="workbench-actions">
+          <button id="editRoute" class="secondary">重画蓝色巡检路线</button>
+          <button id="restoreRecordedRoute" class="secondary">恢复录制路线</button>
+          <button id="editAllowedArea" class="secondary">绘制绿色允许范围</button>
+          <button id="undoWorkspacePoint" class="secondary">撤销上一个点</button>
+          <button id="cancelWorkspaceEdit" class="secondary">取消本次编辑</button>
+          <button id="saveWorkspace">保存路线与允许范围</button>
+        </div>
+        <div id="workspaceHelp" class="workspace-help">选择已完成的地图后，录制轨迹会自动成为蓝色路线。</div>
+        <div id="workspaceError" class="error"></div>
+      </article>
+    </section>
     <section class="navigation-lab">
       <article class="panel navigation-map-panel">
         <div class="panel-title"><div><span>地图定位与巡检路线</span><small>GLIM 地图 · 固定路线 · 实时定位</small></div><b id="localizationBadge">尚未启动</b></div>
         <canvas id="navigationMap"></canvas>
-        <div class="map-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>录制路线</span><span><i class="robot-dot"></i>机器狗</span></div>
+        <div class="map-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>巡检路线</span><span><i class="allowed-area-swatch"></i>允许范围</span><span><i class="robot-dot"></i>机器狗</span></div>
       </article>
       <article class="panel navigation-control-panel">
         <div class="panel-title"><div><span>巡检操作向导</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
@@ -74,26 +102,20 @@
     </section>
     <section class="engineering-grid">
       <details class="panel engineering-panel" id="parameterPanel">
-        <summary><span>参数中心</span><small>速度、避障、定位与 MPPI；保存前会校验，可回滚</small></summary>
+        <summary><span>参数中心</span><small>速度、定位与 MPPI；保存前会校验，可回滚</small></summary>
         <div class="parameter-note">日常只调整下面的常用参数。保存后需重启“定位与 Nav2”生效，正在巡检时不允许修改。</div>
         <div class="parameter-grid">
           <label>MPPI前进速度上限 (m/s)<input id="straightSpeed" type="number" min="0.4" max="0.9" step="0.05"></label>
           <label>接收链路硬上限 (m/s)<input id="maxForwardSpeed" type="number" min="0.6" max="0.9" step="0.05"></label>
           <label>加速度 (m/s²)<input id="acceleration" type="number" min="0.5" max="4" step="0.1"></label>
           <label>减速度 (m/s²)<input id="deceleration" type="number" min="0.5" max="5" step="0.1"></label>
-          <label>局部绕行速度 (m/s)<input id="detourSpeed" type="number" min="0.24" max="0.9" step="0.05"></label>
           <label>转弯角速度 (rad/s)<input id="turnSpeed" type="number" min="0.1" max="0.6" step="0.05"></label>
           <label>侧向避障速度 (m/s)<input id="lateralSpeed" type="number" min="0.05" max="0.2" step="0.05"></label>
-          <label>减速区半宽 (m)<input id="slowHalfWidth" type="number" min="0.25" max="0.7" step="0.01"></label>
-          <label>减速比例<input id="slowdownRatio" type="number" min="0.5" max="1" step="0.05"></label>
           <label>无运动进展超时 (秒)<input id="progressTimeout" type="number" min="2" max="12" step="0.5"></label>
           <label>定位断流容忍 (秒)<input id="dropoutGrace" type="number" min="0.2" max="5" step="0.1"></label>
-          <label>重入路线前视 (m)<input id="rejoinLookahead" type="number" min="0.5" max="6" step="0.25"></label>
+          <label>路线阻塞检查前视 (m)<input id="rejoinLookahead" type="number" min="0.5" max="6" step="0.25"></label>
         </div>
         <details class="advanced-parameters"><summary>工程参数（一般不需要改）</summary><div class="parameter-grid">
-          <label>前向停车边界 (m)<input id="stopFront" type="number" min="0.4" max="1" step="0.01"></label>
-          <label>停车区半宽 (m)<input id="stopHalfWidth" type="number" min="0.22" max="0.5" step="0.01"></label>
-          <label>减速区前缘 (m)<input id="slowFront" type="number" min="0.6" max="2" step="0.05"></label>
           <label>定位消息超时 (秒)<input id="localizationTimeout" type="number" min="0.2" max="2" step="0.1"></label>
           <label>定位恢复稳定 (秒)<input id="recoveryStable" type="number" min="0.2" max="3" step="0.1"></label>
           <label>MPPI 频率 (Hz)<input id="controllerFrequency" type="number" min="10" max="30" step="1"></label>
@@ -130,7 +152,7 @@
         <div class="incident-views">
           <figure><figcaption>摄像头现场</figcaption><video id="incidentVideo" controls muted playsinline></video><div id="incidentVideoMissing" class="incident-missing">没有同步视频</div></figure>
           <figure><figcaption>3D 点云</figcaption><canvas id="incidentCloud"></canvas></figure>
-          <figure><figcaption>代价地图、原路线与 A* 搜索</figcaption><canvas id="incidentPlan"></canvas></figure>
+          <figure><figcaption>代价地图、原路线与 Nav2 规划</figcaption><canvas id="incidentPlan"></canvas></figure>
           <figure><figcaption>当时状态与决策</figcaption><pre id="incidentDecision">暂无数据</pre></figure>
         </div>
         <div class="incident-timeline"><span id="incidentTimeLabel">0.0 s</span><input id="incidentTimeline" type="range" min="0" max="0" step="0.1" value="0"></div>

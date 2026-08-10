@@ -1,12 +1,12 @@
 {
   "id": "map_factory",
-  "responsibility": "Submit a sealed recording to cloud GLIM and return versioned map artifacts",
+  "responsibility": "Submit a sealed recording to cloud GLIM, provide isolated official map editing, and return immutable map versions",
   "runtime": ["workstation", "cloud"],
-  "status": "real_workstation_to_cloud_glim_roundtrip_verified",
+  "status": "cloud_glim_roundtrip_and_official_editor_export_verified",
   "codeRoots": ["services/map_factory", "deployment/cloud"],
-  "entrypoints": ["gogoguard_map_factory.manager:MapJobManager", "deployment/cloud/gogoguard-map-job"],
+  "entrypoints": ["gogoguard_map_factory.manager:MapJobManager", "gogoguard_map_factory.editor:GlimEditorManager", "deployment/cloud/gogoguard-map-job", "deployment/cloud/gogoguard-glim-editor"],
   "dependsOn": ["contracts", "evidence"],
   "consumes": ["RecordingBundle"],
-  "produces": ["MapJob", "map.ply", "map.json", "overview.svg"],
-  "sourceProvenance": ["V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline"]
+  "produces": ["MapJob", "map.ply", "map.json", "overview.svg", "isolated official GLIM editor session"],
+  "sourceProvenance": ["V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline", "2026-08-10 the official GLIM map_editor is available through a loopback-only noVNC service and Mac SSH tunnel; edited dumps export as new immutable map versions while the source job remains unchanged"]
 }

@@ -97,7 +97,7 @@ class NavigationOrchestrationTest(unittest.TestCase):
         )
         self.assertEqual(failure.action, RecoveryAction.START_DETOUR)
         self.assertEqual(
-            controller_success_action(ControllerMode.DETOUR_RPP),
+            controller_success_action(ControllerMode.DETOUR_MPPI),
             ControllerSuccessAction.RESUME_MPPI_SUFFIX,
         )
         self.assertEqual(
@@ -108,7 +108,7 @@ class NavigationOrchestrationTest(unittest.TestCase):
     def test_map_8dd_incident_is_actuation_stall_not_path_blocked(self):
         decision = decide_controller_failure(
             FailureEvidence(
-                controller=ControllerMode.DETOUR_RPP,
+                controller=ControllerMode.DETOUR_MPPI,
                 localization_usable=True,
                 costmap_healthy=True,
                 costmap_reason="OK",
@@ -123,7 +123,7 @@ class NavigationOrchestrationTest(unittest.TestCase):
     def test_detour_failure_never_recursively_starts_another_detour(self):
         decision = decide_controller_failure(
             FailureEvidence(
-                controller=ControllerMode.DETOUR_RPP,
+                controller=ControllerMode.DETOUR_MPPI,
                 localization_usable=True,
                 costmap_healthy=True,
                 costmap_reason="OK",

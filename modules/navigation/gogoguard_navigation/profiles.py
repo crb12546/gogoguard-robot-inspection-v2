@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 
 
-PROFILE_SCHEMA = "gogoguard.navigation_profile.v5"
+PROFILE_SCHEMA = "gogoguard.navigation_profile.v6"
 LEGACY_PROFILE_SCHEMAS = {
     "gogoguard.navigation_profile.v1",
     "gogoguard.navigation_profile.v2",
     "gogoguard.navigation_profile.v3",
     "gogoguard.navigation_profile.v4",
+    "gogoguard.navigation_profile.v5",
 }
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": PROFILE_SCHEMA,
@@ -22,20 +23,12 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "motion": {
         "targetCruiseMps": 0.60,
         "maxForwardMps": 0.90,
-        "detourSpeedMps": 0.40,
         "turnSpeedRadps": 0.40,
         "lateralSpeedMps": 0.20,
         "accelerationMps2": 0.90,
         "decelerationMps2": 0.90,
     },
     "avoidance": {
-        "stopZoneFrontM": 0.55,
-        "stopZoneRearM": 0.38,
-        "stopZoneHalfWidthM": 0.27,
-        "slowZoneFrontM": 1.00,
-        "slowZoneRearM": 0.55,
-        "slowZoneHalfWidthM": 0.30,
-        "slowdownRatio": 0.85,
         "rejoinLookaheadM": 2.0,
         "obstructionCostThreshold": 65,
         "obstructionMinSamples": 2,
@@ -154,22 +147,12 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
         "motion": {
             "targetCruiseMps": _finite(target_cruise, "MPPI前进速度上限", 0.40, 0.90),
             "maxForwardMps": _finite(max_forward, "接收链路硬上限", 0.60, 0.90),
-            "detourSpeedMps": _finite(
-                detour_speed, "局部绕行速度", 0.24, 0.90
-            ),
             "turnSpeedRadps": _finite(turn_speed, "转弯角速度", 0.10, 0.60),
             "lateralSpeedMps": _finite(lateral_speed, "侧向速度", 0.05, 0.20),
             "accelerationMps2": _finite(acceleration, "加速度", 0.50, 4.00),
             "decelerationMps2": _finite(deceleration, "减速度", 0.50, 5.00),
         },
         "avoidance": {
-            "stopZoneFrontM": _finite(avoidance.get("stopZoneFrontM"), "停车区前缘", 0.40, 1.00),
-            "stopZoneRearM": _finite(avoidance.get("stopZoneRearM"), "停车区后缘", 0.25, 0.80),
-            "stopZoneHalfWidthM": _finite(avoidance.get("stopZoneHalfWidthM"), "停车区半宽", 0.22, 0.50),
-            "slowZoneFrontM": _finite(avoidance.get("slowZoneFrontM"), "减速区前缘", 0.60, 2.00),
-            "slowZoneRearM": _finite(avoidance.get("slowZoneRearM"), "减速区后缘", 0.30, 1.00),
-            "slowZoneHalfWidthM": _finite(avoidance.get("slowZoneHalfWidthM"), "减速区半宽", 0.25, 0.70),
-            "slowdownRatio": _finite(avoidance.get("slowdownRatio"), "减速比例", 0.50, 1.00),
             "rejoinLookaheadM": _finite(avoidance.get("rejoinLookaheadM"), "重入前视距离", 0.50, 6.00),
             "obstructionCostThreshold": int(
                 _finite(
@@ -217,18 +200,8 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
             "iterationCount": int(_finite(controller.get("iterationCount"), "MPPI 迭代数", 1, 2)),
         },
     }
-    if normalized["avoidance"]["slowZoneHalfWidthM"] < normalized["avoidance"]["stopZoneHalfWidthM"]:
-        raise ProfileError("减速区必须覆盖停车区")
-    if normalized["avoidance"]["slowZoneFrontM"] < normalized["avoidance"]["stopZoneFrontM"]:
-        raise ProfileError("减速区前缘必须早于停车区")
     if normalized["motion"]["maxForwardMps"] < normalized["motion"]["targetCruiseMps"]:
         raise ProfileError("前进控制上限必须高于或等于目标实际巡航速度")
-    if (
-        normalized["motion"]["detourSpeedMps"]
-        * normalized["avoidance"]["slowdownRatio"]
-        < 0.20
-    ):
-        raise ProfileError("局部绕行经过减速后必须保持至少 0.20 m/s 有效步态")
     workload = (
         normalized["controller"]["frequencyHz"]
         * normalized["controller"]["timeSteps"]
@@ -237,13 +210,6 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     )
     if workload > 1_200_000:
         raise ProfileError("MPPI 计算量超过背板的已校验上限")
-    prediction_distance = (
-        normalized["controller"]["timeSteps"]
-        / normalized["controller"]["frequencyHz"]
-        * normalized["motion"]["targetCruiseMps"]
-    )
-    if prediction_distance < normalized["avoidance"]["slowZoneFrontM"]:
-        raise ProfileError("MPPI 预测距离必须覆盖减速区前缘")
     return normalized
 
 

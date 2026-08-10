@@ -15,7 +15,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from go2_nav2_interfaces.srv import StartPatrol
-from nav2_msgs.action import FollowPath
+from nav2_msgs.action import ComputePathToPose, FollowPath
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from rclpy.action import ActionClient
@@ -33,7 +33,6 @@ from tf2_ros import Buffer, TransformListener
 from unitree_go.msg import SportModeState
 
 from go2_site_ops.map_store import MapVersionStore
-from gogoguard_navigation.detour_diagnostics import plan_detour_diagnostic
 from gogoguard_navigation.orchestration import (
     ControllerMode,
     ControllerSuccessAction,
@@ -82,6 +81,7 @@ RECOVERABLE_RUNTIME_GATES = frozenset(
         "FASTLIO_SETTLING",
         "FASTLIO_STATIONARY_DRIFT",
         "NAV2_FOLLOW_PATH_UNAVAILABLE",
+        "NAV2_PLANNER_UNAVAILABLE",
         "ROBOT_STATE_MISSING",
         "ROBOT_STATE_STALE",
         "ROBOT_POSTURE_NOT_READY",
@@ -123,10 +123,15 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("candidate.localization_map", "")
         self.declare_parameter("candidate.route", "")
         self.declare_parameter("candidate.runtime_profile", "")
+        self.declare_parameter("candidate.allowed_area_mask", "")
+        self.declare_parameter("candidate.allowed_area_mask_image", "")
         self.declare_parameter("candidate.localization_map_hash", "")
         self.declare_parameter("candidate.route_hash", "")
         self.declare_parameter("candidate.runtime_profile_hash", "")
+        self.declare_parameter("candidate.allowed_area_mask_hash", "")
+        self.declare_parameter("candidate.allowed_area_mask_image_hash", "")
         self.declare_parameter("follow_path_action", "/follow_path")
+        self.declare_parameter("compute_path_action", "/compute_path_to_pose")
         self.declare_parameter("localization_status_topic", "/localization/status")
         self.declare_parameter("localization_pose_topic", "/localization/pose")
         self.declare_parameter("localization_timeout_s", 0.20)
@@ -139,6 +144,7 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("obstruction_confirmation_s", 0.30)
         self.declare_parameter("costmap_timeout_s", 1.0)
         self.declare_parameter("rejoin_lookahead_m", 2.0)
+        self.declare_parameter("planner_rejoin_lookahead_m", 8.0)
         self.declare_parameter(
             "runtime_trace_status_topic", "/go2/runtime/trace_status"
         )
@@ -198,6 +204,8 @@ class PatrolRuntimeManager(Node):
                     "localization_map": self.bundle.localization_map_path,
                     "route": self.bundle.route_path,
                     "runtime_profile": self.bundle.runtime_profile_path,
+                    "allowed_area_mask": self.bundle.allowed_area_mask_path,
+                    "allowed_area_mask_image": self.bundle.allowed_area_mask_image_path,
                     "calibration_bundle": self.bundle.calibration_bundle_path,
                 }
             )
@@ -210,6 +218,12 @@ class PatrolRuntimeManager(Node):
                 "runtime_profile": self.get_parameter(
                     "candidate.runtime_profile"
                 ).value,
+                "allowed_area_mask": self.get_parameter(
+                    "candidate.allowed_area_mask"
+                ).value,
+                "allowed_area_mask_image": self.get_parameter(
+                    "candidate.allowed_area_mask_image"
+                ).value,
             }
             self.bundle = load_candidate_runtime_bundle(
                 site_id=self.site_id,
@@ -217,6 +231,10 @@ class PatrolRuntimeManager(Node):
                 localization_map_path=candidate_paths["localization_map"],
                 route_path=candidate_paths["route"],
                 runtime_profile_path=candidate_paths["runtime_profile"],
+                allowed_area_mask_path=candidate_paths["allowed_area_mask"],
+                allowed_area_mask_image_path=candidate_paths[
+                    "allowed_area_mask_image"
+                ],
                 localization_map_hash=self.get_parameter(
                     "candidate.localization_map_hash"
                 ).value,
@@ -224,12 +242,20 @@ class PatrolRuntimeManager(Node):
                 runtime_profile_hash=self.get_parameter(
                     "candidate.runtime_profile_hash"
                 ).value,
+                allowed_area_mask_hash=self.get_parameter(
+                    "candidate.allowed_area_mask_hash"
+                ).value,
+                allowed_area_mask_image_hash=self.get_parameter(
+                    "candidate.allowed_area_mask_image_hash"
+                ).value,
             )
             self.runtime_guard = RuntimeArtifactGuard.capture(
                 {
                     "localization_map": self.bundle.localization_map_path,
                     "route": self.bundle.route_path,
                     "runtime_profile": self.bundle.runtime_profile_path,
+                    "allowed_area_mask": self.bundle.allowed_area_mask_path,
+                    "allowed_area_mask_image": self.bundle.allowed_area_mask_image_path,
                 }
             )
         else:
@@ -268,6 +294,9 @@ class PatrolRuntimeManager(Node):
         )
         self.rejoin_lookahead_m = float(
             self.get_parameter("rejoin_lookahead_m").value
+        )
+        self.planner_rejoin_lookahead_m = float(
+            self.get_parameter("planner_rejoin_lookahead_m").value
         )
         self.runtime_trace_status_timeout_s = float(
             self.get_parameter("runtime_trace_status_timeout_s").value
@@ -318,6 +347,8 @@ class PatrolRuntimeManager(Node):
             raise RuntimeError("costmap_timeout_s is invalid")
         if not 0.5 <= self.rejoin_lookahead_m <= 6.0:
             raise RuntimeError("rejoin_lookahead_m is invalid")
+        if not 6.0 <= self.planner_rejoin_lookahead_m <= 10.0:
+            raise RuntimeError("planner_rejoin_lookahead_m is invalid")
         if not 0.30 <= self.runtime_trace_status_timeout_s <= 2.0:
             raise RuntimeError(
                 "runtime_trace_status_timeout_s must be between 0.30 and 2.0 seconds"
@@ -449,6 +480,12 @@ class PatrolRuntimeManager(Node):
             FollowPath,
             str(self.get_parameter("follow_path_action").value),
         )
+        self.planner_client = ActionClient(
+            self,
+            ComputePathToPose,
+            str(self.get_parameter("compute_path_action").value),
+        )
+        self.planner_goal_handle = None
         self.clear_costmap_client = self.create_client(
             ClearEntireCostmap, "/local_costmap/clear_entirely_local_costmap"
         )
@@ -663,14 +700,16 @@ class PatrolRuntimeManager(Node):
             translation.y + math.sin(yaw) * x + math.cos(yaw) * y,
         )
 
-    def _route_and_rejoin(self):
+    def _route_and_rejoin(self, lookahead_m: Optional[float] = None):
         route_xy = [
             (item.pose.position.x, item.pose.position.y) for item in self.path.poses
         ]
         if len(route_xy) < 2:
             return route_xy, None
         rejoin_index = route_rejoin_index(
-            route_xy, self.route_progress_index, self.rejoin_lookahead_m
+            route_xy,
+            self.route_progress_index,
+            self.rejoin_lookahead_m if lookahead_m is None else float(lookahead_m),
         )
         if rejoin_index <= self.route_progress_index or rejoin_index >= len(route_xy):
             return route_xy, None
@@ -723,98 +762,141 @@ class PatrolRuntimeManager(Node):
         """Return only temporally confirmed obstruction evidence."""
         return bool(self.last_route_obstructed)
 
-    def _nav_path_from_points(self, points) -> Optional[NavPath]:
-        if len(points) < 2:
-            return None
-        path = NavPath()
-        path.header.frame_id = "map"
-        now = self.get_clock().now().to_msg()
-        for index, point in enumerate(points):
-            following = points[index + 1] if index + 1 < len(points) else points[index - 1]
-            pose = PoseStamped()
-            pose.header.frame_id = "map"
-            pose.header.stamp = now
-            pose.pose.position.x = float(point[0])
-            pose.pose.position.y = float(point[1])
-            pose.pose.orientation = _quaternion_from_yaw(
-                math.atan2(following[1] - point[1], following[0] - point[0])
-            )
-            path.poses.append(pose)
-        return path
-
-    def _try_local_replan(self) -> bool:
+    def _try_global_replan(self) -> bool:
         if (
             self.pose is None
-            or self.local_costmap is None
-            or not self._costmap_health().healthy
             or not self._route_obstructed()
+            or not self.planner_client.server_is_ready()
         ):
             return False
-        route_xy, rejoin_index = self._route_and_rejoin()
+        route_xy, rejoin_index = self._route_and_rejoin(
+            self.planner_rejoin_lookahead_m
+        )
         if rejoin_index is None:
             return False
-        start_in_grid = self._transform_xy(
-            self.pose[0], self.pose[1], self.local_costmap_frame, "map"
-        )
-        goal_in_grid = self._transform_xy(
-            route_xy[rejoin_index][0],
-            route_xy[rejoin_index][1],
-            self.local_costmap_frame,
-            "map",
-        )
-        if start_in_grid is None or goal_in_grid is None:
-            return False
-        started = time.monotonic()
-        detour, planner_diagnostics = plan_detour_diagnostic(
-            self.local_costmap,
-            start_in_grid,
-            goal_in_grid,
-            occupied_threshold=self.obstruction_cost_threshold,
-        )
-        self.last_detour_compute_ms = round(
-            (time.monotonic() - started) * 1000.0, 2
-        )
-        planner_diagnostics["computeMs"] = self.last_detour_compute_ms
-        planner_diagnostics["rejoinRouteIndex"] = rejoin_index
-        planner_diagnostics["routeObstructed"] = True
-        planner_message = String()
-        planner_message.data = json.dumps(
-            planner_diagnostics, ensure_ascii=False, separators=(",", ":")
-        )
-        self.planner_diagnostics_publisher.publish(planner_message)
-        if not detour:
-            return False
-        detour_in_map = [
-            self._transform_xy(point[0], point[1], "map", self.local_costmap_frame)
-            for point in detour
-        ]
-        if any(point is None for point in detour_in_map):
-            return False
-        # RPP receives only current -> rejoin. It must never inherit the
-        # remaining recorded route; successful rejoin explicitly returns
-        # ownership to MPPI in _result_callback.
-        path = self._nav_path_from_points(detour_in_map)
-        if path is None:
-            return False
-        goal = FollowPath.Goal()
-        goal.path = path
-        goal.controller_id = "DetourPath"
-        goal.goal_checker_id = "route_goal_checker"
+        stamp = self.get_clock().now().to_msg()
+        start = PoseStamped()
+        start.header.frame_id = "map"
+        start.header.stamp = stamp
+        start.pose.position.x = float(self.pose[0])
+        start.pose.position.y = float(self.pose[1])
+        start.pose.orientation = _quaternion_from_yaw(float(self.pose[2]))
+        target = PoseStamped()
+        target.header.frame_id = "map"
+        target.header.stamp = stamp
+        target.pose.position.x = float(route_xy[rejoin_index][0])
+        target.pose.position.y = float(route_xy[rejoin_index][1])
+        target.pose.orientation = self.path.poses[rejoin_index].pose.orientation
+        goal = ComputePathToPose.Goal()
+        goal.start = start
+        goal.goal = target
+        goal.use_start = True
+        goal.planner_id = "GridBased"
         self.goal_request_pending = True
-        self.active_controller = ControllerMode.DETOUR_RPP
         self.detour_attempt_count += 1
         self.last_rejoin_index = rejoin_index
-        self.runtime_state = "DETOURING"
-        self.runtime_reason = "LOCAL_DETOUR_TO_ROUTE_REJOIN"
+        self.runtime_state = "REPLANNING"
+        self.runtime_reason = "NAV2_GLOBAL_PLAN_TO_ROUTE_REJOIN"
+        self._planner_requested_at = time.monotonic()
         try:
-            future = self.action_client.send_goal_async(
+            future = self.planner_client.send_goal_async(goal)
+        except Exception as exc:
+            self.goal_request_pending = False
+            self.runtime_reason = "NAV2_GLOBAL_PLAN_TRANSPORT: %s" % exc
+            return False
+        future.add_done_callback(self._planner_goal_response_callback)
+        return True
+
+    def _planner_goal_response_callback(self, future) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            goal_handle = None
+            self.runtime_reason = "NAV2_GLOBAL_PLAN_TRANSPORT: %s" % exc
+        if goal_handle is None or not goal_handle.accepted:
+            self.goal_request_pending = False
+            self.last_failure_class = "PLANNER_FAILED"
+            if not self.runtime_reason.startswith("NAV2_GLOBAL_PLAN_TRANSPORT"):
+                self.runtime_reason = "NAV2_GLOBAL_PLAN_REJECTED"
+            self._schedule_recovery("DETOUR", self.runtime_reason)
+            return
+        self.planner_goal_handle = goal_handle
+        if self.stop_requested or self.gate_cancel_reason:
+            goal_handle.cancel_goal_async()
+        goal_handle.get_result_async().add_done_callback(self._planner_result_callback)
+
+    def _planner_result_callback(self, future) -> None:
+        self.goal_request_pending = False
+        self.planner_goal_handle = None
+        try:
+            wrapped = future.result()
+            status = wrapped.status
+            result = wrapped.result
+            path = result.path
+        except Exception as exc:
+            status = None
+            path = None
+            self.runtime_reason = "NAV2_GLOBAL_PLAN_RESULT: %s" % exc
+        self.last_detour_compute_ms = round(
+            (time.monotonic() - getattr(self, "_planner_requested_at", time.monotonic()))
+            * 1000.0,
+            2,
+        )
+        diagnostic = String()
+        diagnostic.data = json.dumps(
+            {
+                "schema": "gogoguard.nav2_planner_receipt.v1",
+                "planner": "SmacPlanner2D",
+                "status": None if status is None else int(status),
+                "computeMs": self.last_detour_compute_ms,
+                "rejoinRouteIndex": self.last_rejoin_index,
+                "routeObstructed": self._route_obstructed(),
+                "pathPoints": len(path.poses) if path is not None else 0,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        self.planner_diagnostics_publisher.publish(diagnostic)
+        if self.stop_requested:
+            self.runtime_state = "READY"
+            self.runtime_reason = "STOPPED"
+            self._finish_active_start_attempt("STOPPED", "STOPPED")
+            return
+        if self.gate_cancel_reason:
+            cancel_reason = self.gate_cancel_reason
+            self.gate_cancel_reason = ""
+            self.resume_pending = cancel_reason in RECOVERABLE_RUNTIME_GATES
+            self.runtime_state = "HOLDING" if self.resume_pending else "FAULT"
+            self.runtime_reason = cancel_reason
+            if not self.resume_pending:
+                self._finish_active_start_attempt("FAILED", cancel_reason)
+            return
+        if status != GoalStatus.STATUS_SUCCEEDED or path is None or len(path.poses) < 2:
+            self.last_failure_class = "PLANNER_FAILED"
+            self._schedule_recovery("DETOUR", "SEARCHING_FOR_PATH")
+            return
+        now = self.get_clock().now().to_msg()
+        path.header.stamp = now
+        for pose in path.poses:
+            pose.header.stamp = now
+        goal = FollowPath.Goal()
+        goal.path = path
+        goal.controller_id = "FollowPath"
+        goal.goal_checker_id = "route_goal_checker"
+        self.goal_request_pending = True
+        self.active_controller = ControllerMode.DETOUR_MPPI
+        self.runtime_state = "DETOURING"
+        self.runtime_reason = "NAV2_GLOBAL_PATH_USING_MPPI"
+        try:
+            request = self.action_client.send_goal_async(
                 goal, feedback_callback=self._feedback_callback
             )
-        except Exception:
+        except Exception as exc:
             self.goal_request_pending = False
-            return False
-        future.add_done_callback(self._replan_goal_response_callback)
-        return True
+            self.runtime_reason = "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
+            self._schedule_recovery("DETOUR", self.runtime_reason)
+            return
+        request.add_done_callback(self._replan_goal_response_callback)
 
     def _replan_goal_response_callback(self, future) -> None:
         self.goal_request_pending = False
@@ -822,11 +904,11 @@ class PatrolRuntimeManager(Node):
             goal_handle = future.result()
         except Exception as exc:
             goal_handle = None
-            self.runtime_reason = "LOCAL_DETOUR_TRANSPORT: %s" % exc
+            self.runtime_reason = "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
         if goal_handle is None or not goal_handle.accepted:
             self.last_failure_class = "CONTROLLER_FAILED"
-            if not self.runtime_reason.startswith("LOCAL_DETOUR_TRANSPORT"):
-                self.runtime_reason = "LOCAL_DETOUR_REJECTED"
+            if not self.runtime_reason.startswith("NAV2_DETOUR_MPPI_TRANSPORT"):
+                self.runtime_reason = "NAV2_DETOUR_MPPI_REJECTED"
             self._schedule_recovery("DETOUR", self.runtime_reason)
             return
         self.goal_handle = goal_handle
@@ -837,7 +919,7 @@ class PatrolRuntimeManager(Node):
             goal_handle.get_result_async().add_done_callback(self._result_callback)
             return
         self.runtime_state = "PATROLLING"
-        self.runtime_reason = "LOCAL_DETOUR_ACCEPTED"
+        self.runtime_reason = "NAV2_DETOUR_MPPI_ACCEPTED"
         goal_handle.get_result_async().add_done_callback(self._result_callback)
 
     def _request_mppi_suffix(self, reason: str) -> bool:
@@ -880,6 +962,16 @@ class PatrolRuntimeManager(Node):
     def _schedule_recovery(self, mode: str, reason: str) -> None:
         """Keep the patrol alive while waiting for fresh planning evidence."""
 
+        # A late planner/controller callback must never resurrect a patrol
+        # after the independent operator-stop lane has revoked it.
+        if self.stop_requested:
+            self.recovery_pending = ""
+            self.recovery_requested_at = None
+            self.recovery_reason = ""
+            self.runtime_state = "READY"
+            self.runtime_reason = "STOPPED"
+            self._finish_active_start_attempt("STOPPED", "STOPPED")
+            return
         self.recovery_pending = str(mode)
         self.recovery_requested_at = time.monotonic()
         self.recovery_reason = str(reason)
@@ -1033,6 +1125,8 @@ class PatrolRuntimeManager(Node):
         )
         if not readiness.ready:
             return readiness
+        if not self.planner_client.server_is_ready():
+            return PatrolReadiness(False, "DEGRADED", "NAV2_PLANNER_UNAVAILABLE")
         costmap = self._costmap_health()
         if not costmap.healthy:
             return PatrolReadiness(False, "FAULT", costmap.reason)
@@ -1070,6 +1164,8 @@ class PatrolRuntimeManager(Node):
         )
         if not readiness.ready:
             return readiness
+        if not self.planner_client.server_is_ready():
+            return PatrolReadiness(False, "POSITIONING", "NAV2_PLANNER_UNAVAILABLE")
         costmap = self._costmap_health()
         if not costmap.healthy:
             return PatrolReadiness(
@@ -1208,6 +1304,12 @@ class PatrolRuntimeManager(Node):
         try:
             goal_handle = future.result()
         except Exception as exc:  # ROS action transport failure
+            if self.stop_requested:
+                attempt.mark_goal_decision(False, reason="STOPPED")
+                self.runtime_state = "READY"
+                self.runtime_reason = "STOPPED"
+                self._finish_active_start_attempt("STOPPED", "STOPPED")
+                return
             self.runtime_state = "FAULT"
             self.runtime_reason = "NAV2_GOAL_TRANSPORT: %s" % exc
             attempt.mark_goal_decision(False, reason=self.runtime_reason)
@@ -1215,6 +1317,12 @@ class PatrolRuntimeManager(Node):
             self.active_start_attempt = None
             return
         if not goal_handle.accepted:
+            if self.stop_requested:
+                attempt.mark_goal_decision(False, reason="STOPPED")
+                self.runtime_state = "READY"
+                self.runtime_reason = "STOPPED"
+                self._finish_active_start_attempt("STOPPED", "STOPPED")
+                return
             self.runtime_state = "FAULT"
             self.runtime_reason = "NAV2_GOAL_REJECTED"
             attempt.mark_goal_decision(False, reason=self.runtime_reason)
@@ -1345,7 +1453,7 @@ class PatrolRuntimeManager(Node):
                 self._schedule_recovery("MPPI", decision.reason)
                 return
             if decision.action == RecoveryAction.START_DETOUR:
-                if self._try_local_replan():
+                if self._try_global_replan():
                     return
                 self._schedule_recovery("DETOUR", "SEARCHING_FOR_PATH")
                 return
@@ -1371,6 +1479,8 @@ class PatrolRuntimeManager(Node):
         self.runtime_reason = "STOP_REQUESTED"
         if self.goal_handle is not None:
             self.goal_handle.cancel_goal_async()
+        if self.planner_goal_handle is not None:
+            self.planner_goal_handle.cancel_goal_async()
         elif not self.goal_request_pending:
             self._finish_active_start_attempt("STOPPED", "STOP_REQUESTED")
         response.success = True
@@ -1390,6 +1500,8 @@ class PatrolRuntimeManager(Node):
         if self.goal_handle is not None:
             self.stop_requested = False
             self.goal_handle.cancel_goal_async()
+        if self.planner_goal_handle is not None:
+            self.planner_goal_handle.cancel_goal_async()
 
     def _request_resume(self) -> None:
         if self.goal_handle is not None or self.goal_request_pending:
@@ -1557,7 +1669,7 @@ class PatrolRuntimeManager(Node):
                         self.recovery_pending = ""
                         self.recovery_requested_at = None
                         self.recovery_reason = ""
-                        if not self._try_local_replan():
+                        if not self._try_global_replan():
                             self._schedule_recovery(
                                 "DETOUR", "SEARCHING_FOR_PATH"
                             )
@@ -1696,8 +1808,8 @@ class PatrolRuntimeManager(Node):
                 "NONE"
                 if self.goal_handle is None
                 else (
-                    "RPP_LOCAL_DETOUR_TO_REJOIN"
-                    if self.active_controller == ControllerMode.DETOUR_RPP
+                    "MPPI_NAV2_GLOBAL_DETOUR_TO_REJOIN"
+                    if self.active_controller == ControllerMode.DETOUR_MPPI
                     else "MPPI_RECORDED_ROUTE"
                 )
             ),

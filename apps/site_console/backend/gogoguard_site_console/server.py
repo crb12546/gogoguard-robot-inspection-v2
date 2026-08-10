@@ -51,6 +51,23 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/map-jobs/([A-Za-z0-9-]+)", path)
             if match:
                 return self._json(200, self.server.application.map_job(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/navigation-workspace",
+                path,
+            )
+            if match:
+                return self._json(
+                    200,
+                    self.server.application.navigation_workspace(match.group(1)),
+                )
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/glim-editor",
+                path,
+            )
+            if match:
+                return self._json(
+                    200, self.server.application.glim_editor_status(match.group(1))
+                )
             match = re.fullmatch(r"/api/v1/incidents/(incident-[A-Za-z0-9-]+)", path)
             if match:
                 return self._json(200, self.server.application.incident(match.group(1)))
@@ -123,6 +140,32 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/retry", path)
             if match:
                 return self._json(202, self.server.application.retry_map_job(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/navigation-workspace",
+                path,
+            )
+            if match:
+                return self._json(
+                    200,
+                    self.server.application.update_navigation_workspace(
+                        match.group(1), self._body()
+                    ),
+                )
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/glim-editor/(start|publish|stop)",
+                path,
+            )
+            if match:
+                action = match.group(2)
+                if action == "start":
+                    value = self.server.application.start_glim_editor(match.group(1))
+                    return self._json(201, value)
+                if action == "publish":
+                    value = self.server.application.publish_glim_editor(match.group(1))
+                    return self._json(201, value)
+                return self._json(
+                    200, self.server.application.stop_glim_editor(match.group(1))
+                )
             if path == "/api/v1/navigation/runtime/start":
                 body = self._body()
                 return self._json(200, self.server.application.start_navigation_runtime(str(body.get("candidate_id", ""))))

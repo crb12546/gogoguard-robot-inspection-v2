@@ -324,6 +324,56 @@ class MapJobManager:
         if return_code != 0:
             raise MapWorkerError("".join(output[-40:]).strip() or "cloud GLIM failed")
 
+    def import_edited(
+        self, parent_job_id: str, job_id: str, artifact_root: Path
+    ) -> dict:
+        """Register an immutable map version exported by the official GLIM editor."""
+        parent = self.get(parent_job_id)
+        if parent.state != MapJobState.COMPLETE:
+            raise MapWorkerError("parent GLIM map is not complete")
+        if not re.fullmatch(r"map-[A-Za-z0-9]{12}", job_id):
+            raise MapWorkerError("edited GLIM map id is invalid")
+        artifact_root = Path(artifact_root)
+        required = {"map.json", "map.ply", "overview.svg", "glim-build.json"}
+        if not required.issubset({path.name for path in artifact_root.iterdir()}):
+            raise MapWorkerError("edited GLIM artifact set is incomplete")
+        artifact = json.loads((artifact_root / "map.json").read_text(encoding="utf-8"))
+        if (
+            artifact.get("source") != "cloud-glim"
+            or artifact.get("parent_map_job_id") != parent_job_id
+            or artifact.get("editor") != "official-glim-map-editor"
+        ):
+            raise MapWorkerError("edited GLIM artifact provenance is invalid")
+        prefix = f"/artifacts/{job_id}"
+        job = MapJob(
+            job_id=job_id,
+            session_id=parent.session_id,
+            state=MapJobState.COMPLETE,
+            progress=100,
+            stage="complete",
+            message="GLIM 手工清理地图已返回",
+            artifact_root=str(artifact_root),
+            overview_url=prefix + "/overview.svg",
+            point_cloud_url=prefix + "/map.json",
+            metrics={
+                "worker": "cloud-glim-editor",
+                "parent_map_job_id": parent_job_id,
+                "point_count": len(artifact.get("points") or []),
+            },
+        )
+        with self._lock:
+            if job_id in self._jobs or (self.root / job_id / "job.json").exists():
+                raise MapWorkerError("edited GLIM map id already exists")
+            self._jobs[job_id] = job
+            self._save(job)
+        self.journal.append(
+            "map.edited",
+            job_id=job_id,
+            parent_job_id=parent_job_id,
+            worker="official-glim-map-editor",
+        )
+        return json_ready(job)
+
     @staticmethod
     def _write_ply(path: Path, points: list[list[float]]) -> None:
         header = ["ply", "format ascii 1.0", f"element vertex {len(points)}", "property float x", "property float y", "property float z", "end_header"]

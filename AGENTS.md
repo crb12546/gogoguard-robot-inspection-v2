@@ -26,6 +26,10 @@ the Mac, cloud or SaaS being online.
 - Read `PROJECT_STATE.md` section **New-task handoff — start here** first. Use
   its current snapshot and final next-work list; consult dated sections only
   for the evidence or provenance needed by the task.
+- For product-level, system-architecture or algorithm-selection questions, read
+  `docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md` before proposing changes. Keep its
+  distinctions between deployed capability, known defect, candidate and planned
+  capability explicit in every explanation.
 - Read `docs/generated/repository-index.md`, then only the manifest for the
   primary module being changed.
 - State the primary owning module and any necessary cross-module contract

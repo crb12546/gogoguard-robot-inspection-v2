@@ -16,7 +16,7 @@ from typing import Deque, Iterable, Optional, Protocol, Sequence
 
 class ControllerMode(str, Enum):
     MPPI = "MPPI"
-    DETOUR_RPP = "DETOUR_RPP"
+    DETOUR_MPPI = "DETOUR_MPPI"
 
 
 class FailureClass(str, Enum):
@@ -142,7 +142,7 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
             evidence.costmap_reason or "COSTMAP_UNHEALTHY",
         )
     if evidence.route_obstructed:
-        if evidence.controller == ControllerMode.DETOUR_RPP:
+        if evidence.controller == ControllerMode.DETOUR_MPPI:
             return FailureDecision(
                 FailureClass.PATH_OBSTRUCTED,
                 RecoveryAction.SEARCH_PATH,
@@ -159,7 +159,7 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
             RecoveryAction.RETRY_ACTUATION,
             "ACTUATION_RECOVERY",
         )
-    if evidence.controller == ControllerMode.DETOUR_RPP:
+    if evidence.controller == ControllerMode.DETOUR_MPPI:
         return FailureDecision(
             FailureClass.CONTROLLER_FAILED,
             RecoveryAction.SEARCH_PATH,
@@ -177,7 +177,7 @@ def controller_success_action(
 ) -> ControllerSuccessAction:
     """Make the controller ownership handoff explicit and replayable."""
 
-    if controller == ControllerMode.DETOUR_RPP:
+    if controller == ControllerMode.DETOUR_MPPI:
         return ControllerSuccessAction.RESUME_MPPI_SUFFIX
     return ControllerSuccessAction.COMPLETE_ROUTE
 
