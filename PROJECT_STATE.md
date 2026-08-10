@@ -11,12 +11,14 @@ conflicts with this section or the final paragraph of this file.
 
 ### Overall product status
 
-GoGoGuard V2 is a **field-commissioning system with one real core vertical
+GoGoGuard V2 is a **field-commissioning system with one real mobility vertical
 slice**, not a completed inspection product. The robot -> Mac -> cloud -> Mac ->
-robot loop has produced real maps and completed real route patrols. The current
-work is proving and productizing reliable autonomous movement. Inspection
-actions, mission execution, SaaS integration, realtime dialogue and remote
-teleoperation remain later or parallel slices.
+robot loop has produced real maps and completed real route patrols. V6 mobility
+is now frozen as the operator-accepted release baseline. The previously
+independent realtime-dialogue implementation has been merged behind its own
+default-disabled module, and the next product work is the thin checkpoint
+inspection composition; it has offline contracts and tests but is not yet a
+deployed end-to-end inspection mission.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -29,10 +31,10 @@ teleoperation remain later or parallel slices.
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is the working delivery console and includes the GLIM/map/route/allowed-area preparation workflow at `http://127.0.0.1:8080/` | It remains an engineering/field UI rather than a finished operator product |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
-| Inspection actions/evidence | Camera live preview works | Checkpoint photo/video actions and versioned inspection evidence are not implemented |
-| Mission/task system | Boundary is designed | Mission state machine, checkpoint orchestration and result aggregation are not implemented |
+| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; a checksummed bounded offline evidence buffer and explicit Z1Pro capability declaration are implemented offline | Gimbal static commissioning, frame-capture/platform adapters, robot deployment and end-to-end evidence upload remain pending |
+| Mission/task system | A pure map/route-bound checkpoint state machine now defines route-index arrival, correlated true-stop proof, inspection, platform/offline continuation and suffix resume | Navigation pause/resume adapter, platform API binding, persistence and real mission aggregation are not implemented |
 | SaaS integration | Existing GoGoGuard SaaS is retained as an external system | Device agent, task/result contract integration and operational rollout are not implemented in V2 |
-| Realtime dialogue and teleoperation | Realtime dialogue has an independent development branch; Unitree low-level motion boundary exists | Neither dialogue nor remote teleoperation is integrated into the deployed inspection product |
+| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module is merged, retains its real disposable-probe evidence, defaults disabled and has no motion API; the P1.5 heartbeat/start/stop bridge and frozen-V6 combined ARM64 release are built and tested offline | Robot installation, live platform heartbeat, static media and concurrent patrol acceptance remain pending, and remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
 
@@ -132,9 +134,11 @@ these decisions and lessons when continuing in a new conversation:
     while actual mean remained about 0.30 m/s. That is a partial improvement,
     not completion of speed commissioning.
 12. **Parallel feature work now has an explicit integration boundary.**
-    Realtime dialogue lives on its own branch/worktree and is not deployed with
-    inspection navigation. It can later integrate through declared contracts;
-    it must not silently merge composition, deployment or motion ownership.
+    Realtime dialogue was developed on its own branch and has now been merged
+    into the V6 integration branch as the independent `interaction` module. It
+    remains default-disabled and cannot issue motion commands. Checkpoint work
+    composes it through contracts instead of merging media or cloud-model code
+    into navigation.
 
 The recurring lesson is to diagnose the whole ownership and data path before
 changing a local parameter. A field symptom may be algorithmic, orchestration,
@@ -143,10 +147,11 @@ boundaries and receipts to distinguish them.
 
 ### Product and execution boundaries
 
-- The current acceptance loop is record map -> cloud GLIM -> review/publish ->
-  fixed-map localization -> recorded-route Nav2/MPPI patrol. Inspection media,
-  SaaS dispatch, realtime dialogue and remote teleoperation are separate
-  product slices and must not be mixed into navigation debugging.
+- The current accepted mobility loop is record map -> cloud GLIM ->
+  review/publish -> fixed-map localization -> recorded-route Nav2/MPPI patrol.
+  Realtime media is now present in the same source tree but remains a separate
+  module and activation path. Inspection, SaaS dispatch and remote
+  teleoperation must not be mixed into navigation debugging.
 - Robot owns live ROS, localization, Nav2, obstacle handling and Unitree motion.
   Mac owns `http://127.0.0.1:8080/`, history, transfer, review, orchestration and
   release publication. Alibaba Cloud owns only the pinned GLIM job. GitHub
@@ -158,8 +163,10 @@ boundaries and receipts to distinguish them.
 ### Current deployed and live snapshot
 
 - Active product worktree: this repository on branch
-  `agent/three-end-field-workstation`. It contains local commits not yet pushed
-  to `origin/agent/three-end-field-workstation`; do not claim GitHub is current.
+  `agent/three-end-field-workstation`. Operator-accepted V6 was frozen in
+  `922b301`; the independent interaction branch was merged in `6e842d1`. The
+  branch and current checkpoint-inspection work have not yet been pushed, so do
+  not claim GitHub is current.
 - Last verified robot release is
   `gogoguard-robot-inspection:v2-edge-20260810-v6-r4`, built from the local
   worktree at HEAD `d0e29173c7f33f2cff1e89390195a1fa955c07ca` plus the
@@ -1505,3 +1512,100 @@ layer or direct interaction-to-motion path as a shortcut.
   concurrent acceptance. Dialogue remains isolated from motion; any future
   patrol pause/resume or action request goes through the patrol safety owner and
 requires an explicit success receipt.
+
+## 2026-08-10 combined V6, realtime interaction and checkpoint foundation
+
+- The operator accepted the latest V6 patrol for release. Its exact mobility
+  source is frozen in `922b301`; no navigation/controller/safety parameter is
+  changed by the checkpoint foundation below.
+- Realtime interaction commit `3215515` was merged by `6e842d1`. The merged
+  module preserves the already proven LiveKit video/audio, BOYA microphone,
+  Go2 speaker, half-duplex interruption, reconnect, token validation, persona
+  and data-channel status. It defaults disabled, imports no navigation
+  implementation and exposes no motion command. This is source integration,
+  not a new robot deployment or concurrent patrol receipt.
+- The dog-side response to the GoGoGuard phase-2 alignment is
+  `docs/GOGOGUARD_PHASE2_DOG_REPLY.md`. It deliberately distinguishes field
+  evidence, offline implementation, hardware capability and product support.
+  The platform can now define its wire API without assuming unavailable pause,
+  gimbal, buffer or pose-stream behavior.
+- Shared contracts now define a map/route-bound mission, ordered checkpoint
+  views, a pause-correlated true-stop receipt, inspection-frame identity and
+  mission status. The pure `mission` state machine uses monotonic route progress
+  rather than a six-metre platform guess, requires a matching pause request and
+  stable zero-motion evidence, resumes the retained route suffix, and permits
+  offline continuation only when the downloaded mission preauthorizes it and
+  evidence is durably buffered.
+- The independent `inspection` module implements a bounded atomic JPEG/PNG
+  queue with SHA-256, idempotent frame IDs, FIFO capacity enforcement, upload
+  acknowledgement and tamper detection. The planned default is 2,000 frames / 4
+  GiB, but capability remains false until a platform checkpoint adapter and
+  robot storage/load acceptance exist.
+- A commissioning-gated Z1Pro GCU codec/adapter lives in `device_io`. It matches
+  the official V2.0.6 null, pitch and yaw packet CRC examples and parses the
+  official response example with CRC validation. Official hardware limits are
+  declared, but `gimbal.supported` remains false: the vendor's +/-0.01 degree
+  figure is stabilization accuracy, not accepted repeat positioning, and the
+  robot still needs a static pan/tilt/settle/repeatability test. The adapter
+  never moves the dog.
+- `GET /api/v1/capabilities` now serves the versioned fail-closed robot profile.
+  It truthfully records that the existing interaction video and LiveKit data
+  channel are available while the 10 Hz pose publisher is not yet integrated.
+  The localization source is about 10 Hz and the existing navigation public
+  status is about 5 Hz; the platform topic/serializer must reuse the existing
+  LiveKit session after the wire contract is agreed.
+- A separate `platform_edge` service now implements the documented P1.5
+  five-second outbound heartbeat, sends read-only navigation/interaction/
+  capability state, forwards only `start_live`, `stop_live` and
+  `wake_transcript`, and persists only bounded command-ID hashes for
+  deduplication. It rejects commands for another robot and every motion action;
+  token, URL and room are never written to its ledger or status. The adapter
+  supports an optional per-device bearer token, but the current platform test
+  endpoint's robotId-only authentication remains unsuitable for production.
+- No checkpoint adapter, gimbal motion, new container, robot install, runtime
+  start or physical motion was performed in this foundation phase. The next
+  implementation starts from the platform's interface agreement, then performs
+  a dog-lying-down gimbal/static release check before any combined patrol.
+
+## 2026-08-10 combined realtime release built; robot joint acceptance pending
+
+- The release is intentionally derived from the field-accepted V6-r4 image ID
+  `sha256:b8ca1b65ede57fa0f7ca2cfefa3c1490b905717aa3681d245128fa4e9081269c`.
+  Its 32 rootfs layers are the exact prefix of all 44 combined-image layers.
+  `Dockerfile.combined` performs no apt operation, so Ubuntu, ROS, Nav2, MPPI,
+  localization and Unitree native binaries are not rebuilt or upgraded.
+- The retained real-probe ARM64 wheelhouse contains exactly 29 pinned media
+  distributions. Every wheel passed the tracked SHA-256 manifest before an
+  offline install under `/opt/gogoguard/interaction-python`. Only the two
+  realtime daemons receive this import path. Image checks prove the accepted
+  system runtime still uses NumPy 1.21.5 while interaction uses NumPy 2.0.2.
+- The release image is
+  `gogoguard-robot-inspection:v2-edge-20260810-combined-live-r1`, Linux/ARM64,
+  image ID
+  `sha256:6027a7d17ff961da1772a308b074bb4b24568871c126d291b0f9b47dbd18f11c`
+  and Docker size 1,388,559,726 bytes. In-image system/application/native-media
+  imports, all three console entry points and `pip check` pass.
+- The ignored immutable release directory is
+  `release-cache/v2-edge-20260810-combined-live-r1/`. Its 1,388,612,096-byte
+  image archive passed SHA-256 with
+  `9e25dca2cbee5784cd81ccb60b0e65155231055094fc5545d7ef272d4fbce174`.
+  The archive contains the installer, systemd unit, runtime files, clock gate,
+  run wrapper and explicit combined-joint-test configuration helper.
+- Installing a new release no longer overwrites an existing root-only robot
+  environment. A disposable install test proves that commissioned Unitree and
+  custom values are preserved, missing defaults are appended, file mode stays
+  0600 and the service is not started. The explicit configuration helper
+  refuses a missing Unitree key, enables secure HTTPS/WSS defaults when the key
+  exists, preserves the key and still does not start the service.
+- Final offline evidence at this checkpoint is 143 repository tests, 7/7
+  in-image platform/Unix/interaction-flow tests, 19/19 in-image interaction and
+  device-I/O tests, compilation, UI smoke, container contract, generated
+  repository knowledge, shell/JSON checks and a clean diff check. The complete
+  platform-facing handoff is
+  `docs/GOGOGUARD_COMBINED_LIVEKIT_JOINT_TEST_HANDOFF.md`.
+- The combined image has not been installed on the dog. Tomorrow's acceptance
+  remains explicit: install with the service stopped; keep the dog lying down;
+  configure interaction and heartbeat; prove static `start_live`/media/wake/
+  interrupt/refresh/reconnect/`stop_live` with zero motion; only then run one
+  accepted V6 patrol concurrently for ten minutes. Do not activate unfinished
+  checkpoint, gimbal or pose-publisher capabilities during this acceptance.

@@ -13,12 +13,13 @@ this index describes code state and never implies robot acceptance.
 | `device_io` | Livox, IMU, camera and Unitree hardware boundaries; ROS types remain inside adapters | robot | `robot_sensors_camera_deployed_receiver_090_headroom_static_verified_motion_pending` | `contracts` |
 | `evidence` | Append-only runtime events, bounded passive incident capture and immutable receipts; no product decision logic or motion gating | robot, cloud, workstation | `runtime_trace_and_production_lightweight_incident_ring_deployed_motion_receipt_pending` | `contracts` |
 | `field_workstation` | Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment | workstation, browser | `cloud_glim_editor_and_navigation_workspace_running_save_publish_field_verified` | `contracts`, `transfer`, `map_factory`, `site_console`, `evidence` |
-| `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `planned` | `contracts`, `device_io`, `evidence` |
+| `inspection` | Camera, video and site inspection actions at route checkpoints | robot | `checkpoint_evidence_buffer_and_contract_implemented_offline_platform_adapter_pending` | `contracts`, `device_io`, `evidence` |
 | `interaction` | Robot-side realtime multimodal session, half-duplex echo safety, playback interruption and platform status without motion ownership | robot | `real_disposable_probe_verified_formal_runtime_implemented_offline_robot_pending` | `contracts`, `device_io` |
 | `localization` | FAST-LIO local odometry plus continuous VGICP localization against one GLIM map | robot | `vgicp_latest_only_three_frame_recovery_deployed_static_field_acceptance_pending` | `contracts`, `device_io`, `calibration` |
 | `map_factory` | Submit a sealed recording to cloud GLIM, provide isolated official map editing, and return immutable map versions | workstation, cloud | `cloud_glim_roundtrip_and_official_editor_export_verified` | `contracts`, `evidence` |
-| `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `planned` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
+| `mission` | Inspection task state machine and orchestration without algorithm ownership | robot, cloud | `checkpoint_state_machine_and_true_stop_contract_implemented_offline_navigation_adapter_pending` | `contracts`, `route`, `navigation`, `inspection`, `evidence` |
 | `navigation` | Execute a map-bound route with one MPPI controller, Nav2 global bypass planning, continuous recovery and localization-hold ownership | robot | `single_mppi_smac_keepout_v6_generation_5_candidate_ready_motion_acceptance_pending` | `contracts`, `localization`, `route` |
+| `platform_edge` | Outbound GoGoGuard heartbeat and allow-listed realtime interaction command bridge without navigation control | robot | `heartbeat_start_live_stop_live_adapter_implemented_offline_robot_pending` | `contracts`, `interaction` |
 | `route` | Versioned map-bound route model, validation and execution request | robot, workstation, cloud | `navigation_workspace_generation_5_candidate_published_motion_acceptance_pending` | `contracts`, `map_factory` |
 | `site_console` | Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs | robot, workstation, browser | `map_workbench_running_navigation_workspace_save_publish_field_verified` | `contracts`, `device_io`, `data_capture`, `transfer`, `map_factory`, `route`, `localization`, `navigation`, `evidence` |
 | `transfer` | Immutable and resumable artifact exchange across robot, workstation and cloud boundaries | robot, workstation | `immutable_map_and_mutable_navigation_workspace_republish_field_verified` | `contracts`, `evidence` |
@@ -40,8 +41,8 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `modules/contracts`, `contracts`
 - Entrypoints: none yet
 - Consumes: none
-- Produces: SensorSnapshot, RecordingBundle, MapJob, DiagnosticProfile, IncidentBundle, InteractionCapabilities, InteractionSessionStatus, ConversationWakeStatus
-- Provenance: V2 product contract; 2026-08-08 temporary development diagnostics and immutable incident evidence contract; 2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled; 2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract
+- Produces: SensorSnapshot, RecordingBundle, MapJob, DiagnosticProfile, IncidentBundle, InteractionCapabilities, InteractionSessionStatus, ConversationWakeStatus, MissionPlan, MissionStatus, NavigationStopReceipt, InspectionFrame
+- Provenance: V2 product contract; 2026-08-08 temporary development diagnostics and immutable incident evidence contract; 2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled; 2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract; 2026-08-10 GoGoGuard checkpoint-inspection alignment section 4
 
 ### `data_capture`
 
@@ -56,9 +57,9 @@ this index describes code state and never implies robot acceptance.
 
 - Manifest: `architecture/modules/device_io.json`
 - Code roots: `modules/device_io`, `config/robot/livox-mid360s.json`, `config/robot/mediamtx.yml`, `config/robot/interaction-hardware.json`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`, `third_party/locked_stack/src/go2_cmd_vel_bridge`, `third_party/locked_stack/src/unitree_api`
-- Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
+- Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `gogoguard_device_io.z1pro_gimbal:Z1ProGimbal`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
 - Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, BOYA S24_3LE stereo PCM, agent-voice 48k mono PCM, safety-filtered Twist
-- Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, 48k mono microphone PCM, bounded Go2 speaker PCM, Unitree SDK2 Move and StopMove
+- Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, commissioning-gated Z1Pro GCU packet/feedback, 48k mono microphone PCM, bounded Go2 speaker PCM, Unitree SDK2 Move and StopMove
 - Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release; 2026-08-09 BOYA mini 2 commissioned as S24_3LE stereo 48 kHz input; 4x gain and Go2 volume 10 passed disposable real-device probes; field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP; commissioned replacement MID-360S ARMCP6B0035634 at 192.168.1.134; live probe verified 10 Hz point cloud and 200 Hz IMU on 2026-08-08; 2026-08-09 the commissioned 0.60 m/s forward and 0.20 m/s lateral Unitree receiver is an owned device_io source instead of a navigation build overlay; 2026-08-09 orchestration-r2 prepares explicit posture before requiring the zero-motion baseline; real receiver and Nav2 startup passed; 2026-08-09 planar-release-r4 directly invokes the one-shot motion probe with the receiver's paired Unitree library boundary; robot StopMove receipt and remote-control release both passed; 2026-08-09 continuous-r1 deploys the owned receiver envelope with 0.90 m/s forward and 0.60 rad/s yaw headroom while retaining finite validation, the 250 ms command watchdog and StopMove ownership; static robot receipt kept the receiver stopped and UDP 5005 unbound
 
 ### `evidence`
@@ -82,11 +83,11 @@ this index describes code state and never implies robot acceptance.
 ### `inspection`
 
 - Manifest: `architecture/modules/inspection.json`
-- Code roots: none yet
-- Entrypoints: none yet
-- Consumes: inspection action request
-- Produces: image evidence, video evidence, action result
-- Provenance: Z1Pro capability will be selectively migrated after navigation slice
+- Code roots: `modules/inspection`, `config/robot/inspection-capabilities.json`
+- Entrypoints: `gogoguard_inspection.buffer:EvidenceFrameBuffer`
+- Consumes: InspectionViewPlan, timestamped JPEG or PNG frame, map-bound pose and localization quality
+- Produces: InspectionFrame, checksummed offline evidence queue, action result
+- Provenance: 2026-08-10 GoGoGuard checkpoint-inspection alignment; official Z-1Pro product page, user manual V1.4 and GCU private protocol V2.0.6; platform adapter and robot static acceptance remain pending
 
 ### `interaction`
 
@@ -94,7 +95,7 @@ this index describes code state and never implies robot acceptance.
 - Code roots: `modules/interaction`, `services/interaction_edge`, `config/robot/interaction-persona.json`, `docs/realtime-interaction.md`
 - Entrypoints: `gogoguard_interaction.session:InteractionManager`, `gogoguard_interaction_edge.__main__:main`
 - Consumes: start_live/stop_live command, platform finalized ASR transcript, Z1Pro H264, BOYA PCM, agent-voice, gogoguard.playback_control.v1
-- Produces: robot-microphone, z1pro-camera, Go2 speaker PCM, gogoguard.interaction_session_status.v1, gogoguard.conversation_wake_status.v1
+- Produces: robot-microphone, z1pro-camera, Go2 speaker PCM, LiveKit data-connected receipt, gogoguard.interaction_session_status.v1, gogoguard.conversation_wake_status.v1
 - Provenance: GoGoGuard P0/P1 written protocol dated 2026-08-06 and 2026-08-09; 2026-08-09 disposable BOYA/Z1Pro/Go2/LiveKit probe receipts; selective session-state port from superseded realtime-interaction-spike branch; no stale composition merged
 
 ### `localization`
@@ -118,11 +119,11 @@ this index describes code state and never implies robot acceptance.
 ### `mission`
 
 - Manifest: `architecture/modules/mission.json`
-- Code roots: none yet
-- Entrypoints: none yet
-- Consumes: inspection task
-- Produces: mission state, mission result
-- Provenance: V2 module boundary
+- Code roots: `modules/mission`
+- Entrypoints: `gogoguard_mission.state_machine:MissionCoordinator`
+- Consumes: MissionPlan, monotonic route progress, NavigationStopReceipt, inspection action result, platform continue request
+- Produces: MissionStatus, checkpoint reached event, pause/inspect/resume requests, mission result
+- Provenance: V2 module boundary; 2026-08-10 GoGoGuard checkpoint-inspection alignment section 4
 
 ### `navigation`
 
@@ -132,6 +133,15 @@ this index describes code state and never implies robot acceptance.
 - Consumes: released blue route, green allowed-area mask, map pose, local obstacle cloud
 - Produces: safe velocity candidate, navigation progress and operation lifecycle, single-MPPI controller ownership, SmacPlanner2D bypass receipt, classified failure evidence, layered diagnostics
 - Provenance: old go2_nav2_runtime tree f2a8c21b and interfaces tree 295bd539 from commit 3a7597c; ROS 2 Humble FollowPath, MPPI Omni, Regulated Pure Pursuit, VoxelLayer and Collision Monitor; 2026-08-06 field correction prepares balance posture before Nav2, samples forward gait from 0.20 m/s and rejects future-stamped obstacle clouds; 2026-08-07 delivery refactor adds one persistent runtime supervisor, bounded local-costmap A* to a future route rejoin anchor, route-suffix recovery, localization dropout hysteresis, versioned parameter profiles and layered diagnostics; 2026-08-07 delivery compatibility accepted the commissioned 0.60 m/s route contract; runtime readiness and background reaping own the Unitree motion bridge for the complete Nav2 process lifetime; 2026-08-08 field trace map-6a79b7795da6 proved A* could find a local detour while MPPI twice rejected execution; 2026-08-08 trace map-71b045489e8a reached route index 94/121 with localization tracking, then exposed two independent defects: SlowZone reduced DetourPath from 0.20 to 0.17 m/s below the Go2 gait floor, and the VoxelLayer sensor origin at -0.29 to -0.32 m sat below its -0.15 m raytrace bound; 2026-08-08 release evidence-detour-r3 sets DetourPath to 0.24 m/s so the final slowed command remains 0.204 m/s and expands VoxelLayer to -0.60 through 1.48 m; ARM64 image and static robot deployment passed, physical detour acceptance remains pending; 2026-08-09 map-8ddcf3f8c078 replay exposed a transient MPPI abort being misclassified as obstruction, RPP retaining the full route past its rejoin anchor and a later actuation stall being mislabeled blocked; owned V2 runtime code now separates obstruction, transient controller, localization and actuation evidence, gives RPP only the local segment and returns the suffix to MPPI; Humble PoseProgressChecker counts either 0.15 m translation or 0.15 rad rotation as progress; 2026-08-09 orchestration-r2 deployed; real runtime and motion-bridge startup passed, wrong-environment localization correctly remained unauthorized, matching-map clear and obstructed patrol receipts pending; 2026-08-09 matching-map incident proved the 3D odom frame was an invalid height datum for the 2D local costmap; correction uses map-frame planar obstacles, post-clear health synchronization, temporal obstruction proof and a full stop-and-release control contract; 2026-08-09 planar-release-r4 deployed; fixed-map localization and continuous map-frame costmap reached READY, MPPI followed map-71b045489e8a to 76.7%, and an operator-confirmed table-created dead end correctly produced PATH_OBSTRUCTED after a 2.12 ms A* search found no route; direct paired-SDK StopMove and remote-control release passed; passable detour/rejoin remains pending; 2026-08-09 speed-chain evidence showed a saved 0.90 m/s request only changed final mean command from about 0.316 to 0.326 m/s; the receiver can execute at most 0.60 m/s forward, 0.20 m/s lateral and 0.50 rad/s yaw. Profile v3 aligns those limits, migrates impossible V2 values, increases clear-route MPPI sampling from 700 to 1000 with speed-scaled vx noise, and raises PathFollow progress authority; 2026-08-09 cruise-r1 deployed from a615ab9; the checksummed ARM64 release is enabled and active with sensors online, profile v3 migrated to receiver limits, MPPI batch 1000, and Nav2 plus the motion bridge stopped; 2026-08-09 cruise-r1 same-route field receipt reduced completion time from 33.20 to 30.20 seconds and raised final-command p90 from 0.402 to 0.435 m/s, but odometry-integrated mean remained 0.297 m/s. Collision handling reduced the raw mean by only about 2%; sustained MPPI/path-follow speed remains the tuning target; 2026-08-09 continuous-r1 deploys continuous recovery, restores short gate holds, separates the 0.60 m/s cruise objective from 0.90 m/s control headroom, raises acceleration to 2.0 m/s2 and filters isolated floor/self collision returns; static receipt passed with profile revision 4, Nav2 and motion bridge stopped, and physical route acceptance pending; 2026-08-09 profile v5 correction removes VelocityDeadbandCritic as a false minimum-speed objective and restores the last route-completing MPPI, smoother, turn and detour envelope while retaining continuous recovery and the 0.90 m/s receiver hard ceiling; release complete-r1 from e651e84 is deployed, static robot receipts pass with Nav2 and the motion bridge stopped, and one complete-route receipt remains pending; 2026-08-10 v6-r3 fixes the field-proven radius-only costmap versus MPPI polygon-footprint contradiction; strict validation and isolated ARM64 controller lifecycle configuration pass, static robot deployment is active, and real-runtime acceptance remains pending
+
+### `platform_edge`
+
+- Manifest: `architecture/modules/platform_edge.json`
+- Code roots: `services/platform_edge`, `deployment/container/edge-entrypoint`
+- Entrypoints: `gogoguard_platform_edge.__main__:main`
+- Consumes: navigation read-only status, interaction read-only status, robot capability profile, GoGoGuard heartbeat response
+- Produces: gogoguard.robot_heartbeat.v1, deduplicated start_live/stop_live Unix commands, gogoguard.platform_edge_status.v1
+- Provenance: GoGoGuard P1.5 platform delivery dated 2026-08-09; current platform test endpoint accepts robotId only; optional per-device bearer support is implemented but production device authentication remains an explicit platform gap
 
 ### `route`
 
@@ -147,8 +157,8 @@ this index describes code state and never implies robot acceptance.
 - Manifest: `architecture/modules/site_console.json`
 - Code roots: `apps/site_console`
 - Entrypoints: `gogoguard_site_console.__main__:main`
-- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status, DiagnosticProfile, IncidentBundle replay, gogoguard.interaction_edge_status.v1
-- Produces: guided next-action workflow, GLIM editor controls, blue-route and green-allowed-area editor, operation receipts, time-ordered and operator-labeled map history, field visualization, parameter and diagnostic views, diagnostic-mode controls, synchronized incident timeline
+- Consumes: SensorSnapshot, CameraStreamStatus, RecordingSession, MapJob, navigation and localization status, DiagnosticProfile, IncidentBundle replay, gogoguard.interaction_edge_status.v1, gogoguard.platform_edge_status.v1, gogoguard.robot_capabilities.v1
+- Produces: guided next-action workflow, GLIM editor controls, blue-route and green-allowed-area editor, operation receipts, time-ordered and operator-labeled map history, field visualization, parameter and diagnostic views, diagnostic-mode controls, synchronized incident timeline, read-only interaction/platform/capability APIs
 - Provenance: V2 implementation; old Site Console intentionally not migrated wholesale; 2026-08-06 robot/workstation ownership correction; 2026-08-07 browser-tested delivery UX removes redundant prepare action after publication and explains every operator step; asynchronous navigation operation failures remain visible with their exact supervisor message instead of collapsing into a generic timeout; 2026-08-08 operation completion is explicitly a request receipt rather than route success; successful polling clears stale transient errors and patrol, replanning, detour, blocked and fault states have distinct operator wording; 2026-08-08 live browser receipt displayed BLOCKED as route obstruction while keeping the completed patrol operation explicitly scoped to request submission; 2026-08-08 browser-tested development/acceptance/production diagnostic modes and evidence-completeness-aware incident replay; 2026-08-08 field correction blocks patrol against a stale running map and guides the operator to switch Nav2 to the selected candidate; 2026-08-09 persistent stop-and-release control remains available in active, blocked and fault states, bypasses unrelated busy operations and reports Unitree motion-bridge and remote-control release; 2026-08-09 continuous-r1 deploys the navigation profile v4 target/headroom/acceleration/deceleration and continuous-replan UI, displays RECOVERING and SEARCHING_PATH as active states, and explains automatic lightweight production evidence; robot API receipt passed and physical browser/motion acceptance remains pending
 
 ### `transfer`

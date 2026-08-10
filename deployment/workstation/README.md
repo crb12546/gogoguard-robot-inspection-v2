@@ -34,6 +34,11 @@ for the exact field sequence and recovery actions.
 Robot publication is deliberately two-phase so the dog does not wait for a
 five-gigabyte image export. Run `prepare-robot-release` while the dog is off,
 then use `stage-robot-release` only after the wired SSH endpoint is online.
+The installer preserves an existing root-only robot environment. For the
+combined realtime joint test, run
+`sudo /opt/gogoguard/bin/configure-combined-joint-test` after installation and
+before the first stationary service start; the helper refuses to enable the
+services when the commissioned Unitree key is missing.
 
 Port 8080 is published to the Mac while outbound robot/cloud traffic uses the
 normal container network.

@@ -11,6 +11,8 @@ class ArchitectureBoundaryTest(unittest.TestCase):
         module_roots = {
             "gogoguard_device_io", "gogoguard_data_capture", "gogoguard_evidence",
             "gogoguard_map_factory", "gogoguard_interaction",
+            "gogoguard_inspection", "gogoguard_mission",
+            "gogoguard_platform_edge",
         }
         failures = []
         for path in [*root.glob("modules/*/**/*.py"), *root.glob("services/*/**/*.py")]:

@@ -24,7 +24,7 @@ command -v ssh >/dev/null
 command -v rsync >/dev/null
 
 for required in gogoguard-edge-image.tar gogoguard-edge-image.tar.sha256 \
-  runtime.env release.env runtime.json run-edge wait-clock-sync \
+  runtime.env release.env runtime.json run-edge configure-combined-joint-test wait-clock-sync \
   gogoguard-edge.service install-release; do
   if [[ ! -f $PREPARED_DIRECTORY/$required ]]; then
     echo "prepared release is missing: $required" >&2
@@ -37,3 +37,4 @@ rsync -a --partial --progress "$PREPARED_DIRECTORY/" "$ROBOT_TARGET:$REMOTE_STAG
 
 echo "Release staged at $ROBOT_TARGET:$REMOTE_STAGING"
 echo "Activation remains explicit: ssh -t $ROBOT_TARGET sudo $REMOTE_STAGING/install-release $REMOTE_STAGING"
+echo "Combined joint-test setup remains explicit: sudo /opt/gogoguard/bin/configure-combined-joint-test"

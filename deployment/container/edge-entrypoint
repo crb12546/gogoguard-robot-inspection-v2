@@ -13,6 +13,12 @@ readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP6B0035634}
 readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
 readonly INTERACTION_ENABLED=${GOGOGUARD_INTERACTION_ENABLED:-0}
 readonly INTERACTION_ALLOW_INSECURE_WS=${GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS:-0}
+readonly PLATFORM_HEARTBEAT_ENABLED=${GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED:-0}
+readonly PLATFORM_HEARTBEAT_URL=${GOGOGUARD_PLATFORM_HEARTBEAT_URL:-}
+readonly PLATFORM_HEARTBEAT_INTERVAL_S=${GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S:-5}
+readonly PLATFORM_HEARTBEAT_TLS_INSECURE=${GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE:-0}
+readonly PLATFORM_HEARTBEAT_HOST_HEADER=${GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER:-}
+readonly PLATFORM_HEARTBEAT_ALLOW_HTTP=${GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP:-0}
 mkdir -p "$LOG_ROOT"
 
 declare -a CHILD_PIDS=()
@@ -66,8 +72,46 @@ if [[ "$INTERACTION_ENABLED" == "1" ]]; then
   if [[ "$INTERACTION_ALLOW_INSECURE_WS" == "1" ]]; then
     interaction_args+=(--allow-insecure-ws)
   fi
-  setsid gogoguard-interaction-edge "${interaction_args[@]}" \
+  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+    gogoguard-interaction-edge "${interaction_args[@]}" \
     >"$LOG_ROOT/interaction.log" 2>&1 &
+  CHILD_PIDS+=("$!")
+fi
+
+if [[ "$PLATFORM_HEARTBEAT_ENABLED" == "1" ]]; then
+  if [[ "$INTERACTION_ENABLED" != "1" ]]; then
+    echo "platform heartbeat requires the interaction service" >&2
+    exit 78
+  fi
+  if [[ -z "$PLATFORM_HEARTBEAT_URL" ]]; then
+    echo "platform heartbeat enabled but GOGOGUARD_PLATFORM_HEARTBEAT_URL is empty" >&2
+    exit 78
+  fi
+  interaction_deadline=$((SECONDS + 10))
+  while [[ ! -S /var/lib/gogoguard/interaction/control.sock ]]; do
+    if (( SECONDS >= interaction_deadline )); then
+      echo "interaction control socket did not become ready" >&2
+      exit 70
+    fi
+    sleep 0.1
+  done
+  platform_args=(
+    --robot-id "$ROBOT_ID"
+    --url "$PLATFORM_HEARTBEAT_URL"
+    --interval "$PLATFORM_HEARTBEAT_INTERVAL_S"
+  )
+  if [[ "$PLATFORM_HEARTBEAT_TLS_INSECURE" == "1" ]]; then
+    platform_args+=(--tls-insecure)
+  fi
+  if [[ -n "$PLATFORM_HEARTBEAT_HOST_HEADER" ]]; then
+    platform_args+=(--host-header "$PLATFORM_HEARTBEAT_HOST_HEADER")
+  fi
+  if [[ "$PLATFORM_HEARTBEAT_ALLOW_HTTP" == "1" ]]; then
+    platform_args+=(--allow-insecure-http)
+  fi
+  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+    gogoguard-platform-edge "${platform_args[@]}" \
+    >"$LOG_ROOT/platform-heartbeat.log" 2>&1 &
   CHILD_PIDS+=("$!")
 fi
 

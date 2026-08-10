@@ -1,0 +1,12 @@
+{
+  "id": "platform_edge",
+  "responsibility": "Outbound GoGoGuard heartbeat and allow-listed realtime interaction command bridge without navigation control",
+  "runtime": ["robot"],
+  "status": "heartbeat_start_live_stop_live_adapter_implemented_offline_robot_pending",
+  "codeRoots": ["services/platform_edge", "deployment/container/edge-entrypoint"],
+  "entrypoints": ["gogoguard_platform_edge.__main__:main"],
+  "dependsOn": ["contracts", "interaction"],
+  "consumes": ["navigation read-only status", "interaction read-only status", "robot capability profile", "GoGoGuard heartbeat response"],
+  "produces": ["gogoguard.robot_heartbeat.v1", "deduplicated start_live/stop_live Unix commands", "gogoguard.platform_edge_status.v1"],
+  "sourceProvenance": ["GoGoGuard P1.5 platform delivery dated 2026-08-09", "current platform test endpoint accepts robotId only; optional per-device bearer support is implemented but production device authentication remains an explicit platform gap"]
+}

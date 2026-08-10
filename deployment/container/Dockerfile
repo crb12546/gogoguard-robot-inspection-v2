@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM gogoguard-robot-inspection:v2-dev AS mediamtx_seed
-FROM gogoguard-locked-deps:20260805 AS locked_robot_deps
+FROM gogoguard-robot-inspection:v2-dev@sha256:e5ed6cc638b87cfaa0baa37461198c3bc289f4ae8d9b8ea8997db1f2eea2f558 AS mediamtx_seed
+FROM gogoguard-locked-deps:20260805@sha256:f3f3a0645d3e4dd197e65edabd40185189a03fa84d792ce4aef5b1f28a3d8089 AS locked_robot_deps
 
-FROM --platform=linux/arm64 ros:humble-ros-base-jammy
+FROM --platform=linux/arm64 ros:humble-ros-base-jammy@sha256:7bea3d9aa2483d3ca34c8e30d921b79273b0913bd7dc64bebf51d082b5d107e4
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble

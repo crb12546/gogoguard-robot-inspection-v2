@@ -7,6 +7,6 @@
   "entrypoints": ["gogoguard_interaction.session:InteractionManager", "gogoguard_interaction_edge.__main__:main"],
   "dependsOn": ["contracts", "device_io"],
   "consumes": ["start_live/stop_live command", "platform finalized ASR transcript", "Z1Pro H264", "BOYA PCM", "agent-voice", "gogoguard.playback_control.v1"],
-  "produces": ["robot-microphone", "z1pro-camera", "Go2 speaker PCM", "gogoguard.interaction_session_status.v1", "gogoguard.conversation_wake_status.v1"],
+  "produces": ["robot-microphone", "z1pro-camera", "Go2 speaker PCM", "LiveKit data-connected receipt", "gogoguard.interaction_session_status.v1", "gogoguard.conversation_wake_status.v1"],
   "sourceProvenance": ["GoGoGuard P0/P1 written protocol dated 2026-08-06 and 2026-08-09", "2026-08-09 disposable BOYA/Z1Pro/Go2/LiveKit probe receipts", "selective session-state port from superseded realtime-interaction-spike branch; no stale composition merged"]
 }

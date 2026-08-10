@@ -30,8 +30,21 @@ It pulls the commissioned Z1Pro H.264 RTSP stream on demand and exposes the LAN
 WebRTC player on TCP 8889 with ICE on TCP/UDP 8189. This is a remux-only live
 preview; it does not own patrol recording or inspection evidence.
 
+The image also contains two default-disabled realtime services. `interaction`
+owns LiveKit/BOYA/Z1Pro/Go2 media and has no motion API. `platform_edge` owns
+the outbound GoGoGuard heartbeat and can forward only allow-listed realtime
+commands into the interaction Unix socket. Enabling the platform heartbeat
+without enabling interaction fails startup. Tokens and platform device
+credentials are runtime environment values; they are not built into the image
+or release archive.
+
 `install-release` validates the transferred image archive, loads it, and
-installs the runtime files. Installation is separate from activation so a bad
+installs the runtime files. An existing root-only `runtime.env` is preserved;
+only release defaults that are not already present are appended, so installing
+an image cannot erase a commissioned Unitree key or device credential. Run
+`sudo /opt/gogoguard/bin/configure-combined-joint-test` to enable the secure
+interaction and heartbeat switches after that key is present. The helper does
+not start the service. Installation and activation remain separate so a bad
 release cannot silently replace a running one. Once the stationary receipts
 pass, the production policy is to keep this service running and enable it at
 boot. Explicit Docker stop handling keeps later upgrades under systemd control.

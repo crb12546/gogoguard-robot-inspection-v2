@@ -2,11 +2,11 @@
   "id": "inspection",
   "responsibility": "Camera, video and site inspection actions at route checkpoints",
   "runtime": ["robot"],
-  "status": "planned",
-  "codeRoots": [],
-  "entrypoints": [],
+  "status": "checkpoint_evidence_buffer_and_contract_implemented_offline_platform_adapter_pending",
+  "codeRoots": ["modules/inspection", "config/robot/inspection-capabilities.json"],
+  "entrypoints": ["gogoguard_inspection.buffer:EvidenceFrameBuffer"],
   "dependsOn": ["contracts", "device_io", "evidence"],
-  "consumes": ["inspection action request"],
-  "produces": ["image evidence", "video evidence", "action result"],
-  "sourceProvenance": ["Z1Pro capability will be selectively migrated after navigation slice"]
+  "consumes": ["InspectionViewPlan", "timestamped JPEG or PNG frame", "map-bound pose and localization quality"],
+  "produces": ["InspectionFrame", "checksummed offline evidence queue", "action result"],
+  "sourceProvenance": ["2026-08-10 GoGoGuard checkpoint-inspection alignment", "official Z-1Pro product page, user manual V1.4 and GCU private protocol V2.0.6; platform adapter and robot static acceptance remain pending"]
 }

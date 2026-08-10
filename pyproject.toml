@@ -16,6 +16,7 @@ gogoguard-navigation-observer = "gogoguard_navigation.observer:main"
 gogoguard-navigation-supervisor = "gogoguard_navigation.supervisor:main"
 gogoguard-incident-recorder = "gogoguard_evidence.incident_recorder:main"
 gogoguard-interaction-edge = "gogoguard_interaction_edge.__main__:main"
+gogoguard-platform-edge = "gogoguard_platform_edge.__main__:main"
 
 [tool.setuptools.packages.find]
 where = [
@@ -23,6 +24,8 @@ where = [
   "modules/calibration",
   "modules/device_io",
   "modules/interaction",
+  "modules/inspection",
+  "modules/mission",
   "modules/data_capture",
   "modules/evidence",
   "modules/transfer",
@@ -30,6 +33,7 @@ where = [
   "modules/navigation",
   "services/map_factory",
   "services/interaction_edge",
+  "services/platform_edge",
   "apps/site_console/backend",
   "apps/field_workstation/backend",
 ]

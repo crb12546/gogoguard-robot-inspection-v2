@@ -6,11 +6,14 @@ PACKAGES = {
     "gogoguard_calibration": "modules/calibration/gogoguard_calibration",
     "gogoguard_device_io": "modules/device_io/gogoguard_device_io",
     "gogoguard_interaction": "modules/interaction/gogoguard_interaction",
+    "gogoguard_inspection": "modules/inspection/gogoguard_inspection",
+    "gogoguard_mission": "modules/mission/gogoguard_mission",
     "gogoguard_data_capture": "modules/data_capture/gogoguard_data_capture",
     "gogoguard_evidence": "modules/evidence/gogoguard_evidence",
     "gogoguard_transfer": "modules/transfer/gogoguard_transfer",
     "gogoguard_map_factory": "services/map_factory/gogoguard_map_factory",
     "gogoguard_interaction_edge": "services/interaction_edge/gogoguard_interaction_edge",
+    "gogoguard_platform_edge": "services/platform_edge/gogoguard_platform_edge",
     "gogoguard_route": "modules/route/gogoguard_route",
     "gogoguard_navigation": "modules/navigation/gogoguard_navigation",
     "gogoguard_site_console": "apps/site_console/backend/gogoguard_site_console",
@@ -35,6 +38,7 @@ setup(
             "gogoguard-navigation-supervisor=gogoguard_navigation.supervisor:main",
             "gogoguard-incident-recorder=gogoguard_evidence.incident_recorder:main",
             "gogoguard-interaction-edge=gogoguard_interaction_edge.__main__:main",
+            "gogoguard-platform-edge=gogoguard_platform_edge.__main__:main",
         ]
     },
 )

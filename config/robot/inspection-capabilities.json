@@ -1,0 +1,63 @@
+{
+  "schema": "gogoguard.robot_capabilities.v1",
+  "revision": 1,
+  "routeExecution": {
+    "supported": true,
+    "model": "map_bound_route",
+    "routeProgressIndex": true,
+    "checkpointEvent": false
+  },
+  "pauseResume": {
+    "supported": false,
+    "reason": "navigation_has_internal_recovery_but_no_platform_checkpoint_pause_adapter"
+  },
+  "gimbal": {
+    "supported": false,
+    "hardwareSupported": true,
+    "commissioningStatus": "official_protocol_integrated_robot_static_acceptance_pending",
+    "manufacturer": "Nanjing Xianfei Robot Technology",
+    "model": "Z-1Pro",
+    "transport": "tcp://192.168.144.108:2332",
+    "controlMode": "gcu_angle_control_0x10",
+    "panFrame": "carrier_relative",
+    "tiltFrame": "euler_attitude",
+    "absoluteWorld": false,
+    "panDeg": [-140.0, 140.0],
+    "tiltDeg": [-110.0, 120.0],
+    "maxControlSpeedDegS": 150.0,
+    "recommendedCommandHz": [30, 50],
+    "stabilizationAccuracyDeg": 0.01,
+    "repeatabilityDeg": null,
+    "settleTimeS": null
+  },
+  "stillCapture": {
+    "supported": true,
+    "mode": "platform_frame_from_live_video",
+    "usesExistingInteractionVideo": true,
+    "resolution": [1920, 1080],
+    "nativePhotoHardwareSupported": true,
+    "nativePhotoCommand": "gcu_shutter_0x20",
+    "nativePhotoMaxResolution": [2688, 1520],
+    "nativePhotoRetrievalIntegrated": false,
+    "interruptsLiveVideo": null
+  },
+  "offlineBuffer": {
+    "supported": false,
+    "implementationPresent": true,
+    "reason": "buffer_is_implemented_but_not_bound_to_a_platform_checkpoint_contract",
+    "maxFrames": 2000,
+    "maxBytes": 4294967296
+  },
+  "poseStream": {
+    "supported": false,
+    "sourceHz": 10,
+    "publicStatusHz": 5,
+    "livekitDataChannelAvailable": true,
+    "posePublisherIntegrated": false,
+    "reason": "existing_livekit_data_channel_is_connected_but_pose_publisher_and_platform_topic_contract_are_not_yet_integrated"
+  },
+  "lowBatteryReturn": {
+    "supported": false,
+    "reason": "no_commissioned_dock_or_return_route"
+  }
+}

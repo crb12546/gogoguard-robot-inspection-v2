@@ -15,13 +15,14 @@ from gogoguard_transfer import EdgeArtifactExchange
 class InspectionApplication:
     def __init__(self, *, data_root: Path, mode: str, map_worker: str, robot_id: str, site_id: str,
                  topics: dict[str, str], sensor_id: str = "ARMCP6B0035634", cloud: dict | None = None,
-                 camera: dict | None = None) -> None:
+                 camera: dict | None = None, capabilities: dict | None = None) -> None:
         data_root.mkdir(parents=True, exist_ok=True)
         self.data_root = data_root
         self.mode = mode
         self.robot_id = robot_id
         self.site_id = site_id
         self.sensor_id = sensor_id
+        self.capability_profile = dict(capabilities or {})
         self.store = SnapshotStore(robot_id, mode, data_root)
         self.journal = EventJournal(data_root / "events" / "runtime.jsonl")
         self.diagnostic_profiles = DiagnosticProfileStore(data_root)
@@ -66,6 +67,18 @@ class InspectionApplication:
     def camera_status(self) -> dict:
         return json_ready(self.camera.status())
 
+    def capabilities(self) -> dict:
+        value = json_ready(self.capability_profile)
+        if value.get("schema") != "gogoguard.robot_capabilities.v1":
+            return {
+                "schema": "gogoguard.robot_capabilities.v1",
+                "revision": 0,
+                "robotId": self.robot_id,
+                "available": False,
+                "reason": "capability_profile_unavailable",
+            }
+        return {**value, "robotId": self.robot_id, "available": True}
+
     def interaction_status(self) -> dict:
         path = self.data_root / "interaction" / "status.json"
         try:
@@ -78,6 +91,23 @@ class InspectionApplication:
                 "schema": "gogoguard.interaction_edge_status.v1",
                 "enabled": False,
                 "message": "实时对话服务尚未启用",
+                "motionCommandsPermitted": False,
+            }
+
+    def platform_status(self) -> dict:
+        path = self.data_root / "platform" / "status.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict) or value.get("schema") != "gogoguard.platform_edge_status.v1":
+                raise ValueError("invalid platform status schema")
+            return value
+        except FileNotFoundError:
+            return {
+                "schema": "gogoguard.platform_edge_status.v1",
+                "robotId": self.robot_id,
+                "online": False,
+                "enabled": False,
+                "message": "GoGoGuard 平台心跳服务尚未启用",
                 "motionCommandsPermitted": False,
             }
 

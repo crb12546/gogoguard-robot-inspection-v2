@@ -10,7 +10,9 @@ VUI volume and bounded speaker buffering. The composition service is
 
 The runtime imports no navigation implementation and has no motion command
 API. `/api/v1/interaction` is read-only observability served from the status
-file. Platform commands enter only through the local Unix socket.
+file. `platform_edge` sends the outbound GoGoGuard heartbeat and forwards only
+allow-listed `start_live`, `stop_live` and `wake_transcript` commands through
+the local Unix socket. It cannot forward a movement command.
 
 ## Commissioned device profile
 
@@ -44,7 +46,7 @@ Default socket:
 /var/lib/gogoguard/interaction/control.sock
 ```
 
-The existing GoGoGuard heartbeat adapter sends one JSON object plus newline and
+The GoGoGuard heartbeat adapter sends one JSON object plus newline and
 reads one JSON response. Maximum request size is 64 KiB.
 
 Status:
@@ -102,6 +104,36 @@ The current IP-only development endpoint requires the robot-local
 `GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS=1` setting. A platform payload cannot
 downgrade TLS. Production keeps the setting at `0` and requires `wss`.
 
+## Platform heartbeat adapter
+
+`gogoguard-platform-edge` posts every five seconds to the configured
+`POST /api/v1/robot/heartbeat`. It reads navigation and interaction status
+files only; it has no ROS import, supervisor socket or motion API. The payload
+includes map-frame pose, final observed velocity, patrol state/progress,
+interaction session status and the fail-closed capability profile.
+
+Command IDs are deduplicated in a root-readable bounded ledger containing only
+SHA-256 ID hashes, action names and completion times. LiveKit tokens, URLs and
+rooms stay in memory and are never written to the ledger or platform-adapter
+status. A refreshed token must arrive under a new command ID, matching the
+platform P1.5 contract.
+
+Read-only status is exposed at `/api/v1/platform`. The deploy-time switches are:
+
+```text
+GOGOGUARD_INTERACTION_ENABLED=1
+GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED=1
+GOGOGUARD_PLATFORM_HEARTBEAT_URL=https://gogoguard.cn/api/v1/robot/heartbeat
+GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S=5
+```
+
+`GOGOGUARD_DEVICE_TOKEN` is an optional per-device bearer credential. The
+current platform test endpoint documented on 2026-08-09 accepts `robotId`
+without a device credential, so it can be used for joint testing but must not
+be described as production authentication. TLS verification and `wss` remain
+the default. The two insecure flags exist only for the previously documented
+IP/WebSocket commissioning fallback and cannot be set by a platform command.
+
 ## Secret and activation policy
 
 The image contains no LiveKit API secret, GoGoGuard development secret,
@@ -121,6 +153,29 @@ control bridge are present. The edge service treats an enabled interaction
 process as required: an unexpected daemon exit causes the managed container to
 restart instead of presenting stale readiness.
 
+## Combined release construction
+
+The combined image extends the exact field-accepted V6-r4 image ID
+`sha256:b8ca1b65ede57fa0f7ca2cfefa3c1490b905717aa3681d245128fa4e9081269c`.
+`Dockerfile.combined` performs no `apt` operation and therefore does not
+replace the accepted Ubuntu, ROS, Nav2, MPPI or Unitree binaries. The 29 ARM64
+media wheels are the retained real-probe wheelhouse, are fully version-pinned,
+and must pass `interaction-wheelhouse.sha256` before offline installation.
+They are installed under `/opt/gogoguard/interaction-python`; only the two
+realtime daemons receive that `PYTHONPATH`, so their NumPy 2.0.2 cannot replace
+the accepted ROS process NumPy 1.21.5.
+
+The build uses the retained probe wheel directories as named BuildKit
+contexts:
+
+```bash
+docker buildx build --platform linux/arm64 --load \
+  -t gogoguard-robot-inspection:v2-edge-20260810-combined-live-r1 \
+  --build-context interaction_webrtc_wheels=runtime-data/interaction-probe/go2-webrtc-wheels \
+  --build-context interaction_livekit_wheels=runtime-data/interaction-probe/wheelhouse \
+  -f deployment/container/Dockerfile.combined .
+```
+
 ## Acceptance still required
 
 Offline tests and disposable probes do not prove the formal runtime on the
@@ -128,7 +183,8 @@ robot. Acceptance order is:
 
 1. Build the ARM64 image and verify all Python/native imports in-image.
 2. Install without activating interaction; verify patrol behavior is unchanged.
-3. Enable interaction and perform a static, zero-motion media start/stop.
+3. Enable interaction and the outbound heartbeat, then perform a static,
+   zero-motion platform `start_live`/`stop_live`.
 4. Verify 小玖 identity, wake/sleep behavior, visual freshness refusal and
    ordered interruption.
 5. Run a 10 minute session, then run interaction concurrently with an accepted

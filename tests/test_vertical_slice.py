@@ -67,3 +67,25 @@ class VerticalSliceTest(unittest.TestCase):
         status = self.app.interaction_status()
         self.assertFalse(status["enabled"])
         self.assertFalse(status["motionCommandsPermitted"])
+
+    def test_platform_status_is_read_only_and_has_no_motion_surface(self) -> None:
+        status = self.app.platform_status()
+        self.assertFalse(status["online"])
+        self.assertFalse(status["motionCommandsPermitted"])
+
+    def test_capability_status_fails_closed_without_a_profile(self) -> None:
+        status = self.app.capabilities()
+        self.assertFalse(status["available"])
+        self.assertEqual(status["revision"], 0)
+
+    def test_capability_status_reuses_existing_realtime_transport_truthfully(self) -> None:
+        profile = json.loads(
+            (Path(__file__).resolve().parents[1]
+             / "config/robot/inspection-capabilities.json").read_text(encoding="utf-8")
+        )
+        self.app.capability_profile = profile
+        status = self.app.capabilities()
+        self.assertTrue(status["available"])
+        self.assertTrue(status["stillCapture"]["usesExistingInteractionVideo"])
+        self.assertTrue(status["poseStream"]["livekitDataChannelAvailable"])
+        self.assertFalse(status["poseStream"]["posePublisherIntegrated"])

@@ -59,6 +59,19 @@ class ConversationWakeState(str, Enum):
     AWAKE = "awake"
 
 
+class MissionState(str, Enum):
+    IDLE = "idle"
+    TRAVELING = "traveling"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+    INSPECTING = "inspecting"
+    WAITING_CONTINUE = "waiting_continue"
+    RESUMING = "resuming"
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+
+
 @dataclass
 class DeviceStatus:
     schema: str = "gogoguard.device_status.v1"
@@ -162,6 +175,87 @@ class ConversationWakeStatus:
     last_activity_at: str | None = None
     sleep_reason: str | None = None
     observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InspectionViewPlan:
+    """One camera direction, with the Z1Pro's mixed angle frames made explicit."""
+
+    view_id: str
+    pan_body_deg: float = 0.0
+    tilt_euler_deg: float = 0.0
+    roll_euler_deg: float = 0.0
+    settle_s: float = 0.5
+
+
+@dataclass(frozen=True)
+class CheckpointPlan:
+    checkpoint_id: str
+    route_progress_index: int
+    views: tuple[InspectionViewPlan, ...] = ()
+
+
+@dataclass(frozen=True)
+class MissionPlan:
+    schema: str = "gogoguard.mission_plan.v1"
+    mission_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    offline_continue_after_evidence: bool = False
+    checkpoints: tuple[CheckpointPlan, ...] = ()
+
+
+@dataclass(frozen=True)
+class NavigationStopReceipt:
+    """Proof of a stopped command chain, not acknowledgement of a request."""
+
+    schema: str = "gogoguard.navigation_stop_receipt.v1"
+    mission_id: str = ""
+    checkpoint_id: str = ""
+    pause_request_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    route_progress_index: int = 0
+    stopped: bool = False
+    motion_authorized: bool = False
+    linear_speed_mps: float = 0.0
+    angular_speed_rps: float = 0.0
+    stable_for_s: float = 0.0
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InspectionFrame:
+    schema: str = "gogoguard.inspection_frame.v1"
+    frame_id: str = ""
+    mission_id: str = ""
+    checkpoint_id: str = ""
+    view_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    captured_at: str = field(default_factory=utc_now)
+    pose: dict[str, float] = field(default_factory=dict)
+    localization_quality: dict[str, Any] = field(default_factory=dict)
+    content_type: str = "image/jpeg"
+    sha256: str = ""
+    byte_count: int = 0
+
+
+@dataclass
+class MissionStatus:
+    schema: str = "gogoguard.mission_status.v1"
+    mission_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    state: MissionState = MissionState.IDLE
+    checkpoint_index: int = 0
+    active_checkpoint_id: str | None = None
+    pause_request_id: str | None = None
+    route_progress_index: int = 0
+    resume_route_progress_index: int = 0
+    reason: str = "IDLE"
+    resumable: bool = False
+    updated_at: str = field(default_factory=utc_now)
 
 
 @dataclass
