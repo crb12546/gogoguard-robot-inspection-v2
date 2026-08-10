@@ -1429,3 +1429,79 @@ Passable-obstacle/rejoin and a complete retained full-route trace remain useful
 mobility repeatability receipts, but they are no longer blockers for freezing
 the user-accepted V6 release baseline. Do not add another controller, safety
 layer or direct interaction-to-motion path as a shortcut.
+
+## 2026-08-09 realtime multimodal interaction (formal runtime offline; robot deployment pending)
+
+- A disposable, ignored robot probe completed real BOYA mini 2 + Z1Pro + Go2
+  speaker + LiveKit + Qwen-Omni loops before formalization. The final 185.83
+  second run published 9,000 BOYA frames and 3,495 1080p video frames, received
+  9,212 platform audio frames, handled 18 ordered playback-stop messages and
+  reported zero speaker-buffer drops. Platform health ended idle with
+  `currentError=null`, no reconnect, 18 new turns, first-audio latency P50
+  0.712 seconds and P95 1.248 seconds. Process use was about 1.28 CPU cores,
+  232 MiB RSS and 57.75 C maximum temperature. The run sent zero motion
+  commands; motion authorization stayed false and the final command stayed
+  zero. Those facts prove the disposable design and commissioned devices, not
+  the new formal runtime.
+- The formal `interaction` module now validates ephemeral `start_live` JWT
+  identity, room, permissions and expiry; makes repeated commands idempotent;
+  refreshes the in-memory reconnect token; redacts secrets from status/errors;
+  implements half-duplex microphone mute and ordered reliable playback flush;
+  and reports `gogoguard.interaction_session_status.v1` without importing
+  navigation or cloud-model code.
+- The `device_io` interaction boundary fixes the commissioned BOYA format at
+  S24_3LE stereo 48 kHz with 4x gain, Z1Pro at 1920x1080 and requested 30 FPS,
+  and Go2 output at 48 kHz mono 20 ms. A 120 ms prebuffer plus bounded 3 second
+  queue exposes prebuffer, underflow, overflow and flush counters. An owned VUI
+  helper applies and reads back the required 10/10 speaker volume at session
+  start.
+- The versioned robot persona is `小玖`, developed by
+  `北京零零壹玖科技有限公司`, with an explicit rule that stale or absent video
+  cannot support a current visual claim and that conversation has no motion
+  authority. Media-live and conversation-wake states are separate. The first
+  production wake contract accepts `小玖小玖` and the ASR homophone `小九小九`,
+  acknowledges `我在`, sleeps after 30 seconds of inactivity and supports
+  explicit end phrases. Platform-side ASR owns first-release wake detection;
+  local offline KWS is a later enhancement.
+- `gogoguard-interaction-edge` exposes only a local Unix JSON control socket
+  for the existing authenticated GoGoGuard heartbeat adapter. It has no inbound
+  public control port and no motion command surface. The formal service is
+  image-present but defaults disabled; production requires local enablement and
+  the per-device Unitree key. The image, repository or status never contains a
+  GoGoGuard development secret, LiveKit signing secret, DashScope key or
+  persisted LiveKit JWT. The runtime environment file is installed mode 0600.
+- Offline interaction-focused evidence is 19 tests plus the unchanged project
+  suite. Formal ARM64 image build, robot install, platform heartbeat bridge,
+  小玖 persona deployment, visual-freshness refusal, ten-minute media run and
+  concurrent patrol/resource acceptance remain pending. The current insecure
+  IP WebSocket is allowed only by a robot-local development flag; production
+  remains fail-closed to `wss` until GoGoGuard resolves its SNI path.
+
+## 2026-08-09 realtime interaction standalone stage closed
+
+- Product decision: stop realtime interaction as a standalone delivery. Do not
+  schedule another interaction-only GoGoGuard response or robot run. Preserve
+  `agent/realtime-dialogue-v1`, finish field acceptance of patrol first, then
+  integrate from the latest patrol commit and request one combined patrol plus
+  interaction acceptance. The complete handoff is
+  `docs/stage-handoff-realtime-interaction-20260809.md`.
+- GoGoGuard P1.5 evidence is accepted for later joint re-verification of the
+  versioned Xiaojiu persona, identity answers, visual-context freshness/reset,
+  desired-live/JWT refresh/stop flow, and participant-SID reconnect ownership.
+  It does not close the wake requirement: the response contains no wake/sleep
+  evidence or health fields, and its own identity tests answered ordinary
+  speech without `小玖小玖`. It also describes heartbeat `robotId` as the only
+  device recognition mechanism; that is identification, not authentication.
+  Per-device authenticated and replay-resistant heartbeat plus a robot-4G
+  production TLS/SNI receipt remain required.
+- Local evidence at closure is 99 passing tests plus successful compilation,
+  repository-knowledge validation, container-contract validation and diff
+  checks. The Linux/ARM64 build reached the final Python dependency layer after
+  the patrol/ROS native layers, then failed on a `files.pythonhosted.org` read
+  timeout. No formal image was produced, no retry is required in this closed
+  stage, and the formal runtime was never installed on the robot.
+- Next phase must complete the combined capability set and heartbeat adapter,
+  then build and regress patrol with interaction disabled before static and
+  concurrent acceptance. Dialogue remains isolated from motion; any future
+  patrol pause/resume or action request goes through the patrol safety owner and
+requires an explicit success receipt.

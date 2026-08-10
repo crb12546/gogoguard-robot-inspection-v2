@@ -31,6 +31,8 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.live())
             if path == "/api/v1/camera":
                 return self._json(200, self.server.application.camera_status())
+            if path == "/api/v1/interaction":
+                return self._json(200, self.server.application.interaction_status())
             if path == "/api/v1/navigation":
                 return self._json(200, self.server.application.navigation_status())
             if path == "/api/v1/navigation/profile":

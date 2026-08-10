@@ -7,6 +7,6 @@
   "entrypoints": [],
   "dependsOn": [],
   "consumes": [],
-  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle"],
-  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract", "2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled"]
+  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle", "InteractionCapabilities", "InteractionSessionStatus", "ConversationWakeStatus"],
+  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract", "2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled", "2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract"]
 }

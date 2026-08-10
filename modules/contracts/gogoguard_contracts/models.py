@@ -45,6 +45,20 @@ class IncidentState(str, Enum):
     FAILED = "failed"
 
 
+class InteractionSessionState(str, Enum):
+    IDLE = "idle"
+    CONNECTING = "connecting"
+    LIVE = "live"
+    DEGRADED = "degraded"
+    STOPPING = "stopping"
+    FAILED = "failed"
+
+
+class ConversationWakeState(str, Enum):
+    SLEEPING = "sleeping"
+    AWAKE = "awake"
+
+
 @dataclass
 class DeviceStatus:
     schema: str = "gogoguard.device_status.v1"
@@ -76,6 +90,77 @@ class CameraStreamStatus:
     profile: str | None = None
     level: str | None = None
     message: str = "camera stream is not configured"
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InteractionCapabilities:
+    """Robot media-terminal capabilities; cloud AI is deliberately excluded."""
+
+    schema: str = "gogoguard.interaction_capabilities.v1"
+    video_uplink: bool = False
+    audio_uplink: bool = False
+    audio_downlink: bool = False
+    data_channel: bool = False
+    echo_control: str = "half_duplex"
+
+
+@dataclass(frozen=True)
+class RealtimeMediaSessionRequest:
+    """Validated connection request. The ephemeral token must never be logged."""
+
+    command_id: int | str
+    robot_id: str
+    url: str
+    room: str
+    token: str = field(repr=False, compare=False)
+    token_expires_at: str = ""
+    publish_video: bool = True
+    publish_audio: bool = True
+    subscribe_audio: bool = True
+    publish_data: bool = True
+
+
+@dataclass(frozen=True)
+class MediaConnectionReceipt:
+    participant_id: str
+    video_published: bool
+    audio_published: bool
+    audio_subscribed: bool
+    data_connected: bool
+
+
+@dataclass
+class InteractionSessionStatus:
+    """Public session state. Endpoint URLs and access tokens are excluded."""
+
+    schema: str = "gogoguard.interaction_session_status.v1"
+    robot_id: str = "go2-unconfigured"
+    room: str = ""
+    state: InteractionSessionState = InteractionSessionState.IDLE
+    desired_live: bool = False
+    participant_id: str = ""
+    video_published: bool = False
+    audio_published: bool = False
+    audio_subscribed: bool = False
+    data_connected: bool = False
+    microphone_muted: bool = False
+    token_expires_at: str | None = None
+    degraded_reason: str | None = None
+    last_error_code: str | None = None
+    last_error: str | None = None
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class ConversationWakeStatus:
+    schema: str = "gogoguard.conversation_wake_status.v1"
+    state: ConversationWakeState = ConversationWakeState.SLEEPING
+    wake_phrase: str = "小玖小玖"
+    wake_sequence: int = 0
+    awakened_at: str | None = None
+    last_activity_at: str | None = None
+    sleep_reason: str | None = None
     observed_at: str = field(default_factory=utc_now)
 
 

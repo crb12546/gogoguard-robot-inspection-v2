@@ -49,7 +49,7 @@ install -d -m 0755 /opt/gogoguard/bin /etc/gogoguard /var/lib/gogoguard
 install -m 0755 "$STAGING_DIRECTORY/run-edge" /opt/gogoguard/bin/run-edge
 install -m 0755 "$STAGING_DIRECTORY/wait-clock-sync" \
   /opt/gogoguard/bin/wait-clock-sync
-install -m 0644 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
+install -m 0600 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
 install -m 0644 "$STAGING_DIRECTORY/release.env" /etc/gogoguard/release.env
 install -m 0644 "$STAGING_DIRECTORY/runtime.json" /etc/gogoguard/runtime.json
 install -m 0644 "$STAGING_DIRECTORY/gogoguard-edge.service" \

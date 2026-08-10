@@ -62,3 +62,8 @@ class VerticalSliceTest(unittest.TestCase):
         self.app.start_recording()
         with self.assertRaises(Exception):
             self.app.start_recording()
+
+    def test_interaction_status_is_read_only_and_disabled_until_commissioned(self) -> None:
+        status = self.app.interaction_status()
+        self.assertFalse(status["enabled"])
+        self.assertFalse(status["motionCommandsPermitted"])
