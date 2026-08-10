@@ -164,9 +164,11 @@ boundaries and receipts to distinguish them.
 
 - Active product worktree: this repository on branch
   `agent/three-end-field-workstation`. Operator-accepted V6 was frozen in
-  `922b301`; the independent interaction branch was merged in `6e842d1`. The
-  branch and current checkpoint-inspection work have not yet been pushed, so do
-  not claim GitHub is current.
+  `922b301`; the independent interaction branch was merged in `6e842d1`; the
+  combined realtime/platform release implementation is `090635c`. The branch
+  is published to `origin/agent/three-end-field-workstation`; checkpoint
+  inspection remains an offline, default-disabled foundation rather than a
+  deployed product capability.
 - Last verified robot release is
   `gogoguard-robot-inspection:v2-edge-20260810-v6-r4`, built from the local
   worktree at HEAD `d0e29173c7f33f2cff1e89390195a1fa955c07ca` plus the

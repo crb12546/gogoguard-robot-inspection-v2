@@ -148,7 +148,7 @@ LiveKit 连接状态与对话唤醒状态分离：房间可以保持 `live`，�
 - V6 底座一致性：已验收 V6-r4 的 32 个 rootfs layer 是合并镜像 44 个 layer 的完整前缀，只追加 12 个应用/交互 layer；无 `apt` 和 ROS/Nav2 重装。
 - 离线发行包：`release-cache/v2-edge-20260810-combined-live-r1/` （镜像归档 `1,388,612,096 bytes`）
 - 镜像归档 SHA-256：`9e25dca2cbee5784cd81ccb60b0e65155231055094fc5545d7ef272d4fbce174`
-- 源码提交：`TBD_AFTER_COMMIT`
+- 源码实现提交：`090635c112f1213011977ed6a9da838bbfeeb428`
 
 ## 八、本次不做虚假承诺的部分
 
