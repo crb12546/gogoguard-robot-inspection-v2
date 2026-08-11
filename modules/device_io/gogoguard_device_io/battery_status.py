@@ -79,9 +79,12 @@ def main() -> None:
         def __init__(self) -> None:
             super().__init__("gogoguard_battery_observer")
             qos = QoSProfile(
-                depth=5,
+                depth=10,
                 history=HistoryPolicy.KEEP_LAST,
-                reliability=ReliabilityPolicy.BEST_EFFORT,
+                # Unitree's bare-DDS Go2 LowState writer is RELIABLE. Match the
+                # official unitree_ros2 read_low_state example instead of the
+                # best-effort profile used by high-rate navigation sensors.
+                reliability=ReliabilityPolicy.RELIABLE,
             )
             self.create_subscription(LowState, args.topic, self._on_state, qos)
 

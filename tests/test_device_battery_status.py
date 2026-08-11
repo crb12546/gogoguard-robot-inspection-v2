@@ -13,6 +13,26 @@ from gogoguard_device_io.battery_status import (
 
 
 class BatteryStatusTest(unittest.TestCase):
+    def test_edge_observer_uses_unitree_bare_dds_domain(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        entrypoint = (
+            repository / "deployment"
+            / "container"
+            / "edge-entrypoint"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "setsid env ROS_DOMAIN_ID=0 gogoguard-battery-observer",
+            entrypoint,
+        )
+        observer = (
+            repository
+            / "modules"
+            / "device_io"
+            / "gogoguard_device_io"
+            / "battery_status.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("reliability=ReliabilityPolicy.RELIABLE", observer)
+
     def test_converts_unitree_low_state_without_guessing_charging(self) -> None:
         message = SimpleNamespace(
             bms_state=SimpleNamespace(soc=87, status=3),

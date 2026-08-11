@@ -114,7 +114,10 @@ setsid ros2 run fast_lio fastlio_mapping --ros-args \
   >"$LOG_ROOT/fastlio.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
-setsid gogoguard-battery-observer \
+# Unitree's bare-DDS low-state publisher is fixed on domain 0. Keep the main
+# navigation ROS graph isolated on the commissioned domain 42 and override only
+# this read-only hardware observer.
+setsid env ROS_DOMAIN_ID=0 gogoguard-battery-observer \
   --topic /lf/lowstate \
   --output /var/lib/gogoguard/device/battery.json \
   >"$LOG_ROOT/battery-observer.log" 2>&1 &
