@@ -113,6 +113,40 @@ class CheckpointPlatformTest(unittest.TestCase):
                 ],
             )
 
+    def test_platform_coordinator_does_not_take_local_operator_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            navigation = root / "navigation.json"
+            control = root / "control.json"
+            calls = []
+            navigation.write_text(
+                json.dumps(
+                    {
+                        "runtime": {
+                            "checkpoint": {
+                                "missionId": "local:map-v1:1:abcd",
+                                "decisionMode": "local_operator",
+                                "activeCheckpointId": "cp_01",
+                                "attempt": 1,
+                                "phase": "WAITING_PLATFORM",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            coordinator = CheckpointCoordinator(
+                heartbeat_url="http://39.96.37.187/api/v1/robot/heartbeat",
+                navigation_status_path=navigation,
+                control_path=control,
+                inbox_path=root / "inbox.jsonl",
+                state_path=root / "state.json",
+                post_json=lambda *args: calls.append(args) or {},
+            )
+            coordinator.tick(now=100.0)
+            self.assertEqual(calls, [])
+            self.assertFalse(control.exists())
+
     def test_platform_asset_upload_resumes_and_stops_before_activation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

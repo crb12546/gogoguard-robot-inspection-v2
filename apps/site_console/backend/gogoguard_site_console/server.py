@@ -95,6 +95,17 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             if match and hasattr(self.server.application, "checkpoint_audit"):
                 return self._json(200, self.server.application.checkpoint_audit(match.group(1)))
             match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/checkpoints/"
+                r"([A-Za-z0-9_.:-]+)/reference",
+                path,
+            )
+            if match and hasattr(self.server.application, "checkpoint_reference_file"):
+                return self._stream_file(
+                    self.server.application.checkpoint_reference_file(
+                        match.group(1), match.group(2)
+                    )
+                )
+            match = re.fullmatch(
                 r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-upload", path
             )
             if match and hasattr(self.server.application, "platform_upload_status"):
@@ -231,6 +242,14 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.reset_localization())
             if path == "/api/v1/navigation/patrol/start":
                 return self._json(200, self.server.application.start_patrol())
+            if path == "/api/v1/navigation/patrol/start-selected":
+                return self._json(
+                    202, self.server.application.start_selected_patrol(self._body())
+                )
+            if path == "/api/v1/navigation/checkpoint/control":
+                return self._json(
+                    200, self.server.application.checkpoint_control(self._body())
+                )
             if path == "/api/v1/navigation/patrol/stop":
                 return self._json(200, self.server.application.stop_patrol())
             if path == "/api/v1/navigation/profile":
@@ -267,6 +286,14 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)/map", path)
             if match:
                 return self._json(202, self.server.application.submit_recording(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/local-inspection/start",
+                path,
+            )
+            if match and hasattr(self.server.application, "start_local_inspection"):
+                return self._json(
+                    202, self.server.application.start_local_inspection(match.group(1))
+                )
             self._json(404, {"error": "not found"})
         except Exception as exc:
             self._json(409, {"error": str(exc)})

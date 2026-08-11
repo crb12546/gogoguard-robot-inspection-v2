@@ -143,6 +143,11 @@ class CheckpointCoordinator:
         runtime = runtime if isinstance(runtime, dict) else navigation
         checkpoint = runtime.get("checkpoint")
         checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        if str(checkpoint.get("decisionMode") or "platform") != "platform":
+            if self.context:
+                self.context = {}
+                self._save()
+            return
         mission_id = str(checkpoint.get("missionId") or "")
         checkpoint_id = str(checkpoint.get("activeCheckpointId") or "")
         phase = str(checkpoint.get("phase") or "TRAVELING")

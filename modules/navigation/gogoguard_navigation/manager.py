@@ -42,6 +42,9 @@ class NavigationManager:
         self.status_path = self.root / "status.json"
         self.selected_path = self.root / "selected-candidate.json"
         self.mission_path = self.root / "mission-plan.json"
+        self.checkpoint_control_path = (
+            self.data_root / "platform" / "checkpoint-control.json"
+        )
         self.root.mkdir(parents=True, exist_ok=True)
         self.log_root.mkdir(parents=True, exist_ok=True)
         self.routes = RouteManager(self.data_root, site_id=site_id)
@@ -539,6 +542,9 @@ class NavigationManager:
         )
         if not is_safe_external_id(mission_id):
             raise ValueError("missionId is invalid")
+        decision_mode = str(mission_plan.get("decisionMode") or "platform")
+        if decision_mode not in {"platform", "local_operator"}:
+            raise ValueError("decisionMode must be platform or local_operator")
         checkpoints = mission_plan.get("checkpoints", [])
         if not isinstance(checkpoints, list) or len(checkpoints) > 256:
             raise ValueError("mission checkpoints must be a list of at most 256 items")
@@ -639,6 +645,7 @@ class NavigationManager:
             "missionId": mission_id,
             "mapVersion": map_version,
             "routeId": route_id,
+            "decisionMode": decision_mode,
             "verdictTimeoutSec": verdict_timeout,
             "maxRetakeAttempts": max_retakes,
             "checkpoints": normalized,
@@ -650,6 +657,77 @@ class NavigationManager:
         ).hexdigest()
         self._atomic_json(self.mission_path, canonical)
         return canonical
+
+    def checkpoint_control(self, action: str) -> dict[str, Any]:
+        """Apply an operator verdict to an active local checkpoint only."""
+        action = str(action or "").strip()
+        if action not in {"capture", "continue", "retake", "skip"}:
+            raise ValueError("checkpoint action is invalid")
+        runtime = self.status().get("runtime")
+        runtime = runtime if isinstance(runtime, dict) else {}
+        checkpoint = runtime.get("checkpoint")
+        checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        if checkpoint.get("decisionMode") != "local_operator":
+            raise RuntimeError("当前不是本地人工验收任务")
+        mission_id = str(checkpoint.get("missionId") or "")
+        checkpoint_id = str(checkpoint.get("activeCheckpointId") or "")
+        phase = str(checkpoint.get("phase") or "TRAVELING")
+        attempt = int(checkpoint.get("attempt") or 0)
+        if not mission_id or not checkpoint_id or attempt < 1:
+            if action in {"continue", "skip"} and checkpoint.get(
+                "lastCompletedCheckpointId"
+            ):
+                return {
+                    "schema": "gogoguard.local_checkpoint_control_receipt.v1",
+                    "accepted": True,
+                    "duplicate": True,
+                    "action": action,
+                    "phase": phase,
+                }
+            raise RuntimeError("当前没有等待验收的巡检点")
+        allowed_phases = {
+            "capture": {"WAITING_PLATFORM"},
+            "continue": {"WAITING_VERDICT"},
+            "retake": {"WAITING_VERDICT"},
+            "skip": {"WAITING_VERDICT"},
+        }
+        if phase not in allowed_phases[action]:
+            if action == "capture" and phase in {
+                "SPIN_REQUESTED", "SPINNING", "WAITING_VERDICT"
+            }:
+                return {
+                    "schema": "gogoguard.local_checkpoint_control_receipt.v1",
+                    "accepted": True,
+                    "duplicate": True,
+                    "action": action,
+                    "phase": phase,
+                    "missionId": mission_id,
+                    "checkpointId": checkpoint_id,
+                    "attempt": attempt,
+                }
+            raise RuntimeError(f"当前阶段 {phase} 不能执行 {action}")
+        seed = f"{mission_id}:{checkpoint_id}:{attempt}:{action}"
+        control = {
+            "schema": "gogoguard.checkpoint_control.v1",
+            "controlId": "local_" + hashlib.sha256(seed.encode()).hexdigest()[:28],
+            "missionId": mission_id,
+            "checkpointId": checkpoint_id,
+            "attempt": attempt,
+            "action": action,
+            "issuedAt": time.time(),
+        }
+        self.checkpoint_control_path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_json(self.checkpoint_control_path, control)
+        return {
+            "schema": "gogoguard.local_checkpoint_control_receipt.v1",
+            "accepted": True,
+            "duplicate": False,
+            "action": action,
+            "phase": phase,
+            "missionId": mission_id,
+            "checkpointId": checkpoint_id,
+            "attempt": attempt,
+        }
 
     def diagnostics(self) -> dict[str, Any]:
         status = self.status()

@@ -32,6 +32,7 @@ class FakeManager:
     def start_selected_patrol(self, **params):
         self.starts += 1
         return {"started": True, "params": params}
+    def checkpoint_control(self, action): return {"action": action, "accepted": True}
     def stop_patrol(self): return self.stop_runtime()
     def reset_localization(self): return {"reset": True}
     def prepare(self, job_id): return {"job_id": job_id}
@@ -131,6 +132,35 @@ class NavigationSupervisorTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "dwellSec"):
                 manager._configure_mission(candidate, plan)
 
+    def test_local_checkpoint_control_is_scoped_and_writes_correlated_control(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager(
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+            )
+            manager.status = lambda: {
+                "runtime": {
+                    "checkpoint": {
+                        "decisionMode": "local_operator",
+                        "missionId": "local:map-v1:1:abcd",
+                        "activeCheckpointId": "cp_01",
+                        "attempt": 1,
+                        "phase": "WAITING_VERDICT",
+                    }
+                }
+            }
+            receipt = manager.checkpoint_control("continue")
+            self.assertTrue(receipt["accepted"])
+            control = json.loads(manager.checkpoint_control_path.read_text())
+            self.assertEqual(control["action"], "continue")
+            self.assertEqual(control["checkpointId"], "cp_01")
+            self.assertEqual(control["missionId"], "local:map-v1:1:abcd")
+
+            manager.status = lambda: {
+                "runtime": {"checkpoint": {"decisionMode": "platform"}}
+            }
+            with self.assertRaisesRegex(RuntimeError, "不是本地"):
+                manager.checkpoint_control("continue")
+
     def test_long_operation_returns_receipt_and_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as temporary:
             socket_path = Path(temporary) / "supervisor.sock"
@@ -207,6 +237,22 @@ class NavigationSupervisorTest(unittest.TestCase):
                     "expected_route_id": "route-v2",
                     "mission_plan": None,
                 },
+            )
+            server.shutdown()
+            server.server_close()
+
+    def test_local_checkpoint_control_is_synchronous(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            socket_path = Path(temporary) / "supervisor.sock"
+            server = NavigationSupervisorServer(
+                socket_path, SupervisorService(FakeManager())
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            client = NavigationSupervisorClient(socket_path)
+            self.assertEqual(
+                client.checkpoint_control("continue"),
+                {"action": "continue", "accepted": True},
             )
             server.shutdown()
             server.server_close()

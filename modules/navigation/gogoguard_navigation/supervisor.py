@@ -128,6 +128,8 @@ class SupervisorService:
             return self.manager.rollback_profile()
         if method == "diagnostics":
             return self.manager.diagnostics()
+        if method == "checkpoint.control":
+            return self.manager.checkpoint_control(str(params.get("action") or ""))
         if method in {"runtime.stop", "patrol.stop"}:
             self._invalidate_control()
         control_epoch = self._epoch()

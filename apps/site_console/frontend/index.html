@@ -115,6 +115,21 @@
         <div id="navigationError" class="error"></div>
       </article>
     </section>
+    <section id="checkpointValidation" class="checkpoint-validation panel" hidden>
+      <div class="panel-title"><div><span>本地巡检点验收</span><small id="checkpointValidationHint">机器狗到点真实停车后，对比录制样张与当前画面</small></div><b id="checkpointValidationState">等待到点</b></div>
+      <div class="checkpoint-comparison">
+        <figure><figcaption>录制时的参考照片</figcaption><img id="checkpointReference" alt="录制时的巡检点参考照片"></figure>
+        <figure><figcaption>当前 Z1Pro 实时画面</figcaption><iframe id="checkpointCameraFrame" title="巡检点 Z1Pro 实时画面" allow="autoplay; fullscreen; picture-in-picture"></iframe></figure>
+      </div>
+      <div class="checkpoint-validation-footer">
+        <div><strong id="checkpointValidationTitle">等待巡检点</strong><small id="checkpointValidationMeta">到点后会自动调整机身和镜头，并保持停车等您确认。</small></div>
+        <div id="checkpointVerdictActions" class="checkpoint-verdict-actions" hidden>
+          <button id="checkpointContinue">通过并到下一点</button>
+          <button id="checkpointRetake" class="secondary">重新旋转并再看一次</button>
+          <button id="checkpointSkip" class="secondary">跳过本点并继续</button>
+        </div>
+      </div>
+    </section>
     <section class="engineering-grid">
       <details class="panel engineering-panel" id="parameterPanel">
         <summary><span>参数中心</span><small>速度、定位与 MPPI；保存前会校验，可回滚</small></summary>

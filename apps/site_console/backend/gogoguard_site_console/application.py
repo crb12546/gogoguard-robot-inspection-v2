@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 from pathlib import Path
 
 from gogoguard_contracts import json_ready
@@ -282,6 +283,31 @@ class InspectionApplication:
 
     def start_patrol(self) -> dict:
         return self.navigation.start_patrol()
+
+    def start_selected_patrol(self, payload: dict) -> dict:
+        return self.navigation.start_selected_patrol(
+            expected_map_version=payload.get("expected_map_version"),
+            expected_route_id=payload.get("expected_route_id"),
+            mission_plan=payload.get("mission_plan"),
+        )
+
+    def checkpoint_control(self, payload: dict) -> dict:
+        action = str(payload.get("action") or "")
+        if action == "capture":
+            status = self.navigation.status()
+            runtime = status.get("runtime")
+            runtime = runtime if isinstance(runtime, dict) else {}
+            checkpoint = runtime.get("checkpoint")
+            checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+            if (
+                checkpoint.get("decisionMode") == "local_operator"
+                and checkpoint.get("phase") == "WAITING_PLATFORM"
+            ):
+                camera = checkpoint.get("camera")
+                camera = camera if isinstance(camera, dict) else {}
+                self.move_gimbal(camera)
+                time.sleep(max(0.0, min(30.0, float(checkpoint.get("dwellSec") or 0.0))))
+        return self.navigation.checkpoint_control(action)
 
     def stop_patrol(self) -> dict:
         return self.navigation.stop_patrol()

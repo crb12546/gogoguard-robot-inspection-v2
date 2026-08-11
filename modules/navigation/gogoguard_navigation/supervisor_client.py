@@ -52,6 +52,8 @@ class NavigationSupervisorClient:
             mission_plan=mission_plan,
         )
     def stop_patrol(self) -> dict[str, Any]: return self._call("patrol.stop")
+    def checkpoint_control(self, action: str) -> dict[str, Any]:
+        return self._call("checkpoint.control", action=action)
     def recover_runtime(self) -> dict[str, Any]: return self._call("runtime.recover")
     def profile(self) -> dict[str, Any]: return self._call("profile.get")
     def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]: return self._call("profile.update", profile=profile)

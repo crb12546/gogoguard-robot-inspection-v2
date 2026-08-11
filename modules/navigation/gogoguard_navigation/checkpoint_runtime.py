@@ -31,6 +31,7 @@ class NavigationMission:
     route_id: str
     mission_hash: str
     checkpoints: tuple[RuntimeCheckpoint, ...]
+    decision_mode: str = "platform"
     verdict_timeout_s: int = 15
     max_retake_attempts: int = 2
 
@@ -130,6 +131,9 @@ def load_navigation_mission(
                 legacy,
             )
         )
+    decision_mode = str(value.get("decisionMode") or "platform")
+    if decision_mode not in {"platform", "local_operator"}:
+        raise ValueError("navigation mission decision mode is invalid")
     verdict_timeout = value.get("verdictTimeoutSec", 15)
     max_retakes = value.get("maxRetakeAttempts", 2)
     if isinstance(verdict_timeout, bool) or not isinstance(verdict_timeout, int) or not 5 <= verdict_timeout <= 120:
@@ -142,6 +146,7 @@ def load_navigation_mission(
         expected_route_id,
         mission_hash,
         tuple(checkpoints),
+        decision_mode,
         verdict_timeout,
         max_retakes,
     )
@@ -316,6 +321,7 @@ class CheckpointExecutor:
         return {
             "missionId": self.mission.mission_id or None,
             "missionHash": self.mission.mission_hash or None,
+            "decisionMode": self.mission.decision_mode,
             "phase": self.phase,
             "checkpointCount": len(self.mission.checkpoints),
             "completedCheckpointCount": self.cursor,

@@ -206,6 +206,32 @@ class CheckpointRuntimeTest(unittest.TestCase):
                     route_point_count=20,
                 )
 
+    def test_local_operator_mode_is_explicit_in_runtime_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = {
+                "schema": "gogoguard.navigation_mission.v1",
+                "missionId": "local:map-v1:1:abcd",
+                "mapVersion": "map-v1",
+                "routeId": "route-v1",
+                "decisionMode": "local_operator",
+                "checkpoints": [],
+            }
+            payload["missionHash"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            path = Path(temporary) / "mission.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            mission = load_navigation_mission(
+                path,
+                expected_map_version="map-v1",
+                expected_route_id="route-v1",
+                route_point_count=20,
+            )
+        self.assertEqual(mission.decision_mode, "local_operator")
+        self.assertEqual(
+            CheckpointExecutor(mission).status()["decisionMode"], "local_operator"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

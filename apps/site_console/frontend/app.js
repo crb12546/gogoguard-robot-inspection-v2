@@ -17,6 +17,10 @@ const state = {
   gimbal: null,
   recordingCheckpoints: [],
   checkpointAudit: null,
+  checkpointCaptureKey: null,
+  checkpointCaptureRetryAt: 0,
+  checkpointControlBusy: false,
+  checkpointCameraStarted: false,
   platformUpload: null,
   platformUploadSupported: null,
   cameraStarted: false,
@@ -72,6 +76,7 @@ const operationKindLabels = {
   'runtime.recover': '清理并恢复导航',
   'localization.reset': '重新定位',
   'patrol.start': '提交巡检',
+  'patrol.start_selected': '启动本地巡检点验收',
   'patrol.stop': '停止并释放遥控权',
 };
 const operationStateText = operation => {
@@ -112,6 +117,10 @@ const patrolStepStateText = runtime => {
     BLOCKED: '路线受阻',
     FAULT: '运行故障',
     STOPPING: '正在停止',
+    CHECKPOINT_PAUSING: '到点停车中',
+    CHECKPOINT_SETTLING: '验证停稳中',
+    INSPECTING: '调整姿态中',
+    PAUSED: '等待人工确认',
   };
   return labels[runtime.state] || '等待';
 };
@@ -251,6 +260,99 @@ function renderCamera() {
   $('cameraMessage').textContent = camera.ready && camera.width && camera.height
     ? `${camera.width}×${camera.height} · WebRTC`
     : camera.message;
+}
+
+async function prepareLocalCheckpoint(checkpoint) {
+  const key = [
+    checkpoint.missionId,
+    checkpoint.activeCheckpointId,
+    checkpoint.attempt,
+  ].join(':');
+  if (
+    state.checkpointControlBusy
+    || state.checkpointCaptureKey === key
+    || Date.now() < state.checkpointCaptureRetryAt
+  ) return;
+  state.checkpointCaptureKey = key;
+  state.checkpointControlBusy = true;
+  try {
+    await post('/api/v1/navigation/checkpoint/control', {action: 'capture'});
+    $('navigationError').textContent = '';
+  } catch (error) {
+    state.checkpointCaptureKey = null;
+    state.checkpointCaptureRetryAt = Date.now() + 3000;
+    $('navigationError').textContent = `巡检点准备失败：${friendlyError(error)}`;
+  } finally {
+    state.checkpointControlBusy = false;
+    await refreshNavigation();
+  }
+}
+
+function renderLocalCheckpoint() {
+  const runtime = state.navigation?.runtime || {};
+  const checkpoint = runtime.checkpoint || {};
+  const local = checkpoint.decisionMode === 'local_operator';
+  const activeId = checkpoint.activeCheckpointId;
+  const active = local && Boolean(activeId) && checkpoint.phase !== 'TRAVELING';
+  $('checkpointValidation').hidden = !active;
+  if (!active) return;
+
+  const audit = (state.checkpointAudit?.checkpoints || []).find(
+    item => item.checkpointId === activeId,
+  );
+  const jobId = /^map-[A-Za-z0-9]{12}$/.test(String(runtime.mapVersion || ''))
+    ? runtime.mapVersion
+    : state.latestMapJob?.job_id;
+  const referenceKey = `${jobId || ''}:${activeId}`;
+  if (jobId && $('checkpointReference').dataset.referenceKey !== referenceKey) {
+    $('checkpointReference').src = `/api/v1/map-jobs/${encodeURIComponent(jobId)}/checkpoints/${encodeURIComponent(activeId)}/reference`;
+    $('checkpointReference').dataset.referenceKey = referenceKey;
+  }
+  if (state.camera && !state.checkpointCameraStarted) {
+    $('checkpointCameraFrame').src = cameraUrl(state.camera);
+    state.checkpointCameraStarted = true;
+  }
+
+  const phaseLabels = {
+    PAUSING: '正在取消路线速度',
+    SETTLING: '正在确认真实停稳',
+    POSE_REQUESTED: '正在转到录制时朝向',
+    POSING: '正在转到录制时朝向',
+    WAITING_PLATFORM: '正在调整镜头并准备旋转',
+    SPIN_REQUESTED: '正在准备 360° 旋转',
+    SPINNING: '正在 360° 旋转',
+    WAITING_VERDICT: '已停稳，等待您确认',
+    FAILED: '巡检点执行失败',
+  };
+  const ordinal = Number(checkpoint.completedCheckpointCount || 0) + 1;
+  const total = Number(checkpoint.checkpointCount || 0);
+  $('checkpointValidationState').textContent = phaseLabels[checkpoint.phase] || checkpoint.phase;
+  $('checkpointValidationState').className = checkpoint.phase === 'WAITING_VERDICT' ? 'online' : '';
+  $('checkpointValidationTitle').textContent = `第 ${ordinal} / ${total} 个巡检点 · ${activeId}`;
+  $('checkpointValidationMeta').textContent = `${audit?.note || '未填备注'} · pan ${Number(checkpoint.camera?.pan || 0).toFixed(1)}° / tilt ${Number(checkpoint.camera?.tilt || 0).toFixed(1)}° · ${checkpoint.spin ? '包含 360° 旋转' : '不旋转'}`;
+  const ready = checkpoint.phase === 'WAITING_VERDICT';
+  $('checkpointVerdictActions').hidden = !ready;
+  for (const id of ['checkpointContinue', 'checkpointRetake', 'checkpointSkip']) {
+    $(id).disabled = state.checkpointControlBusy;
+  }
+  if (checkpoint.phase === 'WAITING_PLATFORM') prepareLocalCheckpoint(checkpoint);
+}
+
+async function controlLocalCheckpoint(action) {
+  if (state.checkpointControlBusy) return;
+  state.checkpointControlBusy = true;
+  for (const id of ['checkpointContinue', 'checkpointRetake', 'checkpointSkip']) {
+    $(id).disabled = true;
+  }
+  try {
+    await post('/api/v1/navigation/checkpoint/control', {action});
+    $('navigationError').textContent = '';
+  } catch (error) {
+    $('navigationError').textContent = friendlyError(error);
+  } finally {
+    state.checkpointControlBusy = false;
+    await refreshNavigation();
+  }
 }
 
 async function refreshCamera() {
@@ -875,6 +977,7 @@ function renderNavigation() {
     'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
     'DETOURING', 'REJOINING', 'RETRYING', 'RECOVERING', 'SEARCHING_PATH',
     'CHECKPOINT_PAUSING', 'CHECKPOINT_SETTLING', 'INSPECTING',
+    'PAUSED',
   ].includes(runtime.state);
   $('navigationCandidate').textContent = candidate ? `${candidate.map_version} · ${candidate.route_id}` : '等待地图与路线';
   $('runtimeBadge').textContent = runtimeRunning ? '运行中' : '未启动';
@@ -929,6 +1032,7 @@ function renderNavigation() {
   if (runtime.state === 'CHECKPOINT_PAUSING') guidance = '已到平台标记点，正在取消路线速度并关闭运动权。';
   if (runtime.state === 'CHECKPOINT_SETTLING') guidance = '已到平台标记点，正在验证机器狗连续停稳，不是只记录“收到停止”。';
   if (runtime.state === 'INSPECTING') guidance = '机器狗已停稳，正由 Nav2 在现有碰撞检测下原地旋转 360°；完成后从剩余路线继续。';
+  if (runtime.state === 'PAUSED' && runtime.checkpoint?.decisionMode === 'local_operator') guidance = '机器狗已在巡检点保持停车。请在下方对比参考照片和实时画面，由您决定是否继续。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；需要遥控机器狗时先点击“停止巡检并释放遥控权”，需要继续测试时再启动定位与 Nav2。`;
   if (operation?.state === 'failed') {
     guidance = `操作失败：${operation.message || operation.error || '未知错误'}。请不要重复点击，可查看下方诊断。`;
@@ -957,12 +1061,17 @@ function renderNavigation() {
   $('recoverRuntime').disabled = operationBusy;
   $('startPatrol').hidden = !selectedRuntimeReady || patrolRunning;
   $('startPatrol').disabled = !localization.usable || operationBusy || ['FAULT', 'BLOCKED'].includes(runtime.state);
+  const localCheckpointCount = Number(state.checkpointAudit?.checkpoints?.length || 0);
+  $('startPatrol').textContent = localCheckpointCount
+    ? `开始本地验收（${localCheckpointCount} 个巡检点）`
+    : '开始巡检';
   $('stopPatrol').hidden = !runtimeRunning && !motionBridgeRunning;
   $('stopPatrolHelp').hidden = !runtimeRunning && !motionBridgeRunning;
   // Stop uses its own supervisor lane and must remain available even when a
   // start/recovery operation is stuck in the control lane.
   $('stopPatrol').disabled = stopOperationBusy;
   renderPlatformUpload();
+  renderLocalCheckpoint();
   drawNavigation();
 }
 
@@ -977,7 +1086,13 @@ async function navigationAction(action) {
     } else if (action === 'reset') {
       await post('/api/v1/navigation/localization/reset');
     } else if (action === 'start') {
-      await post('/api/v1/navigation/patrol/start');
+      const checkpointCount = Number(state.checkpointAudit?.checkpoints?.length || 0);
+      if (checkpointCount) {
+        if (!state.latestMapJob) throw Error('请先选择要验收的地图');
+        await post(`/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/local-inspection/start`);
+      } else {
+        await post('/api/v1/navigation/patrol/start');
+      }
     } else if (action === 'stop') {
       await post('/api/v1/navigation/runtime/stop');
     } else if (action === 'recover') {
@@ -1468,6 +1583,9 @@ $('resetLocalization').addEventListener('click', () => navigationAction('reset')
 $('recoverRuntime').addEventListener('click', () => navigationAction('recover'));
 $('startPatrol').addEventListener('click', () => navigationAction('start'));
 $('stopPatrol').addEventListener('click', () => navigationAction('stop'));
+$('checkpointContinue').addEventListener('click', () => controlLocalCheckpoint('continue'));
+$('checkpointRetake').addEventListener('click', () => controlLocalCheckpoint('retake'));
+$('checkpointSkip').addEventListener('click', () => controlLocalCheckpoint('skip'));
 $('saveProfile').addEventListener('click', saveProfile);
 $('rollbackProfile').addEventListener('click', rollbackProfile);
 $('refreshDiagnostics').addEventListener('click', refreshDiagnostics);

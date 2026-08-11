@@ -1718,11 +1718,14 @@ class PatrolRuntimeManager(Node):
             result = self._apply_checkpoint_control()
             if self.checkpoints.phase == "SPIN_REQUESTED":
                 self._request_checkpoint_spin()
-            elif now - self.checkpoint_phase_started_at >= (
+            elif (
+                self.mission.decision_mode == "platform"
+                and now - self.checkpoint_phase_started_at >= (
                 25.0
                 + float(
                     self.checkpoints.active_checkpoint.dwell_s
                     if self.checkpoints.active_checkpoint is not None else 0.0
+                )
                 )
             ):
                 # Platform/announcement failure must not strand the patrol.
@@ -1750,7 +1753,8 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason = "CHECKPOINT_WAITING_PLATFORM_VERDICT"
             self._apply_checkpoint_control()
             if (
-                self.checkpoints.phase == "WAITING_VERDICT"
+                self.mission.decision_mode == "platform"
+                and self.checkpoints.phase == "WAITING_VERDICT"
                 and now - self.checkpoint_phase_started_at
                 >= float(self.mission.verdict_timeout_s) + 2.0
             ):

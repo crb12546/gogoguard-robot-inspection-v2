@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from pathlib import Path
 
 from gogoguard_contracts import RecordingSession, RecordingState, json_ready
@@ -296,6 +297,41 @@ class FieldWorkstationApplication:
         self.routes.prepare_map_job(job_id)
         return self.routes.checkpoint_descriptor(job_id)
 
+    def checkpoint_reference_file(self, job_id: str, checkpoint_id: str) -> Path:
+        descriptor = self.checkpoint_audit(job_id)
+        checkpoint = next(
+            (
+                item
+                for item in descriptor.get("checkpoints") or []
+                if item.get("checkpointId") == checkpoint_id
+            ),
+            None,
+        )
+        if not isinstance(checkpoint, dict):
+            raise KeyError(checkpoint_id)
+        session_id = str(descriptor.get("recordingSessionId") or "")
+        recording_root = (self.data_root / "recordings" / session_id).resolve()
+        source_path = recording_root / "samples" / "inspection" / "checkpoints.json"
+        try:
+            source = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise KeyError(checkpoint_id) from exc
+        raw = next(
+            (
+                item
+                for item in source.get("checkpoints") or []
+                if isinstance(item, dict) and item.get("checkpointId") == checkpoint_id
+            ),
+            None,
+        )
+        frames = raw.get("sampleFrames") if isinstance(raw, dict) else None
+        if not isinstance(frames, list) or not frames:
+            raise KeyError(checkpoint_id)
+        target = (recording_root / str(frames[0])).resolve()
+        if recording_root not in target.parents or not target.is_file():
+            raise KeyError(checkpoint_id)
+        return target
+
     def platform_upload_status(self, job_id: str) -> dict:
         self.maps.get(job_id)
         value = self.platform_assets.status(job_id)
@@ -345,6 +381,59 @@ class FieldWorkstationApplication:
         return self.robot.post(
             "api/v1/navigation/patrol/start",
             timeout_s=max(self.robot.timeout_s, 30.0),
+        )
+
+    def start_local_inspection(self, job_id: str) -> dict:
+        descriptor = self.checkpoint_audit(job_id)
+        if descriptor.get("audit", {}).get("ready") is not True:
+            raise RuntimeError("巡检点审核未通过，不能开始本地验收")
+        checkpoints = list(descriptor.get("checkpoints") or [])
+        if not checkpoints:
+            raise RuntimeError("当前路线没有录制巡检点")
+        mission_id = (
+            f"local:{descriptor['mapVersion']}:"
+            f"{self.navigation_workspaces.get(job_id)['revision']}:"
+            f"{uuid.uuid4().hex[:8]}"
+        )
+        mission_plan = {
+            "missionId": mission_id,
+            "mapVersion": descriptor["mapVersion"],
+            "routeId": descriptor["routeId"],
+            "decisionMode": "local_operator",
+            "verdictTimeoutSec": 120,
+            "maxRetakeAttempts": 2,
+            "checkpoints": [
+                {
+                    "checkpointId": item["checkpointId"],
+                    "routeProgressIndex": item["routeProgressIndex"],
+                    "spin": item.get("spin") is not False,
+                    "dwellSec": item.get("dwellSec", 3),
+                }
+                for item in checkpoints
+            ],
+        }
+        result = self.robot.post(
+            "api/v1/navigation/patrol/start-selected",
+            {
+                "expected_map_version": descriptor["mapVersion"],
+                "expected_route_id": descriptor["routeId"],
+                "mission_plan": mission_plan,
+            },
+            timeout_s=max(self.robot.timeout_s, 30.0),
+        )
+        self.journal.append(
+            "inspection.local_mission_started",
+            job_id=job_id,
+            mission_id=mission_id,
+            checkpoint_count=len(checkpoints),
+        )
+        return result
+
+    def checkpoint_control(self, payload: dict) -> dict:
+        return self.robot.post(
+            "api/v1/navigation/checkpoint/control",
+            {"action": str(payload.get("action") or "")},
+            timeout_s=max(self.robot.timeout_s, 15.0),
         )
 
     def stop_patrol(self) -> dict:

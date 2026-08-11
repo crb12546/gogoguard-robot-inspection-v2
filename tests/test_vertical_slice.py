@@ -93,6 +93,40 @@ class VerticalSliceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supported range"):
             self.app.move_gimbal({"pan": 141, "tilt": 0, "roll": 0})
 
+    def test_local_checkpoint_capture_restores_camera_before_navigation_control(self) -> None:
+        original = self.app.navigation
+
+        class FakeNavigation:
+            def __init__(self):
+                self.actions = []
+
+            @staticmethod
+            def status():
+                return {
+                    "runtime": {
+                        "checkpoint": {
+                            "decisionMode": "local_operator",
+                            "phase": "WAITING_PLATFORM",
+                            "camera": {"pan": -15, "tilt": 22.5, "roll": 0},
+                            "dwellSec": 0,
+                        }
+                    }
+                }
+
+            def checkpoint_control(self, action):
+                self.actions.append(action)
+                return {"accepted": True, "action": action}
+
+        fake = FakeNavigation()
+        self.app.navigation = fake
+        try:
+            result = self.app.checkpoint_control({"action": "capture"})
+        finally:
+            self.app.navigation = original
+        self.assertTrue(result["accepted"])
+        self.assertEqual(fake.actions, ["capture"])
+        self.assertEqual(self.app.gimbal_status()["angles"]["pan"], -15.0)
+
     def test_interaction_status_is_read_only_and_disabled_until_commissioned(self) -> None:
         status = self.app.interaction_status()
         self.assertFalse(status["enabled"])

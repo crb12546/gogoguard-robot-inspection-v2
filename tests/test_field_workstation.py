@@ -64,6 +64,85 @@ class FieldWorkstationTest(unittest.TestCase):
                 ],
             )
 
+    def test_local_inspection_builds_operator_owned_mission_from_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = FieldWorkstationApplication(
+                data_root=Path(temporary),
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            app.maps.get = lambda _job_id: {}
+            app.routes.prepare_map_job = lambda _job_id: {}
+            app.routes.checkpoint_descriptor = lambda _job_id: {
+                "mapVersion": "map-123456789abc",
+                "routeId": "route-r7",
+                "audit": {"ready": True},
+                "checkpoints": [
+                    {
+                        "checkpointId": "cp_01",
+                        "routeProgressIndex": 33,
+                        "spin": True,
+                        "dwellSec": 3,
+                    },
+                    {
+                        "checkpointId": "cp_02",
+                        "routeProgressIndex": 57,
+                        "spin": True,
+                        "dwellSec": 3,
+                    },
+                ],
+            }
+            app.navigation_workspaces.get = lambda _job_id: {"revision": 7}
+            posted = []
+            app.robot.post = lambda path, body, **kwargs: posted.append(
+                (path, body, kwargs)
+            ) or {"state": "accepted"}
+            result = app.start_local_inspection("map-123456789abc")
+            self.assertEqual(result["state"], "accepted")
+            path, body, _ = posted[0]
+            self.assertEqual(path, "api/v1/navigation/patrol/start-selected")
+            mission = body["mission_plan"]
+            self.assertEqual(mission["decisionMode"], "local_operator")
+            self.assertEqual(
+                [item["routeProgressIndex"] for item in mission["checkpoints"]],
+                [33, 57],
+            )
+
+    def test_checkpoint_reference_is_resolved_only_inside_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = FieldWorkstationApplication(
+                data_root=root,
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            sample = root / "recordings" / SESSION_ID / "samples" / "inspection" / "cp_01-main.jpg"
+            sample.parent.mkdir(parents=True)
+            sample.write_bytes(b"\xff\xd8reference\xff\xd9")
+            (sample.parent / "checkpoints.json").write_text(
+                json.dumps(
+                    {
+                        "checkpoints": [
+                            {
+                                "checkpointId": "cp_01",
+                                "sampleFrames": ["samples/inspection/cp_01-main.jpg"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            app.checkpoint_audit = lambda _job_id: {
+                "recordingSessionId": SESSION_ID,
+                "checkpoints": [{"checkpointId": "cp_01"}],
+            }
+            self.assertEqual(
+                app.checkpoint_reference_file("map-123456789abc", "cp_01"),
+                sample.resolve(),
+            )
+
     def test_map_jobs_are_newest_first_and_labels_are_local_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             app = FieldWorkstationApplication(
