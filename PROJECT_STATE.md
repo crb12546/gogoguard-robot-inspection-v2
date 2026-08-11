@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 ## New-task handoff — start here
 
@@ -34,7 +34,7 @@ deployed end-to-end inspection mission.
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated; a checksummed bounded offline evidence buffer and explicit Z1Pro capability declaration are implemented offline | Gimbal static commissioning, frame-capture/platform adapters, robot deployment and end-to-end evidence upload remain pending |
 | Mission/task system | A pure map/route-bound checkpoint state machine now defines route-index arrival, correlated true-stop proof, inspection, platform/offline continuation and suffix resume | Navigation pause/resume adapter, platform API binding, persistence and real mission aggregation are not implemented |
 | SaaS integration | Existing GoGoGuard SaaS is retained as an external system | Device agent, task/result contract integration and operational rollout are not implemented in V2 |
-| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module is merged, retains its real disposable-probe evidence, defaults disabled and has no motion API; the P1.5 heartbeat/start/stop bridge and frozen-V6 combined ARM64 release are built and tested offline | Robot installation, live platform heartbeat, static media and concurrent patrol acceptance remain pending, and remote teleoperation is not a product capability |
+| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion | Platform-side video receipt, reliable audible wake acknowledgement, consistent full-volume quality, latency closure and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
 
@@ -170,12 +170,17 @@ boundaries and receipts to distinguish them.
   inspection remains an offline, default-disabled foundation rather than a
   deployed product capability.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260810-v6-r4`, built from the local
-  worktree at HEAD `d0e29173c7f33f2cff1e89390195a1fa955c07ca` plus the
-  documented uncommitted V6 change set. The enabled service is active with
-  sensors online; Nav2, patrol runtime and the Unitree motion bridge are
-  stopped and UDP 5005 is unbound. Always re-read live robot state before
-  deployment or motion because the operator can change it between tasks.
+  `gogoguard-robot-inspection:v2-edge-20260811-combined-live-r8`, whose
+  interaction/platform source is commit `0673849`. The Linux/ARM64 local
+  manifest ID is
+  `sha256:856c5d19e94901d55ed1fcf9d1677a3125a3530359cfc9862cea836115b11590`;
+  the robot-loaded config digest is
+  `sha256:3637efd4d79ccfeaee715bbf8e17e100f1992cfdb539c6df6833e20b6993f62e`.
+  The enabled service is active, the platform heartbeat is online through the
+  frozen HTTP IP endpoint and all four media booleans are true. Nav2, patrol
+  runtime and the Unitree motion bridge are stopped and UDP 5005 is unbound.
+  Always re-read live robot state before deployment or motion because the
+  operator can change it between tasks.
 - The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
   deployed and has received an operator-accepted physical patrol. The selected
   robot candidate is
@@ -1611,3 +1616,77 @@ requires an explicit success receipt.
   interrupt/refresh/reconnect/`stop_live` with zero motion; only then run one
   accepted V6 patrol concurrently for ten minutes. Do not activate unfinished
   checkpoint, gimbal or pose-publisher capabilities during this acceptance.
+
+## 2026-08-11 formal realtime runtime deployed; quality and wake UX open
+
+- The interaction work remained isolated from the accepted mobility stack.
+  The combined Dockerfile still extends the exact V6-r4 base digest; its 32
+  rootfs layers are an exact prefix of the 44 r8 layers. No navigation,
+  localization, route, Nav2, MPPI, collision or Unitree motion parameter was
+  changed. All static tests ran with Nav2 and the motion receiver stopped, and
+  UDP 5005 remained unbound.
+- Real robot diagnostics found two independent native-runtime integration
+  defects. Unitree WebRTC must initialize before AV/aiortc/LiveKit in this
+  paired ARM64 environment; the previous order completed ICE but left the Go2
+  DTLS/DataChannel in `connecting`. Separately, the globally sourced ROS
+  `LD_LIBRARY_PATH` made the VUI helper load an incompatible ROS CycloneDDS and
+  abort with `free(): invalid pointer`. Commit `0673849` centralizes the proven
+  native import order and prepends `/opt/gogoguard/deps/lib` only for the VUI
+  subprocess. The helper now retries bounded transient failures and verifies
+  the requested volume instead of trusting its set return code.
+- The platform-frozen temporary address profile now posts the complete
+  five-second heartbeat to
+  `http://39.96.37.187/api/v1/robot/heartbeat` and permits only the
+  command-supplied `ws://` LiveKit URL. The current service command line proves
+  the HTTP IP endpoint and explicit development allow flag are active. Secure
+  HTTPS/WSS remains the production default after ICP recovery; current
+  robotId-only platform identification is not production authentication.
+- Release
+  `gogoguard-robot-inspection:v2-edge-20260811-combined-live-r8` is deployed.
+  Its Linux/ARM64 manifest ID is
+  `sha256:856c5d19e94901d55ed1fcf9d1677a3125a3530359cfc9862cea836115b11590`,
+  robot config digest is
+  `sha256:3637efd4d79ccfeaee715bbf8e17e100f1992cfdb539c6df6833e20b6993f62e`,
+  Docker size is 1,389,379,684 bytes and its 1,389,431,296-byte release archive
+  passed SHA-256
+  `f3483d61d3aa8b0d82f29574358adf4ae6ef09f424ce0ef14b49a0ce6fd3741c`.
+  The active container has zero restarts.
+- A platform `start_live` produced a real `robot:LLYJ0001` session in
+  `patrol-test-001`. The formal status reached `audioPublished=true`,
+  `videoPublished=true`, `audioSubscribed=true` and `dataConnected=true`; the
+  operator physically heard agent audio. This closes formal static audio
+  deployment and proves BOYA/Z1Pro/Go2/LiveKit composition at the dog. The
+  platform still needs to return its authoritative participant/video-track
+  receipt before server-side video acceptance is closed.
+- The operator compared Go2 speaker volume 7 and 10. Seven was materially
+  clearer but too quiet; the operator explicitly retained 10 as the field
+  default. Full-volume output again sounded choppy and different replies had
+  inconsistent loudness even though the dog-side speaker queue recorded zero
+  drops and zero underflows. Do not hide this with a larger queue. The next
+  diagnosis needs one pre-LiveKit TTS WAV plus platform RTP
+  loss/jitter/concealment statistics, then a three-stage comparison of source
+  TTS, dog-decoded PCM and physical Go2 output.
+- The new timing evidence measured three accepted transcripts. The most recent
+  transcript-to-first-active-audio time was 1,646 ms and the maximum was 2,284
+  ms. Across the first 5,806 decoded agent frames only two inter-frame gaps
+  exceeded 40 ms, maximum 80 ms; the speaker queue still had zero drops and
+  underflows. A separate 30-packet 4G ping had zero loss but 33.493/90.954/
+  331.087 ms min/mean/max RTT and 67.326 ms mdev. TCP 80 was established, TCP
+  7881 remained `SYN-SENT`, UDP 7882 returned no STUN response and UDP 3478
+  returned a valid matching STUN response. Platform timing and candidate-pair
+  evidence are required before assigning the complete latency to network or
+  model/TTS.
+- Audible wake acknowledgement is not accepted. A first wake DataChannel event
+  reached the dog and incremented the wake sequence, but the operator later
+  said `小九小九` without a new DataChannel event reaching the dog; the gate
+  remained sleeping. The platform must correlate ASR, wake-gate and DataChannel
+  logs and must publish an audible `我在` when wake succeeds. A silent internal
+  state change is not an acceptable operator experience.
+- The static deployment regression is 150 repository tests plus Python
+  compilation, repository-knowledge validation, container-contract validation,
+  in-image NumPy/native import checks, exact V6 layer-prefix comparison and a
+  clean diff check. Concurrent patrol plus interaction, ten-minute resource
+  acceptance, token refresh, reconnect and stop-live acceptance remain open.
+  The platform-facing evidence request is
+  `/Users/mac/Desktop/GOGOGUARD_狗端实时对话联调回执-20260811.md` and contains no
+  JWT, device key or password.
