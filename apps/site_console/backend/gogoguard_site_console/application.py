@@ -68,6 +68,7 @@ class InspectionApplication:
         self.journal.append("runtime.started", mode=self.mode, robot_id=self.robot_id)
 
     def close(self) -> None:
+        self.capture.close()
         self.navigation.close()
         self.gateway.stop()
         self.journal.append("runtime.stopped", mode=self.mode, robot_id=self.robot_id)

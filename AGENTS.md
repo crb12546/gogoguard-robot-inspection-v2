@@ -13,8 +13,10 @@ workflow:
 3. The existing Alibaba Cloud worker runs GLIM and returns immutable map
    artifacts. It does not own robot ROS traffic or motion.
 
-The existing GoGoGuard SaaS is a later fourth integration boundary. It is not
-part of the current record-map-localize-patrol acceptance loop.
+The existing GoGoGuard SaaS is the external fourth integration boundary. Its
+heartbeat, selected-patrol, realtime-media and checkpoint adapters are present,
+but SaaS availability never owns the robot's realtime localization or motion
+loop.
 
 Live ROS traffic stays on the robot. A sealed recording moves robot -> Mac ->
 cloud; GLIM artifacts return cloud -> Mac; only a selected map version moves

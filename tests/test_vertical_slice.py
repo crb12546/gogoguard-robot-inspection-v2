@@ -68,6 +68,18 @@ class VerticalSliceTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.app.start_recording()
 
+    def test_runtime_close_stops_and_marks_an_active_recording_interrupted(self) -> None:
+        session = self.app.start_recording()
+        sampler = self.app.capture._sample_thread
+        self.app.capture.close()
+
+        self.assertIsNotNone(sampler)
+        self.assertFalse(sampler.is_alive())
+        self.assertIsNone(self.app.capture.active())
+        stopped = self.app.capture.get(session["session_id"])
+        self.assertEqual(stopped.state.value, "failed")
+        self.assertEqual(stopped.error, "recording interrupted by runtime shutdown")
+
     def test_recording_checkpoint_captures_pose_gimbal_and_local_sample(self) -> None:
         session = self.app.start_recording()
         self.app.move_gimbal({"pan": -15, "tilt": 22.5, "roll": 0})
@@ -80,6 +92,20 @@ class VerticalSliceTest(unittest.TestCase):
         sample = self.root / "recordings" / session["session_id"] / checkpoint["sampleFrames"][0]
         self.assertTrue(sample.read_bytes().startswith(b"\xff\xd8"))
         self.assertTrue(sample.read_bytes().endswith(b"\xff\xd9"))
+        snapshots = [
+            json.loads(line)
+            for line in (
+                self.root
+                / "recordings"
+                / session["session_id"]
+                / "samples"
+                / "snapshots.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertLess(checkpoint["recordingSampleIndex"], len(snapshots))
+        self.assertTrue(
+            snapshots[checkpoint["recordingSampleIndex"]].get("captured_at")
+        )
         self.assertEqual(
             len(self.app.recording_checkpoints(session["session_id"])["checkpoints"]),
             1,

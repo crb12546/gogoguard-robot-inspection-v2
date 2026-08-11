@@ -18,6 +18,39 @@ class MapWorkerError(RuntimeError):
     pass
 
 
+def _validate_optimized_trajectory(path: Path) -> dict:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise MapWorkerError("GLIM optimized trajectory contract is unreadable") from exc
+    if not isinstance(value, dict):
+        raise MapWorkerError("GLIM optimized trajectory contract is invalid")
+    poses = value.get("poses")
+    if (
+        value.get("schema") != "gogoguard.optimized_trajectory.v1"
+        or value.get("frame") != "map"
+        or not isinstance(poses, list)
+        or len(poses) < 2
+    ):
+        raise MapWorkerError("GLIM optimized trajectory contract is invalid")
+    previous_timestamp = -math.inf
+    for pose in poses:
+        try:
+            fields = tuple(
+                float(pose[name])
+                for name in ("timestamp", "x", "y", "z", "qx", "qy", "qz", "qw")
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MapWorkerError("GLIM optimized trajectory pose is invalid") from exc
+        timestamp, _, _, _, qx, qy, qz, qw = fields
+        if not all(math.isfinite(item) for item in fields) or timestamp <= previous_timestamp:
+            raise MapWorkerError("GLIM optimized trajectory pose is invalid")
+        if math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw) < 0.5:
+            raise MapWorkerError("GLIM optimized trajectory quaternion is invalid")
+        previous_timestamp = timestamp
+    return value
+
+
 class MapJobManager:
     def __init__(self, data_root: Path, worker: str, journal: EventJournal, cloud: dict | None = None) -> None:
         self.root = data_root / "map-jobs"
@@ -246,6 +279,7 @@ class MapJobManager:
             returned = {path.name for path in artifact_root.iterdir() if path.is_file()}
             if not required.issubset(returned):
                 raise MapWorkerError("cloud worker returned an incomplete GLIM artifact set")
+            _validate_optimized_trajectory(artifact_root / "trajectory-poses.json")
             prefix = f"/artifacts/{job_id}"
             self._update(job_id, MapJobState.COMPLETE, 100, "云端 GLIM 地图已返回", stage="complete",
                          artifact_root=str(artifact_root), overview_url=prefix + "/overview.svg",
@@ -351,6 +385,7 @@ class MapJobManager:
         }
         if not required.issubset({path.name for path in artifact_root.iterdir()}):
             raise MapWorkerError("edited GLIM artifact set is incomplete")
+        _validate_optimized_trajectory(artifact_root / "trajectory-poses.json")
         artifact = json.loads((artifact_root / "map.json").read_text(encoding="utf-8"))
         if (
             artifact.get("source") != "cloud-glim"

@@ -1,84 +1,102 @@
-# Gogoguard Robot Inspection V2
+# GoGoGuard Robot Inspection V2
 
-V2 keeps the established Livox, FAST-LIO, GLIM, small_gicp, Nav2/MPPI and
-Unitree capabilities, but gives them explicit product boundaries. It does not
-copy the old repository's mixed application structure wholesale.
+GoGoGuard V2 is the active field repository for a Unitree Go2 inspection
+system. It preserves the commissioned Livox, FAST-LIO, GLIM, small_gicp,
+Nav2/MPPI and Unitree capabilities behind explicit product modules.
 
-The first usable release is one visible three-end mapping loop:
+The proven core flow is:
 
 ```text
-Go2 sensors -> sealed recording on robot -> resumable copy to Mac workstation
--> Alibaba Cloud GLIM -> versioned 2D/3D map on Mac
--> selected map version deployed to robot -> localization and Nav2 patrol
+robot records sensors and checkpoints
+-> Mac resumes and verifies the sealed recording
+-> Alibaba Cloud GLIM creates an immutable 3D map and optimized trajectory
+-> Mac reviews the map and versions the blue route, green allowed area and checkpoints
+-> robot localizes and patrols locally
+-> GoGoGuard SaaS may dispatch the selected mission and receive media/status/evidence
 ```
+
+This is a field-commissioning product, not a fully accepted inspection release.
+Read [PROJECT_STATE.md](PROJECT_STATE.md) before assuming that local code is
+built, deployed or robot-verified.
+
+## Start here
+
+1. [Documentation index](docs/README.md)
+2. [Architecture and developer handoff](docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md)
+3. [Current deployed and field state](PROJECT_STATE.md)
+4. [Generated module ownership index](docs/generated/repository-index.md)
+
+Historical handoffs are under `docs/archive/` and are not current operating
+instructions.
 
 ## Repository layout
 
 ```text
-modules/contracts/         Stable cross-module data models
-modules/device_io/         ROS 2 and hardware adapters
-modules/data_capture/      Robot recording lifecycle and sealed bundles
-modules/transfer/          Robot/Mac immutable artifact exchange
-modules/localization/      FAST-LIO and fixed-map localization boundary
-modules/navigation/        Nav2 runtime boundary
-modules/route/             Versioned map-bound route model
-modules/evidence/          Structured run events
-services/map_factory/      Mac-to-cloud GLIM orchestration
-apps/site_console/         Shared HTTP surface and browser assets
-apps/field_workstation/    Mac workflow and historical catalog
-deployment/                Separate Mac and robot releases
-tests/                     Module and vertical-slice tests
+architecture/modules/    Machine-readable module ownership manifests
+modules/contracts/       Stable cross-module and persisted schemas
+modules/calibration/     Authoritative sensor transforms
+modules/device_io/       Livox, camera, gimbal, audio and Unitree adapters
+modules/data_capture/    Recording, sealing and checkpoint samples
+modules/transfer/        Verified robot/Mac artifact exchange
+modules/localization/    FAST-LIO and fixed-map VGICP boundary
+modules/route/           Map-bound route, allowed area and checkpoint assets
+modules/navigation/      Nav2/MPPI runtime, recovery and stop receipts
+modules/inspection/      Checkpoint frame/evidence handling
+modules/mission/         Inspection task state machine
+modules/evidence/        Events, incidents and replay evidence
+modules/interaction/     LiveKit session, wake and audio safety
+services/map_factory/    Mac/cloud GLIM orchestration and editor sessions
+services/interaction_edge/ Robot realtime-media runtime adapter
+services/platform_edge/  Heartbeat and allow-listed platform bridge
+apps/site_console/       Shared narrow HTTP API and browser UI
+apps/field_workstation/  Mac field workflow composition
+deployment/              Cloud, container, robot and workstation releases
+third_party/locked_stack/Content-locked capability build provenance
+tests/                   Unit and vertical-slice regression tests
 ```
 
-These are code and contract boundaries, not dozens of microservices. Production
-uses one main container on the robot and one lightweight container on the Mac.
+These are code responsibilities, not separate microservices. The robot runs
+one primary ARM64 ROS 2 Humble container. The commissioned Mac normally runs
+the workstation as a native process. Alibaba Cloud owns only the pinned GLIM
+worker; GoGoGuard SaaS remains an external boundary.
 
-## Run locally
+## Run the workstation
 
-The dependency-free demo produces a synthetic recording and map:
-
-```bash
-make demo
-```
-
-Open <http://127.0.0.1:8080>. For the real three-end workflow on the
-commissioned Mac:
+For the commissioned Mac workflow:
 
 ```bash
 make workstation
 ```
 
-`make workstation-container` remains the portable container form.
+Open <http://127.0.0.1:8080>. The containerized workstation form remains
+available with `make workstation-container`. A dependency-free synthetic UI
+harness is available with `make demo`, but demo mode is never field evidence.
 
-The Mac catalog and artifacts persist under `workstation-data/`.
+Real recordings, maps, incidents and platform bundles live under ignored
+`workstation-data/` or `runtime-data/`. Image exports live under ignored
+`release-cache/`; none are pushed to GitHub.
 
-The operator flow, button meanings, recovery path and current default
-parameters are documented in [docs/FIELD_WORKSTATION_GUIDE.md](docs/FIELD_WORKSTATION_GUIDE.md).
-
-For a product-level, plain-language explanation of the complete inspection
-flow, the algorithms behind each capability, current limitations, the 3D/stair
-roadmap and the distinction between mature components and our orchestration,
-start with [docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md](docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md).
-
-## Verify
+## Verify before handoff
 
 ```bash
 make test
-make ui-smoke
 make compile
+make ui-smoke
 make container-validate
 make knowledge-check
+git diff --check
 ```
 
-## Production ownership
+An ARM64 Docker build and robot deployment are separate, explicitly authorized
+steps. The robot never runs `git pull` and never compiles this repository.
 
-- Robot: Livox/IMU/camera capture, sealed rosbag, FAST-LIO, fixed-map
-  localization, Nav2/MPPI/collision monitoring and Unitree motion. It has no
-  GitHub access, cloud SSH key, or source compilation responsibility.
-- Mac: field UI, history, resumable recording transfer, GLIM orchestration,
-  map review, selected-map deployment and robot release publication. It
-  contains no ROS 2 and is never in the robot's realtime motion loop.
-- Cloud: the existing Jazzy GLIM worker. It receives one sealed recording and
-  returns immutable map artifacts plus progress markers.
-- SaaS: the existing GoGoGuard service, integrated after the field navigation
-  loop is accepted.
+## Development rules
+
+- Read `AGENTS.md` and the current project-state handoff first.
+- Give each change one primary owning module; share only versioned contracts.
+- Preserve the locked established algorithms unless measured field evidence
+  and an explicit product decision justify replacement.
+- Never commit credentials, recordings, maps, logs, exported images or runtime
+  data.
+- A passing test is offline evidence only. Record commit, image digest and real
+  field receipt separately when deployment is actually authorized and run.

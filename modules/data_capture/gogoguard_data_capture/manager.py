@@ -31,8 +31,11 @@ class CaptureManager:
         self._sessions: dict[str, RecordingSession] = {}
         self._active_id: str | None = None
         self._sample_stop = threading.Event()
+        self._sample_lock = threading.Lock()
         self._sample_thread: threading.Thread | None = None
+        self._sample_error: Exception | None = None
         self._rosbag: subprocess.Popen | None = None
+        self._closed = False
         self._load_existing()
 
     def _load_existing(self) -> None:
@@ -46,6 +49,8 @@ class CaptureManager:
 
     def start(self, site_id: str, robot_id: str) -> RecordingSession:
         with self._lock:
+            if self._closed:
+                raise CaptureError("capture manager is closed")
             if self._active_id:
                 raise CaptureError(f"session {self._active_id} is already recording")
             if shutil.disk_usage(self.root).free < 2 * 1024**3:
@@ -71,6 +76,7 @@ class CaptureManager:
                     self._save(session)
                     raise
             self._sample_stop.clear()
+            self._sample_error = None
             self._sample_thread = threading.Thread(target=self._sample, args=(session_id,), daemon=True)
             self._sample_thread.start()
             self.journal.append("recording.started", session_id=session_id, mode=self.mode)
@@ -87,14 +93,39 @@ class CaptureManager:
     def _sample(self, session_id: str) -> None:
         session = self._sessions[session_id]
         path = Path(session.root) / "samples" / "snapshots.jsonl"
-        while not self._sample_stop.is_set():
-            snapshot = self.store.get()
+        try:
+            while not self._sample_stop.is_set():
+                snapshot = self.store.get()
+                if self._sample_stop.is_set():
+                    break
+                self._append_snapshot(session, path, snapshot)
+                self._sample_stop.wait(0.2)
+        except Exception as exc:
+            self._sample_error = exc
+            self._sample_stop.set()
+            self.journal.append(
+                "recording.sample_failed",
+                session_id=session_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
+    def _append_snapshot(self, session: RecordingSession, path: Path, snapshot) -> int:
+        with self._sample_lock:
+            sample_index = int(session.sample_count)
             with path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(json_ready(snapshot), ensure_ascii=False, separators=(",", ":")) + "\n")
+                handle.write(
+                    json.dumps(
+                        json_ready(snapshot),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
             session.sample_count += 1
             if session.sample_count % 10 == 0:
                 self._save(session)
-            self._sample_stop.wait(0.2)
+            return sample_index
 
     def stop(self, session_id: str) -> RecordingSession:
         with self._lock:
@@ -104,14 +135,25 @@ class CaptureManager:
             session.state = RecordingState.SEALING
             self._save(session)
             self._sample_stop.set()
+            sampler_stopped = True
             if self._sample_thread:
                 self._sample_thread.join(timeout=3)
-            if self._rosbag and self._rosbag.poll() is None:
-                os.killpg(self._rosbag.pid, signal.SIGINT)
-                try:
-                    self._rosbag.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    os.killpg(self._rosbag.pid, signal.SIGTERM)
+                sampler_stopped = not self._sample_thread.is_alive()
+            self._stop_rosbag(timeout=20)
+            if not sampler_stopped:
+                session.state = RecordingState.FAILED
+                session.error = "recording sampler did not stop"
+                session.stopped_at = utc_now()
+                self._active_id = None
+                self._save(session)
+                raise CaptureError(session.error)
+            if self._sample_error is not None:
+                session.state = RecordingState.FAILED
+                session.error = f"snapshot sampling failed: {type(self._sample_error).__name__}"
+                session.stopped_at = utc_now()
+                self._active_id = None
+                self._save(session)
+                raise CaptureError(session.error) from self._sample_error
             session.stopped_at = utc_now()
             manifest_path = self._seal(Path(session.root), session)
             session.bundle_manifest = str(manifest_path)
@@ -120,6 +162,64 @@ class CaptureManager:
             self._save(session)
             self.journal.append("recording.sealed", session_id=session_id, samples=session.sample_count, manifest=str(manifest_path))
             return self.get(session_id)
+
+    def close(self) -> None:
+        """Stop owned background work without claiming an interrupted bundle is sealed."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            active_id = self._active_id
+            self._sample_stop.set()
+        thread = self._sample_thread
+        if thread is not None:
+            thread.join(timeout=3)
+        with self._lock:
+            self._stop_rosbag(timeout=3)
+            if active_id is not None and self._active_id == active_id:
+                session = self._sessions[active_id]
+                session.state = RecordingState.FAILED
+                session.error = "recording interrupted by runtime shutdown"
+                session.stopped_at = utc_now()
+                self._active_id = None
+                try:
+                    self._save(session)
+                except OSError:
+                    pass
+                self.journal.append(
+                    "recording.interrupted",
+                    session_id=active_id,
+                    sampler_stopped=not bool(thread and thread.is_alive()),
+                )
+
+    def _stop_rosbag(self, *, timeout: float) -> None:
+        process = self._rosbag
+        if process is None:
+            return
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGINT)
+            except ProcessLookupError:
+                self._rosbag = None
+                return
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    self._rosbag = None
+                    return
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        self._rosbag = None
+                        return
+                    process.wait(timeout=3)
+        self._rosbag = None
 
     def checkpoints(self, session_id: str) -> dict:
         session = self.get(session_id)
@@ -177,11 +277,16 @@ class CaptureManager:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_sample, sample_path)
-            snapshot = json_ready(self.store.get())
+            snapshot = self.store.get()
+            snapshot_path = Path(self._sessions[session_id].root) / "samples" / "snapshots.jsonl"
+            sample_index = self._append_snapshot(
+                self._sessions[session_id], snapshot_path, snapshot
+            )
+            snapshot = json_ready(snapshot)
             pose = dict(snapshot.get("pose") or {})
             item = {
                 "checkpointId": checkpoint_id,
-                "recordingSampleIndex": int(self._sessions[session_id].sample_count),
+                "recordingSampleIndex": sample_index,
                 "recordingSequence": int(snapshot.get("sequence") or 0),
                 "markedAt": utc_now(),
                 "rawPose": {

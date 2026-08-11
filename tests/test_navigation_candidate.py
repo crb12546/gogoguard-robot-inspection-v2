@@ -220,6 +220,50 @@ class NavigationCandidateTest(unittest.TestCase):
         with self.assertRaisesRegex(NavigationWorkspaceError, "green allowed area"):
             RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
 
+    def test_legacy_map_without_checkpoints_does_not_require_pose_companion(self):
+        self.artifacts.chmod(0o750)
+        (self.artifacts / "trajectory-poses.json").unlink()
+        self.artifacts.chmod(0o550)
+
+        manager = RouteManager(self.root, site_id="test-site")
+        candidate = manager.prepare_map_job(self.job_id)
+        checkpoints = manager.checkpoint_descriptor(self.job_id)
+
+        self.assertIsNone(candidate["source_trajectory_poses_sha256"])
+        self.assertEqual(checkpoints["checkpoints"], [])
+
+    def test_checkpoint_map_requires_pose_companion(self):
+        session_id = "20260811T010203Z-1234abcd"
+        (self.artifacts.parent / "job.json").write_text(
+            json.dumps({"session_id": session_id}), encoding="utf-8"
+        )
+        inspection = (
+            self.root
+            / "recordings"
+            / session_id
+            / "samples"
+            / "inspection"
+        )
+        inspection.mkdir(parents=True)
+        (inspection / "checkpoints.json").write_text(
+            json.dumps(
+                {
+                    "checkpoints": [
+                        {"checkpointId": "cp_01", "recordingSampleIndex": 0}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.artifacts.chmod(0o750)
+        (self.artifacts / "trajectory-poses.json").unlink()
+        self.artifacts.chmod(0o550)
+
+        manager = RouteManager(self.root, site_id="test-site")
+        manager.prepare_map_job(self.job_id)
+        with self.assertRaisesRegex(ValueError, "optimized pose timeline"):
+            manager.checkpoint_descriptor(self.job_id)
+
     def test_platform_bundle_has_relative_versioned_assets_and_hashes(self):
         manager = RouteManager(self.root, site_id="test-site")
         candidate = manager.prepare_map_job(self.job_id)

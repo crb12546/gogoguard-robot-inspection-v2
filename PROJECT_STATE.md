@@ -26,6 +26,21 @@ streams Z1Pro control until feedback converges. It is prepared and tested on
 the Mac, not yet deployed to the robot or accepted in a complete checkpoint
 mission.
 
+The current source tip also includes the 2026-08-12 GitHub handoff audit. It
+keeps legacy maps without checkpoints prepareable while checkpoint maps remain
+fail-closed on a missing GLIM pose timeline; validates optimized trajectories
+as finite, strictly time-ordered quaternion poses; reads fragmented Z1Pro TCP
+frames by their declared length; and makes a checkpoint index refer to the
+exact persisted recording snapshot. Runtime shutdown now joins the recording
+sampler/rosbag and marks an interrupted bundle failed instead of leaving a
+background writer or falsely sealing it. The repository documentation has one
+current architecture guide and archives five superseded one-off handoffs. All
+211 tests, compilation, UI smoke, container contract, generated knowledge,
+shell/JSON/JavaScript syntax, Markdown-link and whitespace checks pass. These
+are local source receipts only: no new ARM64 image was built, no cloud worker
+deployment was changed and nothing in this audit was deployed to or moved the
+robot.
+
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
 | Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
@@ -1541,7 +1556,7 @@ layer or direct interaction-to-motion path as a shortcut.
   `agent/realtime-dialogue-v1`, finish field acceptance of patrol first, then
   integrate from the latest patrol commit and request one combined patrol plus
   interaction acceptance. The complete handoff is
-  `docs/stage-handoff-realtime-interaction-20260809.md`.
+  `docs/archive/2026-08-handoffs/stage-handoff-realtime-interaction-20260809.md`.
 - GoGoGuard P1.5 evidence is accepted for later joint re-verification of the
   versioned Xiaojiu persona, identity answers, visual-context freshness/reset,
   desired-live/JWT refresh/stop flow, and participant-SID reconnect ownership.
@@ -1575,7 +1590,7 @@ requires an explicit success receipt.
   implementation and exposes no motion command. This is source integration,
   not a new robot deployment or concurrent patrol receipt.
 - The dog-side response to the GoGoGuard phase-2 alignment is
-  `docs/GOGOGUARD_PHASE2_DOG_REPLY.md`. It deliberately distinguishes field
+  `docs/archive/2026-08-handoffs/GOGOGUARD_PHASE2_DOG_REPLY.md`. It deliberately distinguishes field
   evidence, offline implementation, hardware capability and product support.
   The platform can now define its wire API without assuming unavailable pause,
   gimbal, buffer or pose-stream behavior.
@@ -1652,7 +1667,7 @@ requires an explicit success receipt.
   device-I/O tests, compilation, UI smoke, container contract, generated
   repository knowledge, shell/JSON checks and a clean diff check. The complete
   platform-facing handoff is
-  `docs/GOGOGUARD_COMBINED_LIVEKIT_JOINT_TEST_HANDOFF.md`.
+  `docs/archive/2026-08-handoffs/GOGOGUARD_COMBINED_LIVEKIT_JOINT_TEST_HANDOFF.md`.
 - The combined image has not been installed on the dog. Tomorrow's acceptance
   remains explicit: install with the service stopped; keep the dog lying down;
   configure interaction and heartbeat; prove static `start_live`/media/wake/

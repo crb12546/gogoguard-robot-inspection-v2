@@ -55,7 +55,34 @@ class GlimEditorTest(unittest.TestCase):
         (root / "overview.svg").write_text("<svg/>", encoding="utf-8")
         (root / "glim-build.json").write_text("{}", encoding="utf-8")
         (root / "trajectory-poses.json").write_text(
-            '{"schema":"gogoguard.optimized_trajectory.v1","poses":[]}',
+            json.dumps(
+                {
+                    "schema": "gogoguard.optimized_trajectory.v1",
+                    "frame": "map",
+                    "poses": [
+                        {
+                            "timestamp": 1.0,
+                            "x": 0.0,
+                            "y": 0.0,
+                            "z": 0.0,
+                            "qx": 0.0,
+                            "qy": 0.0,
+                            "qz": 0.0,
+                            "qw": 1.0,
+                        },
+                        {
+                            "timestamp": 2.0,
+                            "x": 1.0,
+                            "y": 0.0,
+                            "z": 0.0,
+                            "qx": 0.0,
+                            "qy": 0.0,
+                            "qz": 0.0,
+                            "qw": 1.0,
+                        },
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         return root
@@ -76,6 +103,50 @@ class GlimEditorTest(unittest.TestCase):
         value["editor"] = "unknown"
         (root / "map.json").write_text(json.dumps(value), encoding="utf-8")
         with self.assertRaisesRegex(Exception, "provenance"):
+            self.maps.import_edited(self.parent_id, job_id, root)
+
+    def test_edited_map_rejects_invalid_optimized_trajectory(self):
+        job_id = "map-abcdef123456"
+        root = self._artifact(job_id)
+        (root / "trajectory-poses.json").write_text(
+            json.dumps(
+                {
+                    "schema": "gogoguard.optimized_trajectory.v1",
+                    "frame": "map",
+                    "poses": [
+                        {
+                            "timestamp": 1.0,
+                            "x": 0.0,
+                            "y": 0.0,
+                            "z": 0.0,
+                            "qx": 0.0,
+                            "qy": 0.0,
+                            "qz": 0.0,
+                            "qw": 1.0,
+                        },
+                        {
+                            "timestamp": 1.0,
+                            "x": 1.0,
+                            "y": 0.0,
+                            "z": 0.0,
+                            "qx": 0.0,
+                            "qy": 0.0,
+                            "qz": 0.0,
+                            "qw": 1.0,
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(Exception, "pose is invalid"):
+            self.maps.import_edited(self.parent_id, job_id, root)
+
+    def test_edited_map_rejects_non_object_trajectory_contract(self):
+        job_id = "map-abcdef123456"
+        root = self._artifact(job_id)
+        (root / "trajectory-poses.json").write_text("[]", encoding="utf-8")
+        with self.assertRaisesRegex(Exception, "contract is invalid"):
             self.maps.import_edited(self.parent_id, job_id, root)
 
     def test_editor_json_parser_ignores_tool_banner_lines(self):

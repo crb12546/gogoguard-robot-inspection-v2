@@ -36,10 +36,12 @@ def reply_with_angles(roll: float, tilt: float, pan: float) -> bytes:
 
 
 class FakeGcuSocket:
-    def __init__(self, responses: list[bytes]) -> None:
+    def __init__(self, responses: list[bytes], *, max_chunk: int | None = None) -> None:
         self.responses = list(responses)
         self.last = responses[-1]
         self.sent: list[bytes] = []
+        self.buffer = b""
+        self.max_chunk = max_chunk
 
     def __enter__(self):
         return self
@@ -53,8 +55,14 @@ class FakeGcuSocket:
     def sendall(self, packet: bytes) -> None:
         self.sent.append(packet)
 
-    def recv(self, _size: int) -> bytes:
-        return self.responses.pop(0) if self.responses else self.last
+    def recv(self, size: int) -> bytes:
+        if not self.buffer:
+            self.buffer = self.responses.pop(0) if self.responses else self.last
+        count = min(size, len(self.buffer))
+        if self.max_chunk is not None:
+            count = min(count, self.max_chunk)
+        value, self.buffer = self.buffer[:count], self.buffer[count:]
+        return value
 
 
 class Z1ProGimbalProtocolTest(unittest.TestCase):
@@ -80,6 +88,16 @@ class Z1ProGimbalProtocolTest(unittest.TestCase):
         damaged[12] ^= 0x01
         with self.assertRaisesRegex(ValueError, "CRC"):
             parse_gcu_reply(bytes(damaged))
+
+    def test_probe_reads_one_tcp_frame_across_fragmented_packets(self) -> None:
+        fake = FakeGcuSocket([OFFICIAL_REPLY], max_chunk=3)
+        with patch(
+            "gogoguard_device_io.z1pro_gimbal.socket.create_connection",
+            return_value=fake,
+        ):
+            reply = Z1ProGimbal().probe()
+        self.assertAlmostEqual(reply.relative_pan_deg, 62.18)
+        self.assertEqual(len(fake.sent), 1)
 
     def test_motion_and_photo_fail_closed_until_static_commissioning(self) -> None:
         gimbal = Z1ProGimbal(commissioned=False)

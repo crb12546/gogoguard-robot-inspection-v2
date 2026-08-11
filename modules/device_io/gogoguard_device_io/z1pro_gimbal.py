@@ -184,10 +184,7 @@ class Z1ProGimbal:
         with socket.create_connection((self.host, self.port), timeout=self.timeout_s) as client:
             client.settimeout(self.timeout_s)
             client.sendall(packet)
-            response = client.recv(4096)
-        if not response:
-            raise TimeoutError("Z1Pro returned no GCU acknowledgement")
-        return response
+            return self._receive_frame(client)
 
     def _move_until_converged(
         self,
@@ -213,12 +210,10 @@ class Z1ProGimbal:
                 client.settimeout(min(self.timeout_s, max(0.05, remaining)))
                 client.sendall(packet)
                 try:
-                    response = client.recv(4096)
+                    response = self._receive_frame(client)
                 except socket.timeout:
                     next_send = max(next_send + interval, time.monotonic())
                     continue
-                if not response:
-                    raise TimeoutError("Z1Pro closed GCU control connection before convergence")
                 reply = parse_gcu_reply(response)
                 if reply.status not in {None, 0}:
                     raise RuntimeError(
@@ -250,6 +245,26 @@ class Z1ProGimbal:
             "Z1Pro angle convergence timed out: "
             + ", ".join(f"{name} error {error:.2f}deg" for name, error in errors.items())
         )
+
+    @staticmethod
+    def _receive_frame(client: socket.socket) -> bytes:
+        header = Z1ProGimbal._receive_exact(client, 4)
+        if header[:2] != RX_HEADER:
+            raise ValueError("Z1Pro returned an invalid GCU response")
+        declared = struct.unpack_from("<H", header, 2)[0]
+        if not 72 <= declared <= 4096:
+            raise ValueError("Z1Pro returned an invalid GCU frame length")
+        return header + Z1ProGimbal._receive_exact(client, declared - len(header))
+
+    @staticmethod
+    def _receive_exact(client: socket.socket, length: int) -> bytes:
+        payload = bytearray()
+        while len(payload) < length:
+            chunk = client.recv(length - len(payload))
+            if not chunk:
+                raise TimeoutError("Z1Pro closed GCU connection before a complete reply")
+            payload.extend(chunk)
+        return bytes(payload)
 
     @staticmethod
     def _angle_errors(

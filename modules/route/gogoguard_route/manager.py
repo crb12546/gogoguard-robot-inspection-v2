@@ -245,14 +245,16 @@ class RouteManager:
         map_json = artifact_root / "map.json"
         map_ply = artifact_root / "map.ply"
         trajectory_poses = artifact_root / "trajectory-poses.json"
-        if not map_json.is_file() or not map_ply.is_file() or not trajectory_poses.is_file():
+        if not map_json.is_file() or not map_ply.is_file():
             raise ValueError("completed GLIM artifacts are unavailable")
         with self._lock:
             destination = self.root / job_id
             destination.mkdir(parents=True, exist_ok=True)
             source_map_json_hash = _file_hash(map_json)
             source_ply_hash = _file_hash(map_ply)
-            source_trajectory_poses_hash = _file_hash(trajectory_poses)
+            source_trajectory_poses_hash = (
+                _file_hash(trajectory_poses) if trajectory_poses.is_file() else None
+            )
             # On the robot, route-bound checkpoints advance with the editable
             # workspace and live beside immutable GLIM artifacts.  Mac map
             # jobs retain the recording-time source in artifacts/.
@@ -486,6 +488,8 @@ class RouteManager:
         raw_items = source.get("checkpoints")
         if not isinstance(raw_items, list):
             raise ValueError("recording checkpoints are invalid")
+        if not raw_items:
+            return base
         optimized_path = (
             self.data_root
             / "map-jobs"

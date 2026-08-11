@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -31,23 +32,37 @@ def main() -> None:
 
     trajectory = []
     optimized_poses = []
+    previous_timestamp = -math.inf
     for raw in args.trajectory.read_text(encoding="utf-8").splitlines():
         values = raw.split()
-        if len(values) == 8:
-            timestamp, x, y, z, qx, qy, qz, qw = (float(value) for value in values)
-            trajectory.append([x, y, z])
-            optimized_poses.append(
-                {
-                    "timestamp": timestamp,
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "qx": qx,
-                    "qy": qy,
-                    "qz": qz,
-                    "qw": qw,
-                }
-            )
+        if not values:
+            continue
+        if len(values) != 8:
+            raise SystemExit("GLIM trajectory contains a malformed pose")
+        timestamp, x, y, z, qx, qy, qz, qw = (float(value) for value in values)
+        if not all(
+            math.isfinite(value)
+            for value in (timestamp, x, y, z, qx, qy, qz, qw)
+        ):
+            raise SystemExit("GLIM trajectory contains a non-finite pose")
+        if timestamp <= previous_timestamp:
+            raise SystemExit("GLIM trajectory timestamps are not strictly increasing")
+        if math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw) < 0.5:
+            raise SystemExit("GLIM trajectory contains an invalid quaternion")
+        trajectory.append([x, y, z])
+        optimized_poses.append(
+            {
+                "timestamp": timestamp,
+                "x": x,
+                "y": y,
+                "z": z,
+                "qx": qx,
+                "qy": qy,
+                "qz": qz,
+                "qw": qw,
+            }
+        )
+        previous_timestamp = timestamp
     if len(trajectory) < 2:
         raise SystemExit("GLIM trajectory contains fewer than two poses")
 
@@ -63,7 +78,13 @@ def main() -> None:
         "points": points,
     }
     (args.output / "map.json").write_text(
-        json.dumps(artifact, ensure_ascii=False, separators=(",", ":")) + "\n",
+        json.dumps(
+            artifact,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (args.output / "trajectory-poses.json").write_text(
@@ -75,6 +96,7 @@ def main() -> None:
             },
             ensure_ascii=False,
             separators=(",", ":"),
+            allow_nan=False,
         )
         + "\n",
         encoding="utf-8",
