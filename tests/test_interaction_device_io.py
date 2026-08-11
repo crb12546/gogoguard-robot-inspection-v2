@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from gogoguard_device_io import (
     Go2VolumeController,
+    LiveKitGo2Transport,
     NavigationReadOnlyGuard,
     SpeakerJitterBuffer,
     decode_s24_3le_stereo_to_s16_mono,
@@ -98,6 +99,42 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertTrue(stopped["safe"])
         self.assertTrue(unauthorized["safe"])
         self.assertFalse(moving["safe"])
+
+    def test_livekit_data_channel_accepts_only_frozen_agent_schemas(self) -> None:
+        profile = load_interaction_hardware_profile(
+            ROOT / "config/robot/interaction-hardware.json"
+        )
+        transport = LiveKitGo2Transport(
+            profile=profile, unitree_aes_128_key="test-only"
+        )
+        received = []
+        transport.set_wake_transcript_handler(received.append)
+        message = {
+            "schema": "gogoguard.wake_transcript.v1",
+            "action": "wake_transcript",
+            "text": "小九小九",
+            "state": "awake",
+            "wake": True,
+        }
+        self.assertFalse(
+            transport.handle_data_message(
+                message, participant_identity="robot:LLYJ0001"
+            )
+        )
+        self.assertTrue(
+            transport.handle_data_message(
+                message, participant_identity="agent:patrol-test-001"
+            )
+        )
+        self.assertEqual(
+            received, [{"action": "wake_transcript", "text": "小九小九"}]
+        )
+        self.assertFalse(
+            transport.handle_data_message(
+                {"schema": "gogoguard.motion.v1", "action": "goto"},
+                participant_identity="agent:patrol-test-001",
+            )
+        )
 
     @patch("gogoguard_device_io.interaction_media.subprocess.run")
     def test_volume_ten_is_set_and_verified(self, run) -> None:

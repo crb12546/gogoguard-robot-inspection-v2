@@ -58,6 +58,11 @@ class InteractionEdgeService:
             allow_insecure_ws=allow_insecure_ws,
         )
         self.transport.set_playback_control_handler(self.manager.handle_playback_control)
+        set_wake_transcript_handler = getattr(
+            self.transport, "set_wake_transcript_handler", None
+        )
+        if set_wake_transcript_handler is not None:
+            set_wake_transcript_handler(self._wake_transcript_received)
         self.transport.set_playback_state_handler(self._playback_state_changed)
         set_health_handler = getattr(self.transport, "set_health_handler", None)
         if set_health_handler is not None:
@@ -66,6 +71,11 @@ class InteractionEdgeService:
         self._write_lock = threading.Lock()
         self._command_lock = threading.Lock()
         self._write_status()
+
+    def _wake_transcript_received(self, payload: dict[str, Any]) -> None:
+        with self._command_lock:
+            self.wake.handle_transcript(str(payload.get("text", "")))
+            self._write_status()
 
     def _playback_state_changed(self, active: bool) -> None:
         try:

@@ -127,6 +127,20 @@ GOGOGUARD_PLATFORM_HEARTBEAT_URL=https://gogoguard.cn/api/v1/robot/heartbeat
 GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S=5
 ```
 
+The August 2026 joint test uses the explicit
+`configure-combined-joint-test --temporary-icp-fallback` deployment profile
+while Alibaba Cloud's ICP interception blocks the public domain. This profile
+uses the pinned HTTPS IP for heartbeat with temporary hostname-verification
+bypass and accepts the platform-issued `ws://39.96.37.187:7880` media URL. It is
+not a production default and must be removed by rerunning the helper without
+the option after `gogoguard.cn` becomes publicly reachable.
+
+The platform sends finalized wake transcripts over LiveKit DataChannel using
+`gogoguard.wake_transcript.v1`. The device transport accepts this schema only
+from participants whose identity starts with `agent:` and forwards only the
+`text` field into the existing wake gate. Unknown schemas and all motion-like
+messages are ignored.
+
 `GOGOGUARD_DEVICE_TOKEN` is an optional per-device bearer credential. The
 current platform test endpoint documented on 2026-08-09 accepts `robotId`
 without a device credential, so it can be used for joint testing but must not

@@ -46,6 +46,7 @@ class LiveKitGo2Transport:
         self._microphone_muted = threading.Event()
         self._ready: queue.Queue[MediaConnectionReceipt | BaseException] = queue.Queue(maxsize=1)
         self._playback_control_handler: Callable[[dict[str, Any]], Any] | None = None
+        self._wake_transcript_handler: Callable[[dict[str, Any]], Any] | None = None
         self._playback_state_handler: Callable[[bool], Any] | None = None
         self._health_handler: Callable[[bool, str | None], Any] | None = None
         self._ever_connected = False
@@ -59,6 +60,9 @@ class LiveKitGo2Transport:
 
     def set_playback_control_handler(self, handler: Callable[[dict[str, Any]], Any]) -> None:
         self._playback_control_handler = handler
+
+    def set_wake_transcript_handler(self, handler: Callable[[dict[str, Any]], Any]) -> None:
+        self._wake_transcript_handler = handler
 
     def set_playback_state_handler(self, handler: Callable[[bool], Any]) -> None:
         self._playback_state_handler = handler
@@ -145,6 +149,34 @@ class LiveKitGo2Transport:
             "reconnectCount": self._reconnect_count,
             "speaker": self.speaker.status(),
         }
+
+    def handle_data_message(
+        self, payload: Any, *, participant_identity: str
+    ) -> bool:
+        """Dispatch the two frozen agent-to-robot DataChannel schemas only."""
+
+        if not participant_identity.startswith("agent:") or not isinstance(payload, dict):
+            return False
+        schema = payload.get("schema")
+        if schema == "gogoguard.playback_control.v1":
+            handler = self._playback_control_handler
+            if handler is not None:
+                handler(payload)
+            elif payload.get("action") == "stop":
+                self.speaker.flush()
+            return True
+        if schema == "gogoguard.wake_transcript.v1":
+            text = payload.get("text")
+            if payload.get("action") != "wake_transcript" or not isinstance(text, str):
+                return False
+            if not text or len(text) > 4096:
+                return False
+            handler = self._wake_transcript_handler
+            if handler is None:
+                return False
+            handler({"action": "wake_transcript", "text": text})
+            return True
+        return False
 
     def _thread_main(self, request: RealtimeMediaSessionRequest) -> None:
         backoff_s = 1.0
@@ -279,16 +311,19 @@ class LiveKitGo2Transport:
         @room.on("data_received")
         def on_data_received(packet):
             try:
-                payload = json.loads(bytes(packet.data).decode("utf-8"))
+                raw = bytes(packet.data)
+                if len(raw) > 65536:
+                    return
+                payload = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 return
-            if payload.get("schema") != "gogoguard.playback_control.v1":
+            participant = getattr(packet, "participant", None)
+            identity = str(getattr(participant, "identity", ""))
+            try:
+                self.handle_data_message(payload, participant_identity=identity)
+            except Exception:
+                # A malformed or stale control message must not terminate media.
                 return
-            handler = self._playback_control_handler
-            if handler is not None:
-                handler(payload)
-            elif payload.get("action") == "stop":
-                speaker_buffer.flush()
 
         async def publish_microphone() -> None:
             process = await asyncio.create_subprocess_exec(

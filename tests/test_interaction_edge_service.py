@@ -39,6 +39,7 @@ def token() -> str:
 class FakeTransport:
     def __init__(self) -> None:
         self.control = None
+        self.wake_transcript = None
         self.playback = None
         self.disconnects = 0
         self.muted = []
@@ -46,6 +47,9 @@ class FakeTransport:
 
     def set_playback_control_handler(self, handler):
         self.control = handler
+
+    def set_wake_transcript_handler(self, handler):
+        self.wake_transcript = handler
 
     def set_playback_state_handler(self, handler):
         self.playback = handler
@@ -108,6 +112,14 @@ class InteractionEdgeServiceTest(unittest.TestCase):
             self.assertNotIn(secret, status_text)
             self.assertIn("小玖", status_text)
             service.handle({"action": "stop_live"})
+
+    def test_livekit_data_transcript_updates_the_same_wake_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service = self.create_service(Path(temporary))
+            service.transport.wake_transcript(
+                {"action": "wake_transcript", "text": "小玖小玖"}
+            )
+            self.assertEqual(service.status()["wake"]["state"], "awake")
 
     def test_unix_socket_is_a_narrow_json_control_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

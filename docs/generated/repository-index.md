@@ -58,7 +58,7 @@ this index describes code state and never implies robot acceptance.
 - Manifest: `architecture/modules/device_io.json`
 - Code roots: `modules/device_io`, `config/robot/livox-mid360s.json`, `config/robot/mediamtx.yml`, `config/robot/interaction-hardware.json`, `third_party/locked_stack/src/Livox-SDK2`, `third_party/locked_stack/src/livox_ros_driver2`, `third_party/locked_stack/src/go2_cmd_vel_bridge`, `third_party/locked_stack/src/unitree_api`
 - Entrypoints: `gogoguard_device_io.gateway:create_gateway`, `gogoguard_device_io.camera:create_camera_gateway`, `gogoguard_device_io.z1pro_gimbal:Z1ProGimbal`, `mediamtx config/robot/mediamtx.yml`, `ros2 run go2_cmd_vel_bridge go2_sdk2_udp_receiver`
-- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, BOYA S24_3LE stereo PCM, agent-voice 48k mono PCM, safety-filtered Twist
+- Consumes: MID-360 UDP, ROS 2 PointCloud2, ROS 2 Imu, Z1Pro RTSP H264, BOYA S24_3LE stereo PCM, agent-voice 48k mono PCM, agent:* LiveKit DataChannel control, safety-filtered Twist
 - Produces: SensorSnapshot, CameraStreamStatus, /mapping/livox/lidar, /mapping/livox/imu, Z1Pro WebRTC stream, commissioning-gated Z1Pro GCU packet/feedback, 48k mono microphone PCM, bounded Go2 speaker PCM, Unitree SDK2 Move and StopMove
 - Provenance: old capability commit 3a7597c; exact SDK, driver and Unitree motion boundary sources locked; unitree_sdk2 commit 5ea10f3; commissioned Z1Pro RTSP source; pinned MediaMTX v1.20.0 ARM64 release; 2026-08-09 BOYA mini 2 commissioned as S24_3LE stereo 48 kHz input; 4x gain and Go2 volume 10 passed disposable real-device probes; field correction rebases the shared Livox no-sync epoch after host realtime steps and gates initial startup on stable NTP; commissioned replacement MID-360S ARMCP6B0035634 at 192.168.1.134; live probe verified 10 Hz point cloud and 200 Hz IMU on 2026-08-08; 2026-08-09 the commissioned 0.60 m/s forward and 0.20 m/s lateral Unitree receiver is an owned device_io source instead of a navigation build overlay; 2026-08-09 orchestration-r2 prepares explicit posture before requiring the zero-motion baseline; real receiver and Nav2 startup passed; 2026-08-09 planar-release-r4 directly invokes the one-shot motion probe with the receiver's paired Unitree library boundary; robot StopMove receipt and remote-control release both passed; 2026-08-09 continuous-r1 deploys the owned receiver envelope with 0.90 m/s forward and 0.60 rad/s yaw headroom while retaining finite validation, the 250 ms command watchdog and StopMove ownership; static robot receipt kept the receiver stopped and UDP 5005 unbound
 
@@ -94,9 +94,9 @@ this index describes code state and never implies robot acceptance.
 - Manifest: `architecture/modules/interaction.json`
 - Code roots: `modules/interaction`, `services/interaction_edge`, `config/robot/interaction-persona.json`, `docs/realtime-interaction.md`
 - Entrypoints: `gogoguard_interaction.session:InteractionManager`, `gogoguard_interaction_edge.__main__:main`
-- Consumes: start_live/stop_live command, platform finalized ASR transcript, Z1Pro H264, BOYA PCM, agent-voice, gogoguard.playback_control.v1
+- Consumes: start_live/stop_live command, platform finalized ASR transcript, Z1Pro H264, BOYA PCM, agent-voice, gogoguard.playback_control.v1, gogoguard.wake_transcript.v1 from agent:*
 - Produces: robot-microphone, z1pro-camera, Go2 speaker PCM, LiveKit data-connected receipt, gogoguard.interaction_session_status.v1, gogoguard.conversation_wake_status.v1
-- Provenance: GoGoGuard P0/P1 written protocol dated 2026-08-06 and 2026-08-09; 2026-08-09 disposable BOYA/Z1Pro/Go2/LiveKit probe receipts; selective session-state port from superseded realtime-interaction-spike branch; no stale composition merged
+- Provenance: GoGoGuard P0/P1 written protocol dated 2026-08-06 and 2026-08-09; 2026-08-09 disposable BOYA/Z1Pro/Go2/LiveKit probe receipts; selective session-state port from superseded realtime-interaction-spike branch; no stale composition merged; 2026-08-11 platform readiness receipt froze gogoguard.wake_transcript.v1 over LiveKit DataChannel and the temporary ICP fallback endpoint
 
 ### `localization`
 

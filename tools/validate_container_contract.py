@@ -37,6 +37,7 @@ for path, needles in checks.items():
         if needle not in content:
             raise SystemExit(f"{path}: missing required contract {needle}")
 run_edge = service.parent / "run-edge"
+joint_test = service.parent / "configure-combined-joint-test"
 entrypoint = dockerfile.parent / "edge-entrypoint"
 combined_dockerfile = dockerfile.parent / "Dockerfile.combined"
 interaction_requirements = dockerfile.parent / "interaction-requirements.txt"
@@ -59,6 +60,16 @@ if "gogoguard-platform-edge" not in entrypoint.read_text(encoding="utf-8"):
     raise SystemExit("robot image must contain the formal platform heartbeat adapter")
 if "platform heartbeat requires the interaction service" not in entrypoint.read_text(encoding="utf-8"):
     raise SystemExit("platform live control must not start without the interaction service")
+joint_text = joint_test.read_text(encoding="utf-8")
+for required in (
+    "--temporary-icp-fallback",
+    "https://39.96.37.187/api/v1/robot/heartbeat",
+    "GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 1",
+    "GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 1",
+    "GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0",
+):
+    if required not in joint_text:
+        raise SystemExit(f"temporary joint-test profile is incomplete: {required}")
 if not combined_dockerfile.is_file():
     raise SystemExit("combined release Dockerfile is missing")
 combined_content = combined_dockerfile.read_text(encoding="utf-8")
