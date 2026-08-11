@@ -15,10 +15,12 @@ GoGoGuard V2 is a **field-commissioning system with one real mobility vertical
 slice**, not a completed inspection product. The robot -> Mac -> cloud -> Mac ->
 robot loop has produced real maps and completed real route patrols. V6 mobility
 is now frozen as the operator-accepted release baseline. The previously
-independent realtime-dialogue implementation has been merged behind its own
-default-disabled module, and the next product work is the thin checkpoint
-inspection composition; it has offline contracts and tests but is not yet a
-deployed end-to-end inspection mission.
+independent realtime-dialogue implementation has been merged, and its formal
+runtime is explicitly enabled in the current combined r8 release for static
+GoGoGuard joint testing while retaining a separate activation path and zero
+motion authority. The next work is to close realtime joint acceptance and then
+compose the thin checkpoint inspection slice; checkpoint contracts and tests
+exist offline, but there is not yet a deployed end-to-end inspection mission.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -26,14 +28,14 @@ deployed end-to-end inspection mission.
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active | Long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area, and has published a real generation-5 Nav2 keepout candidate | Route/version comparison and publication progress feedback remain operator-UX work |
+| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area, and has published a real generation-5 Nav2 keepout candidate | Route/version comparison and publication progress feedback remain operator-UX work; the external SaaS still has no PCD/route/allowed-area asset upload and activation contract |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is the working delivery console and includes the GLIM/map/route/allowed-area preparation workflow at `http://127.0.0.1:8080/` | It remains an engineering/field UI rather than a finished operator product |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated; a checksummed bounded offline evidence buffer and explicit Z1Pro capability declaration are implemented offline | Gimbal static commissioning, frame-capture/platform adapters, robot deployment and end-to-end evidence upload remain pending |
 | Mission/task system | A pure map/route-bound checkpoint state machine now defines route-index arrival, correlated true-stop proof, inspection, platform/offline continuation and suffix resume | Navigation pause/resume adapter, platform API binding, persistence and real mission aggregation are not implemented |
-| SaaS integration | Existing GoGoGuard SaaS is retained as an external system | Device agent, task/result contract integration and operational rollout are not implemented in V2 |
+| SaaS integration | Existing GoGoGuard SaaS is retained as an external system; the realtime heartbeat/interaction slice is deployed for joint testing | The SaaS does not yet receive the selected map PCD, route or allowed-area assets; its asset upload/receipt/activation contract, device task/result integration and operational rollout remain open |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion | Platform-side video receipt, reliable audible wake acknowledgement, consistent full-volume quality, latency closure and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
@@ -136,7 +138,8 @@ these decisions and lessons when continuing in a new conversation:
 12. **Parallel feature work now has an explicit integration boundary.**
     Realtime dialogue was developed on its own branch and has now been merged
     into the V6 integration branch as the independent `interaction` module. It
-    remains default-disabled and cannot issue motion commands. Checkpoint work
+    ships disabled by default, is explicitly enabled in the current r8 joint-
+    test configuration and cannot issue motion commands. Checkpoint work
     composes it through contracts instead of merging media or cloud-model code
     into navigation.
 
@@ -165,10 +168,11 @@ boundaries and receipts to distinguish them.
 - Active product worktree: this repository on branch
   `agent/three-end-field-workstation`. Operator-accepted V6 was frozen in
   `922b301`; the independent interaction branch was merged in `6e842d1`; the
-  combined realtime/platform release implementation is `090635c`. The branch
-  is published to `origin/agent/three-end-field-workstation`; checkpoint
-  inspection remains an offline, default-disabled foundation rather than a
-  deployed product capability.
+  combined realtime/platform release implementation is `090635c`. Deployment
+  implementation and receipts through `69f4849` are published to
+  `origin/agent/three-end-field-workstation`; always check `git status` for a
+  later local handoff commit. Checkpoint inspection remains an offline,
+  default-disabled foundation rather than a deployed product capability.
 - Last verified robot release is
   `gogoguard-robot-inspection:v2-edge-20260811-combined-live-r8`, whose
   interaction/platform source is commit `0673849`. The Linux/ARM64 local
@@ -548,12 +552,16 @@ boundaries and receipts to distinguish them.
 
 ### Development roadmap and current priorities
 
-1. **P0 — promote and field-accept the simplified mobility loop.** After a safe
-   stationary deployment, verify the three-candidate VGICP recovery anchor,
-   one-MPPI clear route, a physically passable Smac bypass/rejoin, continuous
-   no-path retry and operator stop/release. Do not weaken the one emergency
-   circle or receiver limits to solve controller speed.
-2. **P1 — use the new map assets on a real site.** Clean one GLIM map when
+1. **P0 — close the deployed realtime joint acceptance without changing V6.**
+   Obtain the platform-side video/participant receipt, make `小玖小玖` reliably
+   produce an audible `我在`, isolate the full-volume audio-quality and latency
+   cause, and verify token refresh, reconnect and `stop_live`. Then run the
+   ten-minute interaction-plus-patrol resource acceptance while retaining V6
+   navigation, localization, collision and motion ownership unchanged.
+2. **P1 — complete mobility repeatability and use the new map assets on a real
+   site.** Retain V6-r4 as the accepted baseline while collecting a complete
+   full-route trace and a physically passable Smac bypass/rejoin receipt. Clean
+   one GLIM map when
    needed, draw and save its green allowed area, review the blue route and
    publish the resulting immutable child/candidate. Then improve version
    comparison and approval wording from operator feedback rather than adding
@@ -564,9 +572,13 @@ boundaries and receipts to distinguish them.
    evidence separate from business inspection evidence while sharing immutable
    identifiers and timestamps.
 4. **P3 — connect external product surfaces.** Integrate the existing SaaS
-   through a narrow device-agent task/result boundary. Integrate realtime
-   dialogue and later remote teleoperation as separate capabilities; neither
-   may bypass navigation ownership or silently take motion control.
+   through a narrow device-agent task/result boundary. Before mission binding,
+   agree and implement a Mac-owned upload for the selected immutable map PCD,
+   map-bound `go2.route.v1`, editable allowed-area geometry and a checksummed
+   portable manifest; the current Mac -> robot publication does not publish
+   these assets to SaaS. Integrate realtime dialogue and later remote
+   teleoperation as separate capabilities; neither may bypass navigation
+   ownership or silently take motion control.
 5. **P4 — close delivery engineering.** Productize Mac installation/startup,
    define release promotion and rollback, push/review the integration branch,
    and add full-load performance/soak acceptance on the 16 GB Orin NX.
@@ -578,17 +590,19 @@ itself.
 
 ### Parallel Codex and Git boundary
 
-- Realtime dialogue is being developed independently in worktree
-  `runtime-data/worktrees/realtime-dialogue-v1` on branch
-  `agent/realtime-dialogue-v1` (handoff commit `3215515`). Do not edit, deploy or
-  merge it from a navigation task without an explicit integration request.
+- `agent/realtime-dialogue-v1` at `3215515` is a preserved historical
+  checkpoint whose implementation was already merged by `6e842d1`. Do not
+  deploy that old worktree or continue product work there; the active combined
+  source is `agent/three-end-field-workstation`.
 - `agent/realtime-interaction-spike` is attached to the superseded
   `gogoguard_robot_inspection_v2` worktree. It is not evidence of current robot
   runtime behavior and must not be deployed.
-- New navigation work stays on `agent/three-end-field-workstation`, names
-  `navigation` as the primary owner, updates its manifest and
-  `PROJECT_STATE.md`, passes the required checks, and records commit plus image
-  digest after a real deployment. Never infer deployed state from branch HEAD.
+- All current navigation, interaction, platform and checkpoint integration work
+  stays on `agent/three-end-field-workstation` with one declared integration
+  owner for shared contracts, container composition and deployment files. A
+  task names its primary module, updates its manifest and `PROJECT_STATE.md`,
+  passes the required checks, and records commit plus image digest after a real
+  deployment. Never infer deployed state from branch HEAD.
 
 ## Verified external facts
 
@@ -603,8 +617,11 @@ itself.
   and has since processed real operator-driven robot recordings into maps used
   for fixed-map localization and patrol. Map quality review remains an operator
   acceptance step.
-- SaaS: existing GoGoGuard platform is retained. Its V2 device-agent/task/result
-  integration boundary is planned but is not part of the deployed core loop.
+- SaaS: existing GoGoGuard platform is retained. Its realtime heartbeat and
+  interaction command bridge are deployed for joint testing, but production
+  authentication/TLS, map/route/allowed-area asset delivery and the V2 mission
+  task/result boundary remain open and are not part of the accepted mobility
+  loop.
 
 ## V2 implementation state
 
@@ -1690,3 +1707,54 @@ requires an explicit success receipt.
   The platform-facing evidence request is
   `/Users/mac/Desktop/GOGOGUARD_狗端实时对话联调回执-20260811.md` and contains no
   JWT, device key or password.
+
+## 2026-08-11 external map-asset delivery gap recorded
+
+- The original GoGoGuard phase-2 request expects a gravity-aligned PCD for 3D
+  rendering and checkpoint placement, plus a version-bound route and poses in
+  the same `map` frame. The previous dog-side response defined those formats
+  but did not define how the SaaS receives the files.
+- Current publication is only Mac -> robot. The Mac uploads immutable GLIM
+  artifacts plus the editable navigation workspace; the robot then derives a
+  binary PCD v0.7 (`float32 x/y/z/intensity`, metres, gravity-aligned z-up), a
+  planar `go2.route.v1` (`x/y/yaw`, yaw in radians), the Nav2 keepout mask and a
+  generation-5 candidate manifest. No current API publishes that candidate to
+  the GoGoGuard SaaS, and large PCDs must not be sent through heartbeat or
+  LiveKit.
+- The preferred ownership is Mac field workstation -> SaaS: one selected map
+  release produces a portable checksummed bundle containing `map.pcd`,
+  `route.json`, editable allowed-area geometry, an optional preview and a
+  relative-path manifest. The same `mapVersion`, workspace revision/hash and
+  `routeId` bind platform checkpoints, live poses and robot execution. Map
+  versions remain immutable; a changed blue/green workspace creates a new
+  route revision on the same map.
+- Before implementation, ask GoGoGuard to freeze the asset API: init/presigned
+  or resumable upload, size limits, authentication, SHA-256 verification,
+  completion/activation receipt, replacement/retirement semantics and which
+  optional assets it wants. Until that contract exists, the operator has no
+  legitimate "publish map to platform" action; manual file copying is only a
+  temporary exchange, not product delivery.
+
+## Current next-task handoff (2026-08-11; supersedes older next experiments)
+
+Start only from `gogoguard_robot_inspection_v2_field` on
+`agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
+source, `6e842d1` as the historical interaction merge and `0673849` plus the r8
+digests above as the latest verified realtime robot deployment. The old
+realtime worktrees are evidence/provenance only and must not be deployed.
+
+The next acceptance is the already-deployed r8 realtime slice: obtain the
+platform video-track receipt, make wake acknowledgement audible and reliable,
+diagnose volume-10 quality and latency from source TTS through RTP and dog PCM,
+then verify refresh/reconnect/stop and a ten-minute concurrent V6 patrol. Do not
+change V6 navigation or give interaction motion authority while closing those
+receipts. Checkpoint inspection remains offline and disabled; after realtime
+acceptance, implement it only through the declared mission/navigation-stop/
+inspection/platform contracts. Separately, freeze the SaaS map-asset upload and
+activation API before adding any "publish map to platform" workflow.
+
+The last recorded robot state had the r8 service active and interaction online,
+with Nav2, patrol runtime and the Unitree motion bridge stopped and UDP 5005
+unbound. This is a receipt, not a promise of current live state: a new task must
+re-read the robot before any deployment, and must obtain explicit authorization
+before starting localization, Nav2 or physical motion.
