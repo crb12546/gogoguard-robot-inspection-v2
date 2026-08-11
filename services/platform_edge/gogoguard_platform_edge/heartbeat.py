@@ -26,6 +26,9 @@ ACTIVE_PATROL_STATES = {
     "SEARCHING_PATH",
     "BLOCKED",
     "PAUSED",
+    "CHECKPOINT_PAUSING",
+    "CHECKPOINT_SETTLING",
+    "INSPECTING",
 }
 INTERACTION_STATUS_FIELDS = {
     "schema",
@@ -69,11 +72,20 @@ def _atomic_json(path: Path, value: dict[str, Any], *, mode: int = 0o640) -> Non
             os.unlink(temporary)
 
 
-def _finite(value: Any, default: float = 0.0) -> float:
+def _finite_or_none(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return default
+        return None
     number = float(value)
-    return number if math.isfinite(number) else default
+    return number if math.isfinite(number) else None
+
+
+def command_result_url(heartbeat_url: str) -> str:
+    endpoint = urlsplit(heartbeat_url)
+    if not endpoint.path.endswith("/heartbeat"):
+        raise ValueError("platform heartbeat URL cannot derive command result URL")
+    return endpoint._replace(
+        path=endpoint.path[: -len("heartbeat")] + "command/result"
+    ).geturl()
 
 
 class InteractionControlClient:
@@ -101,6 +113,63 @@ class InteractionControlClient:
         value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict) or value.get("ok") is not True:
             raise RuntimeError("interaction service rejected the platform command")
+        return value
+
+
+class NavigationControlClient:
+    """Expose only selected-route start and full motion-owner stop to SaaS."""
+
+    def __init__(self, socket_path: Path, *, timeout_s: float = 10.0) -> None:
+        self.socket_path = Path(socket_path)
+        self.timeout_s = float(timeout_s)
+
+    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        action = payload.get("action", payload.get("type"))
+        params = payload.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ValueError("platform patrol command params must be an object")
+        if action == "start_patrol":
+            method = "patrol.start_selected"
+            rpc_params = {
+                "expected_map_version": params.get("mapVersion"),
+                "expected_route_id": params.get("routeId"),
+                "mission_plan": params.get("missionPlan"),
+            }
+        elif action == "stop_patrol":
+            method = "patrol.stop"
+            rpc_params = {}
+        else:
+            raise ValueError("platform command is outside the patrol allow-list")
+        encoded = (
+            json.dumps(
+                {"method": method, "params": rpc_params},
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(self.timeout_s)
+            client.connect(str(self.socket_path))
+            client.sendall(encoded)
+            reader = client.makefile("rb")
+            raw = reader.readline(1024 * 1024 + 1)
+        if not raw or len(raw) > 1024 * 1024:
+            raise RuntimeError("navigation supervisor returned an invalid response")
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, dict) or value.get("ok") is not True:
+            message = value.get("error") if isinstance(value, dict) else None
+            raise RuntimeError(str(message or "navigation supervisor rejected command"))
+        result = value.get("result")
+        if not isinstance(result, dict) or result.get("state") not in {
+            "accepted",
+            "running",
+            "complete",
+        }:
+            raise RuntimeError("navigation supervisor did not accept operation")
         return value
 
 
@@ -191,7 +260,7 @@ class UrllibJsonPoster:
         ).encode("utf-8")
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.device_token:
-            headers["Authorization"] = f"Bearer {self.device_token}"
+            headers["X-Device-Token"] = self.device_token
         if self.host_header:
             headers["Host"] = self.host_header
         request = Request(url, data=body, headers=headers, method="POST")
@@ -212,10 +281,11 @@ class UrllibJsonPoster:
 
 
 class PlatformHeartbeatService:
-    """Thin platform adapter around files and the interaction Unix socket.
+    """Thin platform adapter around status files and narrow Unix controls.
 
-    It has no ROS imports and no navigation command surface. Platform commands
-    are allow-listed to realtime interaction only.
+    It has no ROS imports. Platform commands are restricted to realtime
+    interaction plus start/stop of the already selected patrol route; arbitrary
+    velocity and navigation mutation are not exposed.
     """
 
     def __init__(
@@ -224,12 +294,16 @@ class PlatformHeartbeatService:
         robot_id: str,
         heartbeat_url: str,
         navigation_status_path: Path,
+        battery_status_path: Path,
         interaction_status_path: Path,
         capabilities_path: Path,
         service_status_path: Path,
         ledger: CommandLedger,
         interaction_client: InteractionControlClient,
+        navigation_client: NavigationControlClient,
         post_json: Callable[[str, dict[str, Any], float], dict[str, Any]],
+        command_result_url: str = "",
+        post_result: Callable[[str, dict[str, Any], float], dict[str, Any]] | None = None,
         interval_s: float = 5.0,
         timeout_s: float = 10.0,
     ) -> None:
@@ -242,12 +316,16 @@ class PlatformHeartbeatService:
         self.robot_id = robot_id
         self.heartbeat_url = heartbeat_url
         self.navigation_status_path = Path(navigation_status_path)
+        self.battery_status_path = Path(battery_status_path)
         self.interaction_status_path = Path(interaction_status_path)
         self.capabilities_path = Path(capabilities_path)
         self.service_status_path = Path(service_status_path)
         self.ledger = ledger
         self.interaction_client = interaction_client
+        self.navigation_client = navigation_client
         self.post_json = post_json
+        self.command_result_url = command_result_url
+        self.post_result = post_result
         self.interval_s = float(interval_s)
         self.timeout_s = float(timeout_s)
         self._sequence = 0
@@ -255,9 +333,12 @@ class PlatformHeartbeatService:
         self._last_error_code: str | None = None
         self._processed_commands = 0
         self._duplicate_commands = 0
+        self._command_results_sent = 0
+        self._command_result_failures = 0
 
     def build_payload(self) -> dict[str, Any]:
         navigation = _read_json(self.navigation_status_path)
+        battery_status = _read_json(self.battery_status_path)
         interaction_edge = _read_json(self.interaction_status_path)
         capabilities = _read_json(self.capabilities_path)
         runtime = navigation.get("runtime")
@@ -281,20 +362,22 @@ class PlatformHeartbeatService:
             "time": utc_now(),
             "status": "patrolling" if patrol_running else "idle",
             "motion": {
+                "frame": str(pose.get("frame") or "map"),
                 "position": {
-                    "x": _finite(pose.get("x")),
-                    "y": _finite(pose.get("y")),
-                    "z": _finite(pose.get("z")),
+                    "x": _finite_or_none(pose.get("x")),
+                    "y": _finite_or_none(pose.get("y")),
+                    "z": _finite_or_none(pose.get("z")),
                 },
-                "yaw_rad": _finite(pose.get("yaw")),
+                "yaw_rad": _finite_or_none(pose.get("yaw")),
                 "twist": {
                     "linear": {
-                        "x": _finite(final_command.get("vx")),
-                        "y": _finite(final_command.get("vy")),
+                        "x": _finite_or_none(final_command.get("vx")),
+                        "y": _finite_or_none(final_command.get("vy")),
                     },
-                    "angular": {"z": _finite(final_command.get("wz"))},
+                    "angular": {"z": _finite_or_none(final_command.get("wz"))},
                 },
             },
+            "battery": self._battery_payload(battery_status),
             "patrol": {
                 "running": patrol_running,
                 "state": state,
@@ -303,12 +386,38 @@ class PlatformHeartbeatService:
                 "routeId": runtime.get("routeId"),
                 "routeProgressIndex": runtime.get("routeProgressIndex"),
                 "routeProgressPercent": runtime.get("routeProgressPercent"),
+                "checkpoint": runtime.get("checkpoint"),
             },
             "interaction": public_live,
         }
         if capabilities.get("schema") == "gogoguard.robot_capabilities.v1":
             payload["capabilities"] = capabilities
         return payload
+
+    @staticmethod
+    def _battery_payload(status: dict[str, Any]) -> dict[str, Any]:
+        percent = _finite_or_none(status.get("percent", status.get("soc")))
+        if percent is not None and not 0.0 <= percent <= 100.0:
+            percent = None
+        voltage = _finite_or_none(status.get("voltage"))
+        if voltage is not None and voltage <= 0.0:
+            voltage = None
+        charging = status.get("charging")
+        if not isinstance(charging, bool):
+            charging = None
+        observed_at = status.get("observedAt")
+        if not isinstance(observed_at, str) or not observed_at:
+            observed_at = None
+        source = status.get("source")
+        if not isinstance(source, str) or not source:
+            source = "unitree_sdk"
+        return {
+            "percent": percent,
+            "charging": charging,
+            "voltage": voltage,
+            "observedAt": observed_at,
+            "source": source,
+        }
 
     def poll_once(self) -> dict[str, Any]:
         self._sequence += 1
@@ -331,7 +440,23 @@ class PlatformHeartbeatService:
             commands = response.get("commands", [])
             if not isinstance(commands, list) or len(commands) > MAX_COMMANDS_PER_HEARTBEAT:
                 raise ValueError("platform heartbeat commands are invalid")
-            outcomes = [self._handle_command(command) for command in commands]
+            outcomes = []
+            for command in commands:
+                try:
+                    outcome = self._handle_command(command)
+                except Exception as exc:
+                    outcome = {
+                        "action": (
+                            command.get("action", command.get("type"))
+                            if isinstance(command, dict)
+                            else None
+                        ),
+                        "ok": False,
+                        "status": "failed",
+                        "message": str(exc)[:512] or type(exc).__name__,
+                    }
+                outcomes.append(outcome)
+                self._report_command_result(command, outcome)
             self._last_error_code = None
             self._write_status(online=True)
             return {
@@ -353,15 +478,66 @@ class PlatformHeartbeatService:
             raise ValueError("platform command must be an object")
         command_id = command.get("id")
         action = command.get("action", command.get("type"))
-        if action not in {"start_live", "stop_live", "wake_transcript"}:
-            raise ValueError("platform command is outside the interaction allow-list")
+        interaction_actions = {"start_live", "stop_live", "wake_transcript"}
+        patrol_actions = {"start_patrol", "stop_patrol"}
+        if action not in interaction_actions | patrol_actions:
+            raise ValueError("platform command is outside the robot allow-list")
         if self.ledger.contains(command_id):
             self._duplicate_commands += 1
-            return {"idHash": self.ledger.key(command_id), "action": action, "duplicate": True}
-        self.interaction_client.request(command)
+            return {
+                "idHash": self.ledger.key(command_id),
+                "action": action,
+                "duplicate": True,
+                "ok": True,
+                "status": "duplicate",
+                "message": "command already processed",
+            }
+        if action in interaction_actions:
+            response = self.interaction_client.request(command)
+        else:
+            response = self.navigation_client.request(command)
         self.ledger.record(command_id, action)
         self._processed_commands += 1
-        return {"idHash": self.ledger.key(command_id), "action": action, "duplicate": False}
+        result = response.get("result")
+        result = result if isinstance(result, dict) else {}
+        return {
+            "idHash": self.ledger.key(command_id),
+            "action": action,
+            "duplicate": False,
+            "ok": True,
+            "status": str(result.get("state") or "accepted"),
+            "message": "command accepted by robot service",
+            "operationId": result.get("operationId"),
+        }
+
+    def _report_command_result(
+        self, command: Any, outcome: dict[str, Any]
+    ) -> None:
+        if not self.command_result_url or self.post_result is None:
+            return
+        if not isinstance(command, dict):
+            return
+        command_id = command.get("id")
+        if isinstance(command_id, bool) or not isinstance(command_id, (int, str)):
+            return
+        result = {
+            "command_id": command_id,
+            "ok": outcome.get("ok") is True,
+            "msg": str(outcome.get("message") or outcome.get("status") or "")[:512],
+            "status": str(outcome.get("status") or "failed")[:64],
+        }
+        if outcome.get("operationId"):
+            result["operation_id"] = str(outcome["operationId"])[:128]
+        try:
+            self.post_result(
+                self.command_result_url,
+                {"robotId": self.robot_id, "time": utc_now(), "result": result},
+                self.timeout_s,
+            )
+        except Exception:
+            self._command_result_failures += 1
+        else:
+            self._command_results_sent += 1
 
     def run(self, stop_event: threading.Event) -> None:
         while not stop_event.is_set():
@@ -382,7 +558,10 @@ class PlatformHeartbeatService:
                 "lastErrorCode": self._last_error_code,
                 "processedCommands": self._processed_commands,
                 "duplicateCommands": self._duplicate_commands,
+                "commandResultsSent": self._command_results_sent,
+                "commandResultFailures": self._command_result_failures,
                 "observedAt": utc_now(),
                 "motionCommandsPermitted": False,
+                "selectedPatrolLifecyclePermitted": True,
             },
         )

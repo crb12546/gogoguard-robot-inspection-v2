@@ -155,6 +155,13 @@ class InteractionDeviceIoTest(unittest.TestCase):
         transport = LiveKitGo2Transport(
             profile=profile, unitree_aes_128_key="test-only"
         )
+        self.assertFalse(
+            transport.publish_data(
+                {"schema": "gogoguard.robot_pose.v1", "x": 1.0},
+                topic="gogoguard.robot_pose.v1",
+                reliable=False,
+            )
+        )
         received = []
         transport.set_wake_transcript_handler(received.append)
         message = {

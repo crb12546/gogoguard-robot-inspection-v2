@@ -15,7 +15,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from go2_nav2_interfaces.srv import StartPatrol
-from nav2_msgs.action import ComputePathToPose, FollowPath
+from nav2_msgs.action import ComputePathToPose, FollowPath, Spin
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from rclpy.action import ActionClient
@@ -44,6 +44,10 @@ from gogoguard_navigation.orchestration import (
     decide_controller_failure,
     evaluate_costmap_health,
     route_obstruction_evidence,
+)
+from gogoguard_navigation.checkpoint_runtime import (
+    CheckpointExecutor,
+    load_navigation_mission,
 )
 
 from .runtime_core import (
@@ -119,6 +123,7 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("site_id", "")
         self.declare_parameter("expected_map_version", "")
         self.declare_parameter("runtime_source", "active")
+        self.declare_parameter("mission_plan_path", "")
         self.declare_parameter("nav2_profile_hash", "")
         self.declare_parameter("candidate.localization_map", "")
         self.declare_parameter("candidate.route", "")
@@ -446,6 +451,17 @@ class PatrolRuntimeManager(Node):
         self.last_feedback_distance = None
         self.path = self._make_path()
         self.route_progress_index = 0
+        self.mission = load_navigation_mission(
+            Path(str(self.get_parameter("mission_plan_path").value).strip()),
+            expected_map_version=self.bundle.version_id,
+            expected_route_id=self.bundle.route.route_id,
+            route_point_count=len(self.path.poses),
+        )
+        self.checkpoints = CheckpointExecutor(self.mission)
+        self.spin_goal_handle = None
+        self.spin_request_pending = False
+        self.last_final_command = None
+        self.last_final_command_at = 0.0
         self.localization_gate_failed_at = None
         self.localization_recovered_at = None
         self.patrol_started_at = None
@@ -485,6 +501,7 @@ class PatrolRuntimeManager(Node):
             ComputePathToPose,
             str(self.get_parameter("compute_path_action").value),
         )
+        self.spin_client = ActionClient(self, Spin, "/spin")
         self.planner_goal_handle = None
         self.clear_costmap_client = self.create_client(
             ClearEntireCostmap, "/local_costmap/clear_entirely_local_costmap"
@@ -1051,8 +1068,13 @@ class PatrolRuntimeManager(Node):
 
     def _final_cmd_callback(self, message: Twist) -> None:
         """Observe, but never influence, the final safety-filtered command."""
+        received_at = time.monotonic()
+        linear_speed = math.hypot(float(message.linear.x), float(message.linear.y))
+        angular_speed = abs(float(message.angular.z))
+        self.last_final_command = (linear_speed, angular_speed)
+        self.last_final_command_at = received_at
         self.motion_evidence.record_command(
-            time.monotonic(),
+            received_at,
             float(message.linear.x),
             float(message.linear.y),
             float(message.angular.z),
@@ -1127,6 +1149,8 @@ class PatrolRuntimeManager(Node):
             return readiness
         if not self.planner_client.server_is_ready():
             return PatrolReadiness(False, "DEGRADED", "NAV2_PLANNER_UNAVAILABLE")
+        if self.mission.checkpoints and not self.spin_client.server_is_ready():
+            return PatrolReadiness(False, "DEGRADED", "NAV2_SPIN_UNAVAILABLE")
         costmap = self._costmap_health()
         if not costmap.healthy:
             return PatrolReadiness(False, "FAULT", costmap.reason)
@@ -1166,6 +1190,8 @@ class PatrolRuntimeManager(Node):
             return readiness
         if not self.planner_client.server_is_ready():
             return PatrolReadiness(False, "POSITIONING", "NAV2_PLANNER_UNAVAILABLE")
+        if self.mission.checkpoints and not self.spin_client.server_is_ready():
+            return PatrolReadiness(False, "POSITIONING", "NAV2_SPIN_UNAVAILABLE")
         costmap = self._costmap_health()
         if not costmap.healthy:
             return PatrolReadiness(
@@ -1217,6 +1243,9 @@ class PatrolRuntimeManager(Node):
             )
 
         self.route_progress_index = 0
+        self.checkpoints.reset()
+        self.spin_goal_handle = None
+        self.spin_request_pending = False
         self.localization_gate_failed_at = None
         self.localization_recovered_at = None
         self.detour_attempt_count = 0
@@ -1350,6 +1379,15 @@ class PatrolRuntimeManager(Node):
                 self.route_progress_index,
                 self._nearest_path_index(self.pose[0], self.pose[1]),
             )
+        if self.checkpoints.observe_progress(self.route_progress_index):
+            self.runtime_state = "CHECKPOINT_PAUSING"
+            self.runtime_reason = "CHECKPOINT_REACHED_CANCELLING_ROUTE"
+            self.resume_pending = False
+            self.recovery_pending = ""
+            self.recovery_requested_at = None
+            self.recovery_reason = ""
+            if self.goal_handle is not None:
+                self.goal_handle.cancel_goal_async()
 
     def _result_callback(self, future) -> None:
         completed_controller = self.active_controller
@@ -1376,6 +1414,11 @@ class PatrolRuntimeManager(Node):
             }
         self.goal_handle = None
         self.goal_request_pending = False
+        if self.checkpoints.phase == "PAUSING":
+            self.checkpoints.route_goal_cancelled()
+            self.runtime_state = "CHECKPOINT_SETTLING"
+            self.runtime_reason = "CHECKPOINT_ROUTE_CANCELLED_WAITING_TRUE_STOP"
+            return
         if self.gate_cancel_reason:
             cancel_reason = self.gate_cancel_reason
             self.runtime_state = (
@@ -1467,6 +1510,146 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason,
         )
 
+    def _request_checkpoint_spin(self) -> None:
+        checkpoint = self.checkpoints.active_checkpoint
+        if checkpoint is None or self.spin_request_pending or self.spin_goal_handle is not None:
+            return
+        if not self.spin_client.server_is_ready():
+            self.checkpoints.fail("NAV2_SPIN_UNAVAILABLE")
+            self.runtime_state = "BLOCKED"
+            self.runtime_reason = "CHECKPOINT_SPIN_UNAVAILABLE"
+            return
+        goal = Spin.Goal()
+        goal.target_yaw = float(checkpoint.target_yaw_rad)
+        goal.time_allowance.sec = 30
+        goal.time_allowance.nanosec = 0
+        self.spin_request_pending = True
+        self.runtime_state = "INSPECTING"
+        self.runtime_reason = "CHECKPOINT_SPIN_REQUESTED"
+        try:
+            future = self.spin_client.send_goal_async(goal)
+        except Exception as exc:
+            self.spin_request_pending = False
+            self.checkpoints.fail("NAV2_SPIN_TRANSPORT: %s" % exc)
+            self.runtime_state = "BLOCKED"
+            self.runtime_reason = "CHECKPOINT_SPIN_TRANSPORT"
+            return
+        future.add_done_callback(self._checkpoint_spin_response_callback)
+
+    def _checkpoint_spin_response_callback(self, future) -> None:
+        self.spin_request_pending = False
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            goal_handle = None
+            self.checkpoints.fail("NAV2_SPIN_TRANSPORT: %s" % exc)
+        if goal_handle is None or not goal_handle.accepted:
+            if self.checkpoints.phase != "FAILED":
+                self.checkpoints.fail("NAV2_SPIN_REJECTED")
+            self.runtime_state = "BLOCKED"
+            self.runtime_reason = self.checkpoints.failure_reason or "NAV2_SPIN_REJECTED"
+            return
+        self.spin_goal_handle = goal_handle
+        if self.stop_requested:
+            goal_handle.cancel_goal_async()
+            goal_handle.get_result_async().add_done_callback(
+                self._checkpoint_spin_result_callback
+            )
+            return
+        self.checkpoints.spin_started()
+        self.runtime_state = "INSPECTING"
+        self.runtime_reason = "CHECKPOINT_SPIN_ACTIVE"
+        goal_handle.get_result_async().add_done_callback(
+            self._checkpoint_spin_result_callback
+        )
+
+    def _checkpoint_spin_result_callback(self, future) -> None:
+        self.spin_goal_handle = None
+        try:
+            wrapped = future.result()
+            status = wrapped.status
+        except Exception as exc:
+            status = None
+            self.checkpoints.fail("NAV2_SPIN_RESULT_TRANSPORT: %s" % exc)
+        if self.stop_requested:
+            self.checkpoints.fail("STOPPED")
+            self.runtime_state = "READY"
+            self.runtime_reason = "STOPPED"
+            return
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            if self.checkpoints.phase != "FAILED":
+                self.checkpoints.fail("NAV2_SPIN_FAILED")
+            self.runtime_state = "BLOCKED"
+            self.runtime_reason = self.checkpoints.failure_reason or "NAV2_SPIN_FAILED"
+            return
+        self.checkpoints.spin_completed()
+        # Continue through the existing fresh-costmap suffix-resume barrier.
+        # The checkpoint is complete, but route motion is not reauthorized
+        # until Nav2 accepts the retained suffix goal.
+        self.resume_pending = True
+        self.localization_recovered_at = None
+        self._reset_costmap_refresh()
+        self.runtime_state = "HOLDING"
+        self.runtime_reason = "CHECKPOINT_COMPLETE_WAITING_ROUTE_SUFFIX"
+
+    def _tick_checkpoint(self, now: float, gate: PatrolReadiness) -> bool:
+        phase = self.checkpoints.phase
+        if phase == "PAUSING":
+            self.runtime_state = "CHECKPOINT_PAUSING"
+            self.runtime_reason = "CHECKPOINT_REACHED_CANCELLING_ROUTE"
+            if self.goal_handle is not None:
+                self.goal_handle.cancel_goal_async()
+            return False
+        if phase == "SETTLING":
+            self.runtime_state = "CHECKPOINT_SETTLING"
+            self.runtime_reason = "CHECKPOINT_WAITING_TRUE_STOP"
+            command_fresh = now - self.last_final_command_at <= 0.5
+            command = self.last_final_command if command_fresh else None
+            command_linear = float(command[0]) if command is not None else math.inf
+            command_angular = float(command[1]) if command is not None else math.inf
+            robot = self.robot_motion_status if isinstance(self.robot_motion_status, dict) else None
+            robot_fresh = (
+                not self.require_robot_state
+                or now - self.robot_motion_received_at <= self.robot_state_timeout_s
+            )
+            if not self.require_robot_state:
+                robot_linear = 0.0
+                robot_angular = 0.0
+            elif robot is not None and robot_fresh:
+                robot_linear = math.hypot(float(robot["vx"]), float(robot["vy"]))
+                robot_angular = abs(float(robot["yawSpeed"]))
+            else:
+                robot_linear = math.inf
+                robot_angular = math.inf
+            ready = self.checkpoints.observe_stop(
+                now,
+                motion_authorized=False,
+                command_linear_mps=command_linear,
+                command_angular_rps=command_angular,
+                robot_linear_mps=robot_linear,
+                robot_angular_rps=robot_angular,
+                route_progress_index=self.route_progress_index,
+            )
+            if ready:
+                self._request_checkpoint_spin()
+            return False
+        if phase == "SPIN_REQUESTED":
+            self.runtime_state = "INSPECTING"
+            self.runtime_reason = "CHECKPOINT_SPIN_REQUESTED"
+            return False
+        if phase == "SPINNING":
+            if not gate.ready:
+                if self.spin_goal_handle is not None:
+                    self.spin_goal_handle.cancel_goal_async()
+                self.checkpoints.fail("CHECKPOINT_SPIN_RUNTIME_GATE: %s" % gate.reason)
+                self.runtime_state = "BLOCKED"
+                self.runtime_reason = self.checkpoints.failure_reason
+                return False
+            self.runtime_state = "INSPECTING"
+            self.runtime_reason = "CHECKPOINT_SPIN_ACTIVE"
+            return self.spin_goal_handle is not None
+        return False
+
     def _stop_callback(self, request, response):
         del request
         self.stop_requested = True
@@ -1481,6 +1664,10 @@ class PatrolRuntimeManager(Node):
             self.goal_handle.cancel_goal_async()
         if self.planner_goal_handle is not None:
             self.planner_goal_handle.cancel_goal_async()
+        if self.spin_goal_handle is not None:
+            self.spin_goal_handle.cancel_goal_async()
+        if self.checkpoints.active:
+            self.checkpoints.fail("STOPPED")
         elif not self.goal_request_pending:
             self._finish_active_start_attempt("STOPPED", "STOP_REQUESTED")
         response.success = True
@@ -1606,6 +1793,11 @@ class PatrolRuntimeManager(Node):
         self._verify_runtime_binding()
         self._update_obstruction_evidence(now)
         gate = self._runtime_gate()
+        if self.checkpoints.active:
+            motion_authorized = self._tick_checkpoint(now, gate)
+            self.current_motion_authorized = bool(motion_authorized)
+            self._publish_status(motion_authorized)
+            return
         accepted_goal = self.goal_handle is not None
         motion_authorized = accepted_goal and gate.ready and self.runtime_state == "PATROLLING"
         if (accepted_goal or self.goal_request_pending) and not gate.ready:
@@ -1857,6 +2049,7 @@ class PatrolRuntimeManager(Node):
             "rejoinRouteIndex": self.last_rejoin_index,
             "resumePending": self.resume_pending,
             "resumeCount": self.resume_count,
+            "checkpoint": self.checkpoints.status(),
             "robotStateRequired": self.require_robot_state,
             "robotMode": (
                 self.robot_motion_status.get("mode")

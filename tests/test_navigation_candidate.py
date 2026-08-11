@@ -3,6 +3,7 @@ import math
 import struct
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from gogoguard_route import NavigationWorkspaceError, NavigationWorkspaceStore, RouteManager
@@ -88,7 +89,7 @@ class NavigationCandidateTest(unittest.TestCase):
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 5)
+        self.assertEqual(candidate["candidate_generation"], 6)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -138,6 +139,43 @@ class NavigationCandidateTest(unittest.TestCase):
         (self.artifacts.parent / "navigation-workspace.json").unlink()
         with self.assertRaisesRegex(NavigationWorkspaceError, "green allowed area"):
             RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
+
+    def test_platform_bundle_has_relative_versioned_assets_and_hashes(self):
+        manager = RouteManager(self.root, site_id="test-site")
+        candidate = manager.prepare_map_job(self.job_id)
+        descriptor = manager.export_platform_bundle(self.job_id)
+        manifest = json.loads(Path(descriptor["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["mapVersion"], self.job_id)
+        self.assertEqual(manifest["routeId"], candidate["route_id"])
+        self.assertEqual(manifest["frame"], "map")
+        self.assertTrue(manifest["gravityAligned"])
+        self.assertEqual(
+            {item["path"] for item in manifest["files"]},
+            {
+                "map.pcd",
+                "route.json",
+                "execution-route.json",
+                "navigation-workspace.json",
+                "allowed-area-mask.json",
+            },
+        )
+        self.assertTrue(all(not Path(item["path"]).is_absolute() for item in manifest["files"]))
+        self.assertEqual(len(descriptor["archiveSha256"]), 64)
+        execution_route = json.loads(
+            (Path(descriptor["manifest"]).parent / "execution-route.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(execution_route["waypoints"][0]["routeProgressIndex"], 0)
+        self.assertEqual(
+            execution_route["waypoints"][-1]["routeProgressIndex"],
+            len(execution_route["waypoints"]) - 1,
+        )
+        with zipfile.ZipFile(descriptor["archive"]) as archive:
+            self.assertEqual(
+                set(archive.namelist()),
+                {"manifest.json"} | {item["path"] for item in manifest["files"]},
+            )
 
 
 if __name__ == "__main__":

@@ -78,43 +78,6 @@ if [[ "$INTERACTION_ENABLED" == "1" ]]; then
   CHILD_PIDS+=("$!")
 fi
 
-if [[ "$PLATFORM_HEARTBEAT_ENABLED" == "1" ]]; then
-  if [[ "$INTERACTION_ENABLED" != "1" ]]; then
-    echo "platform heartbeat requires the interaction service" >&2
-    exit 78
-  fi
-  if [[ -z "$PLATFORM_HEARTBEAT_URL" ]]; then
-    echo "platform heartbeat enabled but GOGOGUARD_PLATFORM_HEARTBEAT_URL is empty" >&2
-    exit 78
-  fi
-  interaction_deadline=$((SECONDS + 10))
-  while [[ ! -S /var/lib/gogoguard/interaction/control.sock ]]; do
-    if (( SECONDS >= interaction_deadline )); then
-      echo "interaction control socket did not become ready" >&2
-      exit 70
-    fi
-    sleep 0.1
-  done
-  platform_args=(
-    --robot-id "$ROBOT_ID"
-    --url "$PLATFORM_HEARTBEAT_URL"
-    --interval "$PLATFORM_HEARTBEAT_INTERVAL_S"
-  )
-  if [[ "$PLATFORM_HEARTBEAT_TLS_INSECURE" == "1" ]]; then
-    platform_args+=(--tls-insecure)
-  fi
-  if [[ -n "$PLATFORM_HEARTBEAT_HOST_HEADER" ]]; then
-    platform_args+=(--host-header "$PLATFORM_HEARTBEAT_HOST_HEADER")
-  fi
-  if [[ "$PLATFORM_HEARTBEAT_ALLOW_HTTP" == "1" ]]; then
-    platform_args+=(--allow-insecure-http)
-  fi
-  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
-    gogoguard-platform-edge "${platform_args[@]}" \
-    >"$LOG_ROOT/platform-heartbeat.log" 2>&1 &
-  CHILD_PIDS+=("$!")
-fi
-
 setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -r __node:=livox_mapping_publisher \
   -r /livox/lidar:=/mapping/livox/lidar \
@@ -149,6 +112,12 @@ setsid ros2 run fast_lio fastlio_mapping --ros-args \
   --params-file "$APP_ROOT/third_party/locked_stack/src/go2_mapping_capture/config/go2_mid360_capture_fastlio.yaml" \
   --params-file "$APP_ROOT/config/robot/fastlio_base_output.yaml" \
   >"$LOG_ROOT/fastlio.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+setsid gogoguard-battery-observer \
+  --topic /lf/lowstate \
+  --output /var/lib/gogoguard/device/battery.json \
+  >"$LOG_ROOT/battery-observer.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
 setsid gogoguard-navigation-observer \
@@ -187,6 +156,55 @@ while [[ ! -S /var/lib/gogoguard/navigation/supervisor.sock ]]; do
   fi
   sleep 0.1
 done
+
+# Platform lifecycle control depends on the persistent navigation owner, but
+# not on the optional interaction module. Each Unix client connects lazily only
+# when its own allow-listed command is received.
+if [[ "$PLATFORM_HEARTBEAT_ENABLED" == "1" ]]; then
+  if [[ -z "$PLATFORM_HEARTBEAT_URL" ]]; then
+    echo "platform heartbeat enabled but GOGOGUARD_PLATFORM_HEARTBEAT_URL is empty" >&2
+    exit 78
+  fi
+  if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+    interaction_deadline=$((SECONDS + 10))
+    while [[ ! -S /var/lib/gogoguard/interaction/control.sock ]]; do
+      if (( SECONDS >= interaction_deadline )); then
+        echo "interaction control socket did not become ready" >&2
+        exit 70
+      fi
+      sleep 0.1
+    done
+  fi
+  platform_args=(
+    --robot-id "$ROBOT_ID"
+    --url "$PLATFORM_HEARTBEAT_URL"
+    --interval "$PLATFORM_HEARTBEAT_INTERVAL_S"
+    --navigation-socket /var/lib/gogoguard/navigation/supervisor.sock
+    --battery-status /var/lib/gogoguard/device/battery.json
+  )
+  if [[ "$PLATFORM_HEARTBEAT_TLS_INSECURE" == "1" ]]; then
+    platform_args+=(--tls-insecure)
+  fi
+  if [[ -n "$PLATFORM_HEARTBEAT_HOST_HEADER" ]]; then
+    platform_args+=(--host-header "$PLATFORM_HEARTBEAT_HOST_HEADER")
+  fi
+  if [[ "$PLATFORM_HEARTBEAT_ALLOW_HTTP" == "1" ]]; then
+    platform_args+=(--allow-insecure-http)
+  fi
+  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+    gogoguard-platform-edge "${platform_args[@]}" \
+    >"$LOG_ROOT/platform-heartbeat.log" 2>&1 &
+  CHILD_PIDS+=("$!")
+  if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+    setsid gogoguard-platform-pose-stream \
+      --robot-id "$ROBOT_ID" \
+      --navigation-status /var/lib/gogoguard/navigation/status.json \
+      --interaction-socket /var/lib/gogoguard/interaction/control.sock \
+      --max-hz 10 \
+      >"$LOG_ROOT/platform-pose-stream.log" 2>&1 &
+    CHILD_PIDS+=("$!")
+  fi
+fi
 
 setsid gogoguard-site-console \
   --mode robot \

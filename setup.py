@@ -39,6 +39,8 @@ setup(
             "gogoguard-incident-recorder=gogoguard_evidence.incident_recorder:main",
             "gogoguard-interaction-edge=gogoguard_interaction_edge.__main__:main",
             "gogoguard-platform-edge=gogoguard_platform_edge.__main__:main",
+            "gogoguard-platform-pose-stream=gogoguard_platform_edge.pose_stream:main",
+            "gogoguard-battery-observer=gogoguard_device_io.battery_status:main",
         ]
     },
 )

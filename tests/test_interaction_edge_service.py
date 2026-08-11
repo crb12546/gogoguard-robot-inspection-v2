@@ -44,6 +44,7 @@ class FakeTransport:
         self.disconnects = 0
         self.muted = []
         self.health = None
+        self.published_data = []
 
     def set_playback_control_handler(self, handler):
         self.control = handler
@@ -77,6 +78,10 @@ class FakeTransport:
 
     def refresh(self, request):
         pass
+
+    def publish_data(self, payload, *, topic, reliable):
+        self.published_data.append((payload, topic, reliable))
+        return True
 
     def status(self):
         return {"running": self.disconnects == 0, "speaker": {"underflowFrames": 0}}
@@ -120,6 +125,34 @@ class InteractionEdgeServiceTest(unittest.TestCase):
                 {"action": "wake_transcript", "text": "小玖小玖"}
             )
             self.assertEqual(service.status()["wake"]["state"], "awake")
+
+    def test_map_bound_pose_is_forwarded_unreliably_without_motion_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service = self.create_service(Path(temporary))
+            pose = {
+                "schema": "gogoguard.robot_pose.v1",
+                "robotId": "LLYJ0001",
+                "sequence": 4,
+                "mapVersion": "map-6855ba54ae11",
+                "routeId": "route-6855ba54ae11-workspace-r4",
+                "frameId": "map",
+                "pose": {
+                    "position": {"x": 1.2, "y": -0.4, "z": 0.1},
+                    "yawRad": 0.3,
+                },
+                "localization": {"usable": True, "confidence": 0.8},
+                "sourceAt": "2026-08-11T08:00:00.000+00:00",
+                "observedAt": "2026-08-11T08:00:00+00:00",
+            }
+            result = service.handle({"action": "publish_pose", "payload": pose})
+            self.assertTrue(result["accepted"])
+            self.assertEqual(
+                service.transport.published_data,
+                [(pose, "gogoguard.robot_pose.v1", False)],
+            )
+            invalid = dict(pose, robotId="OTHER")
+            with self.assertRaisesRegex(ValueError, "identity"):
+                service.handle({"action": "publish_pose", "payload": invalid})
 
     def test_unix_socket_is_a_narrow_json_control_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

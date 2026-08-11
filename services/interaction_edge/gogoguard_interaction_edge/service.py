@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import socket
 import threading
 from pathlib import Path
@@ -19,6 +21,48 @@ from gogoguard_interaction import (
     WakePolicy,
     load_persona,
 )
+
+
+SAFE_EXTERNAL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def validate_pose_stream_payload(payload: Any, *, robot_id: str) -> dict[str, Any]:
+    """Validate the frozen robot-to-platform pose DataChannel envelope."""
+
+    if not isinstance(payload, dict) or payload.get("schema") != "gogoguard.robot_pose.v1":
+        raise ValueError("pose stream schema is invalid")
+    if payload.get("robotId") != robot_id:
+        raise ValueError("pose stream robot identity is invalid")
+    for name in ("mapVersion", "routeId"):
+        if not SAFE_EXTERNAL_ID.fullmatch(str(payload.get(name) or "")):
+            raise ValueError(f"pose stream {name} is invalid")
+    sequence = payload.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+        raise ValueError("pose stream sequence is invalid")
+    if payload.get("frameId") != "map":
+        raise ValueError("pose stream frame must be map")
+    pose = payload.get("pose")
+    position = pose.get("position") if isinstance(pose, dict) else None
+    values = (
+        position.get("x") if isinstance(position, dict) else None,
+        position.get("y") if isinstance(position, dict) else None,
+        position.get("z") if isinstance(position, dict) else None,
+        pose.get("yawRad") if isinstance(pose, dict) else None,
+    )
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in values
+    ):
+        raise ValueError("pose stream coordinates are invalid")
+    for name in ("sourceAt", "observedAt"):
+        if not isinstance(payload.get(name), str) or not payload[name]:
+            raise ValueError(f"pose stream {name} is invalid")
+    # Serialization is also a final NaN/size guard before crossing the native
+    # LiveKit boundary.
+    json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    return payload
 
 
 class InteractionEdgeService:
@@ -114,6 +158,22 @@ class InteractionEdgeService:
         if not isinstance(payload, dict):
             raise ValueError("interaction request must be an object")
         action = payload.get("action", payload.get("type"))
+        if action == "publish_pose":
+            pose = validate_pose_stream_payload(
+                payload.get("payload"), robot_id=self.robot_id
+            )
+            publisher = getattr(self.transport, "publish_data", None)
+            if publisher is None:
+                raise RuntimeError("realtime transport cannot publish data")
+            return {
+                "accepted": bool(
+                    publisher(
+                        pose,
+                        topic="gogoguard.robot_pose.v1",
+                        reliable=False,
+                    )
+                )
+            }
         if action == "status":
             result = self.status()
         elif action == "start_live":

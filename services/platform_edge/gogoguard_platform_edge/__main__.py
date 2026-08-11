@@ -9,8 +9,10 @@ from pathlib import Path
 from .heartbeat import (
     CommandLedger,
     InteractionControlClient,
+    NavigationControlClient,
     PlatformHeartbeatService,
     UrllibJsonPoster,
+    command_result_url,
 )
 
 
@@ -26,9 +28,19 @@ def main() -> None:
         default=Path("/var/lib/gogoguard/interaction/control.sock"),
     )
     parser.add_argument(
+        "--navigation-socket",
+        type=Path,
+        default=Path("/var/lib/gogoguard/navigation/supervisor.sock"),
+    )
+    parser.add_argument(
         "--navigation-status",
         type=Path,
         default=Path("/var/lib/gogoguard/navigation/status.json"),
+    )
+    parser.add_argument(
+        "--battery-status",
+        type=Path,
+        default=Path("/var/lib/gogoguard/device/battery.json"),
     )
     parser.add_argument(
         "--interaction-status",
@@ -60,12 +72,16 @@ def main() -> None:
         robot_id=args.robot_id,
         heartbeat_url=args.url,
         navigation_status_path=args.navigation_status,
+        battery_status_path=args.battery_status,
         interaction_status_path=args.interaction_status,
         capabilities_path=args.capabilities,
         service_status_path=args.state_root / "status.json",
         ledger=CommandLedger(args.state_root / "command-ledger.json"),
         interaction_client=InteractionControlClient(args.interaction_socket),
+        navigation_client=NavigationControlClient(args.navigation_socket),
         post_json=poster,
+        command_result_url=command_result_url(args.url),
+        post_result=poster,
         interval_s=args.interval,
         timeout_s=args.timeout,
     )

@@ -15,8 +15,10 @@ from gogoguard_interaction_edge.service import InteractionEdgeService, Interacti
 from gogoguard_platform_edge import (
     CommandLedger,
     InteractionControlClient,
+    NavigationControlClient,
     PlatformHeartbeatService,
     UrllibJsonPoster,
+    command_result_url,
 )
 
 
@@ -27,6 +29,10 @@ class FakeInteractionClient:
     def request(self, payload: dict) -> dict:
         self.commands.append(payload)
         return {"ok": True, "result": {"accepted": True}}
+
+
+class FakeNavigationClient(FakeInteractionClient):
+    pass
 
 
 class FakeMediaTransport:
@@ -117,6 +123,7 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.navigation = self.root / "navigation.json"
         self.interaction = self.root / "interaction.json"
+        self.battery = self.root / "battery.json"
         self.capabilities = self.root / "capabilities.json"
         self.status = self.root / "platform-status.json"
         self.ledger_path = self.root / "command-ledger.json"
@@ -169,21 +176,49 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        self.battery.write_text(
+            json.dumps(
+                {
+                    "schema": "gogoguard.battery_status.v1",
+                    "percent": 87,
+                    "charging": False,
+                    "voltage": 32.14,
+                    "observedAt": "2026-08-11T12:00:00Z",
+                    "source": "unitree_sdk",
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def service(self, responses: ResponseQueue, interaction: FakeInteractionClient):
+    def service(
+        self,
+        responses: ResponseQueue,
+        interaction: FakeInteractionClient,
+        navigation: FakeNavigationClient | None = None,
+        *,
+        post_result=None,
+    ):
         return PlatformHeartbeatService(
             robot_id="LLYJ0001",
             heartbeat_url="https://gogoguard.cn/api/v1/robot/heartbeat",
             navigation_status_path=self.navigation,
+            battery_status_path=self.battery,
             interaction_status_path=self.interaction,
             capabilities_path=self.capabilities,
             service_status_path=self.status,
             ledger=CommandLedger(self.ledger_path),
             interaction_client=interaction,
+            navigation_client=navigation or FakeNavigationClient(),
             post_json=responses,
+            command_result_url=(
+                "https://gogoguard.cn/api/v1/robot/command/result"
+                if post_result is not None
+                else ""
+            ),
+            post_result=post_result,
         )
 
     def test_builds_platform_compatible_read_only_heartbeat(self) -> None:
@@ -196,11 +231,29 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertEqual(payload["motion"]["position"]["x"], 12.4)
         self.assertEqual(payload["motion"]["twist"]["linear"]["x"], 0.4)
         self.assertEqual(payload["patrol"]["routeProgressIndex"], 12)
+        self.assertEqual(payload["battery"]["percent"], 87.0)
+        self.assertEqual(payload["battery"]["voltage"], 32.14)
         self.assertEqual(payload["capabilities"]["revision"], 1)
         encoded = json.dumps(payload)
         self.assertNotIn("must-not-leak", encoded)
         self.assertNotIn('"token"', encoded)
         self.assertNotIn('"url"', encoded)
+
+    def test_unknown_pose_and_battery_values_are_null_not_fake_zero(self) -> None:
+        self.navigation.write_text(
+            json.dumps({"runtime": {"state": "IDLE"}, "localization_pose": None}),
+            encoding="utf-8",
+        )
+        self.battery.unlink()
+        responses = ResponseQueue({"ok": True, "robotId": "LLYJ0001", "commands": []})
+        service = self.service(responses, FakeInteractionClient())
+        self.assertTrue(service.poll_once()["ok"])
+        payload = responses.payloads[0]
+        self.assertIsNone(payload["motion"]["position"]["x"])
+        self.assertIsNone(payload["motion"]["yaw_rad"])
+        self.assertIsNone(payload["motion"]["twist"]["linear"]["x"])
+        self.assertIsNone(payload["battery"]["percent"])
+        self.assertEqual(payload["battery"]["source"], "unitree_sdk")
 
     def test_start_refresh_stop_and_duplicate_commands_are_deterministic(self) -> None:
         first = {
@@ -270,9 +323,79 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         )
         interaction = FakeInteractionClient()
         result = self.service(motion, interaction).poll_once()
-        self.assertFalse(result["ok"])
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["commands"][0]["ok"])
         self.assertEqual(interaction.commands, [])
         self.assertTrue(json.loads(self.status.read_text(encoding="utf-8"))["online"])
+
+    def test_command_results_report_acceptance_and_failure_without_payload_secrets(self) -> None:
+        commands = [
+            {"id": 40, "action": "start_patrol", "params": {}},
+            {"id": 41, "action": "move", "params": {"token": "never-log-me"}},
+        ]
+        responses = ResponseQueue(
+            {"ok": True, "robotId": "LLYJ0001", "commands": commands}
+        )
+        result_calls = []
+
+        def post_result(url, payload, timeout_s):
+            result_calls.append((url, payload, timeout_s))
+            return {"ok": True}
+
+        service = self.service(
+            responses,
+            FakeInteractionClient(),
+            post_result=post_result,
+        )
+        outcome = service.poll_once()
+        self.assertTrue(outcome["ok"])
+        self.assertTrue(outcome["commands"][0]["ok"])
+        self.assertFalse(outcome["commands"][1]["ok"])
+        self.assertEqual(len(result_calls), 2)
+        self.assertEqual(result_calls[0][1]["result"]["command_id"], 40)
+        self.assertTrue(result_calls[0][1]["result"]["ok"])
+        self.assertFalse(result_calls[1][1]["result"]["ok"])
+        self.assertNotIn(
+            "never-log-me", json.dumps(result_calls, ensure_ascii=False)
+        )
+        persisted = json.loads(self.status.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["commandResultsSent"], 2)
+
+    def test_command_result_endpoint_is_derived_from_frozen_heartbeat_path(self) -> None:
+        self.assertEqual(
+            command_result_url(
+                "http://39.96.37.187/api/v1/robot/heartbeat?source=dog"
+            ),
+            "http://39.96.37.187/api/v1/robot/command/result?source=dog",
+        )
+
+    def test_platform_can_only_start_or_stop_the_selected_patrol(self) -> None:
+        start = {
+            "id": "patrol-1",
+            "action": "start_patrol",
+            "params": {
+                "mapVersion": "map-v1",
+                "routeId": "route-v2",
+                "missionPlan": {
+                    "missionId": "mission-1",
+                    "checkpoints": [
+                        {"checkpointId": "point-1", "routeProgressIndex": 42}
+                    ],
+                },
+            },
+        }
+        stop = {"id": "patrol-2", "action": "stop_patrol", "params": {}}
+        responses = ResponseQueue(
+            {"ok": True, "robotId": "LLYJ0001", "commands": [start]},
+            {"ok": True, "robotId": "LLYJ0001", "commands": [stop]},
+        )
+        interaction = FakeInteractionClient()
+        navigation = FakeNavigationClient()
+        service = self.service(responses, interaction, navigation)
+        self.assertTrue(service.poll_once()["ok"])
+        self.assertTrue(service.poll_once()["ok"])
+        self.assertEqual(interaction.commands, [])
+        self.assertEqual(navigation.commands, [start, stop])
 
     def test_unix_client_uses_one_line_json_framing(self) -> None:
         socket_path = self.root / "control.sock"
@@ -300,6 +423,51 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(received, [{"id": 9, "action": "stop_live"}])
 
+    def test_navigation_client_maps_platform_lifecycle_to_narrow_rpc(self) -> None:
+        socket_path = self.root / "navigation.sock"
+        received: list[dict] = []
+        ready = threading.Event()
+
+        def server() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(socket_path))
+                listener.listen(1)
+                ready.set()
+                connection, _ = listener.accept()
+                with connection:
+                    received.append(
+                        json.loads(connection.makefile("rb").readline().decode("utf-8"))
+                    )
+                    connection.sendall(
+                        b'{"ok":true,"result":{"state":"accepted","operationId":"op-1"}}\n'
+                    )
+
+        thread = threading.Thread(target=server, daemon=True)
+        thread.start()
+        self.assertTrue(ready.wait(2))
+        response = NavigationControlClient(socket_path).request(
+            {
+                "id": 10,
+                "action": "start_patrol",
+                "params": {"mapVersion": "map-v1", "routeId": "route-v2"},
+            }
+        )
+        thread.join(timeout=2)
+        self.assertTrue(response["ok"])
+        self.assertEqual(
+            received,
+            [
+                {
+                    "method": "patrol.start_selected",
+                    "params": {
+                        "expected_map_version": "map-v1",
+                        "expected_route_id": "route-v2",
+                        "mission_plan": None,
+                    },
+                }
+            ],
+        )
+
     def test_real_http_adapter_posts_json_and_optional_device_token(self) -> None:
         requests: list[dict] = []
 
@@ -310,6 +478,7 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
                     {
                         "path": self.path,
                         "authorization": self.headers.get("Authorization"),
+                        "device_token": self.headers.get("X-Device-Token"),
                         "body": json.loads(self.rfile.read(length)),
                     }
                 )
@@ -342,7 +511,8 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
             thread.join(timeout=2)
         self.assertTrue(response["ok"])
         self.assertEqual(requests[0]["path"], "/api/v1/robot/heartbeat")
-        self.assertEqual(requests[0]["authorization"], "Bearer device-token")
+        self.assertIsNone(requests[0]["authorization"])
+        self.assertEqual(requests[0]["device_token"], "device-token")
         self.assertEqual(requests[0]["body"], {"robotId": "LLYJ0001"})
 
     def test_complete_platform_to_unix_to_interaction_state_flow(self) -> None:
@@ -398,11 +568,13 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
             robot_id="LLYJ0001",
             heartbeat_url="https://gogoguard.cn/api/v1/robot/heartbeat",
             navigation_status_path=self.navigation,
+            battery_status_path=self.battery,
             interaction_status_path=interaction_status,
             capabilities_path=self.capabilities,
             service_status_path=self.status,
             ledger=CommandLedger(self.ledger_path),
             interaction_client=InteractionControlClient(socket_path),
+            navigation_client=FakeNavigationClient(),
             post_json=responses,
         )
         try:

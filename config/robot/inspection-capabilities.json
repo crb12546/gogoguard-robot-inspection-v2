@@ -1,15 +1,25 @@
 {
   "schema": "gogoguard.robot_capabilities.v1",
-  "revision": 1,
+  "revision": 2,
   "routeExecution": {
     "supported": true,
     "model": "map_bound_route",
     "routeProgressIndex": true,
-    "checkpointEvent": false
+    "checkpointEvent": true,
+    "platformStartStop": true,
+    "checkpointBinding": "execution_route_progress_index"
   },
   "pauseResume": {
-    "supported": false,
-    "reason": "navigation_has_internal_recovery_but_no_platform_checkpoint_pause_adapter"
+    "supported": true,
+    "mode": "automatic_checkpoint_true_stop_and_suffix_resume",
+    "externalArbitraryPause": false,
+    "stableStopThresholdS": 0.5
+  },
+  "checkpointInspection": {
+    "supported": true,
+    "action": "nav2_collision_checked_body_spin_360",
+    "usesExistingLiveVideo": true,
+    "requiresPlatformMissionPlan": true
   },
   "gimbal": {
     "supported": false,
@@ -49,12 +59,22 @@
     "maxBytes": 4294967296
   },
   "poseStream": {
-    "supported": false,
+    "supported": true,
     "sourceHz": 10,
     "publicStatusHz": 5,
     "livekitDataChannelAvailable": true,
-    "posePublisherIntegrated": false,
-    "reason": "existing_livekit_data_channel_is_connected_but_pose_publisher_and_platform_topic_contract_are_not_yet_integrated"
+    "posePublisherIntegrated": true,
+    "schema": "gogoguard.robot_pose.v1",
+    "topic": "gogoguard.robot_pose.v1",
+    "delivery": "unreliable_latest_only",
+    "binding": ["mapVersion", "routeId", "frameId"],
+    "requiresActiveLiveSession": true
+  },
+  "powerStatus": {
+    "supported": true,
+    "source": "unitree_lowstate",
+    "fields": ["percent", "voltage", "observedAt"],
+    "charging": "pending_docked_field_receipt"
   },
   "lowBatteryReturn": {
     "supported": false,

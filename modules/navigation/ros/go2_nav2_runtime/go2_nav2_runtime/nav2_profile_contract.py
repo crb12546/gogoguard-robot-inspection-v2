@@ -285,6 +285,22 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if _finite(min_velocity[0], "min_velocity.x") < 0.0:
         raise Nav2ProfileError("velocity smoother must not authorize reverse driving")
 
+    behavior = _mapping(profile.get("behavior_server"), "behavior_server")
+    behavior = _mapping(behavior.get("ros__parameters"), "behavior parameters")
+    if behavior.get("behavior_plugins") != ["spin"]:
+        raise Nav2ProfileError("checkpoint inspection requires only the Nav2 Spin behavior")
+    spin = _mapping(behavior.get("spin"), "behavior spin")
+    if spin.get("plugin") != "nav2_behaviors/Spin":
+        raise Nav2ProfileError("checkpoint inspection must use the Humble Nav2 Spin plugin")
+    if behavior.get("global_frame") != "map" or behavior.get("robot_base_frame") != "base_link":
+        raise Nav2ProfileError("Nav2 Spin frames must be map -> base_link")
+    if behavior.get("costmap_topic") != "local_costmap/costmap_raw":
+        raise Nav2ProfileError("Nav2 Spin must collision-check the local costmap")
+    spin_max = _positive(behavior.get("max_rotational_vel"), "max_rotational_vel")
+    spin_min = _positive(behavior.get("min_rotational_vel"), "min_rotational_vel")
+    if spin_min > spin_max or spin_max > _finite(max_velocity[2], "max_velocity.yaw"):
+        raise Nav2ProfileError("Nav2 Spin speed exceeds the commissioned yaw chain")
+
     return {
         "controllerFrequencyHz": frequency,
         "modelDtS": model_dt,
@@ -302,4 +318,5 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         "batchSize": batch_size,
         "iterationCount": iteration_count,
         "rolloutStatesPerSecond": rollout_states_per_second,
+        "spinMaxRotationalVelocityRps": spin_max,
     }

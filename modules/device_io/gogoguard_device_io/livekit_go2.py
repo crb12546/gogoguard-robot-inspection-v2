@@ -52,6 +52,7 @@ class LiveKitGo2Transport:
         self._request: RealtimeMediaSessionRequest | None = None
         self._native_dependencies: tuple[Any, ...] | None = None
         self._microphone_track = None
+        self._local_participant = None
         self._microphone_muted = threading.Event()
         self._ready: queue.Queue[MediaConnectionReceipt | BaseException] = queue.Queue(maxsize=1)
         self._playback_control_handler: Callable[[dict[str, Any]], Any] | None = None
@@ -70,6 +71,11 @@ class LiveKitGo2Transport:
         self._transcript_audio_samples = 0
         self._last_transcript_to_audio_ms: float | None = None
         self._max_transcript_to_audio_ms = 0.0
+        self._data_publish_lock = threading.Lock()
+        self._data_publish_pending = False
+        self._data_published = 0
+        self._data_dropped = 0
+        self._data_publish_errors = 0
         self.speaker = SpeakerJitterBuffer(
             sample_rate_hz=profile.speaker_rate_hz,
             frame_ms=profile.speaker_frame_ms,
@@ -158,11 +164,74 @@ class LiveKitGo2Transport:
         with self._request_lock:
             self._request = None
         self._microphone_track = None
+        self._local_participant = None
+        with self._data_publish_lock:
+            self._data_publish_pending = False
         self._microphone_muted.clear()
         with self._timing_lock:
             self._pending_transcript_at = None
             self._agent_frame_at = None
         self.speaker.flush()
+
+    def publish_data(
+        self,
+        payload: dict[str, Any],
+        *,
+        topic: str,
+        reliable: bool,
+    ) -> bool:
+        """Queue one bounded robot-to-platform DataChannel message.
+
+        Pose samples are latest-only. A slow mobile link drops an old position
+        instead of building a queue behind realtime audio and video.
+        """
+
+        if not isinstance(payload, dict) or not topic or len(topic) > 128:
+            raise ValueError("data channel payload or topic is invalid")
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 16384:
+            raise ValueError("data channel payload exceeds 16 KiB")
+        loop = self._loop
+        participant = self._local_participant
+        if loop is None or participant is None or not loop.is_running():
+            return False
+        with self._data_publish_lock:
+            if self._data_publish_pending:
+                self._data_dropped += 1
+                return False
+            self._data_publish_pending = True
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                participant.publish_data(
+                    encoded,
+                    reliable=bool(reliable),
+                    topic=topic,
+                ),
+                loop,
+            )
+        except Exception:
+            with self._data_publish_lock:
+                self._data_publish_pending = False
+                self._data_publish_errors += 1
+            return False
+
+        def completed(result) -> None:
+            with self._data_publish_lock:
+                self._data_publish_pending = False
+                try:
+                    result.result()
+                except Exception:
+                    self._data_publish_errors += 1
+                else:
+                    self._data_published += 1
+
+        future.add_done_callback(completed)
+        return True
 
     def refresh(self, request: RealtimeMediaSessionRequest) -> None:
         """Keep the newest ephemeral token in memory for a future reconnect."""
@@ -212,6 +281,11 @@ class LiveKitGo2Transport:
             "microphoneMuted": self._microphone_muted.is_set(),
             "reconnectCount": self._reconnect_count,
             "audioTiming": audio_timing,
+            "dataChannel": {
+                "published": self._data_published,
+                "droppedLatestOnly": self._data_dropped,
+                "publishErrors": self._data_publish_errors,
+            },
             "speaker": self.speaker.status(),
         }
 
@@ -500,6 +574,9 @@ class LiveKitGo2Transport:
             go2.pc.addTrack(SpeakerTrack())
             self._startup_stage = "LIVEKIT_CONNECT"
             await room.connect(request.url, request.token, rtc.RoomOptions(auto_subscribe=True))
+            self._local_participant = (
+                room.local_participant if request.publish_data else None
+            )
 
             audio_publication = None
             if request.publish_audio:
@@ -578,6 +655,9 @@ class LiveKitGo2Transport:
                 except Exception:
                     pass
             self._microphone_track = None
+            self._local_participant = None
+            with self._data_publish_lock:
+                self._data_publish_pending = False
             self._loop = None
             try:
                 await room.disconnect()

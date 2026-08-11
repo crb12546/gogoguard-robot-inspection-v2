@@ -58,8 +58,15 @@ if "GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED:-0" not in entrypoint.read_text(encodin
     raise SystemExit("robot platform heartbeat must remain explicitly gated until commissioned")
 if "gogoguard-platform-edge" not in entrypoint.read_text(encoding="utf-8"):
     raise SystemExit("robot image must contain the formal platform heartbeat adapter")
-if "platform heartbeat requires the interaction service" not in entrypoint.read_text(encoding="utf-8"):
-    raise SystemExit("platform live control must not start without the interaction service")
+entrypoint_text = entrypoint.read_text(encoding="utf-8")
+if "Each Unix client connects lazily" not in entrypoint_text:
+    raise SystemExit("platform clients must retain lazy module boundaries")
+if "gogoguard-platform-pose-stream" not in entrypoint_text:
+    raise SystemExit("robot image must contain the map-bound pose data publisher")
+if entrypoint_text.index("navigation supervisor did not become ready") > entrypoint_text.index(
+    "gogoguard-platform-edge"
+):
+    raise SystemExit("platform patrol control must start after the navigation owner")
 joint_text = joint_test.read_text(encoding="utf-8")
 for required in (
     "--temporary-icp-fallback",
@@ -80,6 +87,9 @@ for required in (
     'numpy.__version__ == "2.0.2"',
     "src/go2_vui_control.cpp",
     "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control",
+    "site-packages/go2_nav2_runtime/patrol_runtime_manager.py",
+    "share/go2_nav2_runtime/launch/active_map_patrol.launch.py",
+    "share/go2_nav2_runtime/config/go2_nav2_patrol.yaml",
 ):
     if required not in combined_content:
         raise SystemExit(f"combined release is missing frozen-baseline contract: {required}")

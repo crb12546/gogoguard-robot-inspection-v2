@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -15,6 +17,7 @@ from .profiles import DEFAULT_PROFILE, NavigationProfileStore, validate_profile
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
+SAFE_EXTERNAL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SDK_RECEIVER = Path(
     "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/"
     "go2_sdk2_udp_receiver"
@@ -38,6 +41,7 @@ class NavigationManager:
         self.log_root = self.root / "logs"
         self.status_path = self.root / "status.json"
         self.selected_path = self.root / "selected-candidate.json"
+        self.mission_path = self.root / "mission-plan.json"
         self.root.mkdir(parents=True, exist_ok=True)
         self.log_root.mkdir(parents=True, exist_ok=True)
         self.routes = RouteManager(self.data_root, site_id=site_id)
@@ -49,6 +53,7 @@ class NavigationManager:
         self._last_runtime_exit: int | None = None
         self._last_receiver_exit: int | None = None
         self._candidate: dict[str, Any] | None = self._read_json(self.selected_path)
+        self._launched_mission_hash: str | None = None
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -144,7 +149,8 @@ class NavigationManager:
 
     @staticmethod
     def _launch_arguments(candidate: dict[str, Any], *, site_id: str, robot_id: str,
-                          sensor_id: str, log_root: Path, profile: dict[str, Any] | None = None) -> list[str]:
+                          sensor_id: str, log_root: Path, profile: dict[str, Any] | None = None,
+                          mission_plan_path: Path | None = None) -> list[str]:
         profile = profile or validate_profile(DEFAULT_PROFILE)
         motion = profile["motion"]
         avoidance = profile["avoidance"]
@@ -162,6 +168,7 @@ class NavigationManager:
             f"candidate_runtime_profile:={candidate['runtime_profile']}",
             f"candidate_allowed_area_mask:={candidate['allowed_area_mask']}",
             f"candidate_allowed_area_mask_image:={candidate['allowed_area_mask_image']}",
+            f"mission_plan_path:={mission_plan_path or ''}",
             f"localization_map_hash:={candidate['localization_map_hash']}",
             f"route_hash:={candidate['route_hash']}",
             f"runtime_profile_hash:={candidate['runtime_profile_hash']}",
@@ -333,6 +340,7 @@ class NavigationManager:
                     candidate, site_id=self.site_id, robot_id=self.robot_id,
                     sensor_id=self.sensor_id, log_root=self.log_root,
                     profile=self.profiles.get(),
+                    mission_plan_path=getattr(self, "mission_path", None),
                 )
                 self._process = subprocess.Popen(
                     command,
@@ -374,6 +382,10 @@ class NavigationManager:
                     name=f"navigation-reaper-{candidate_id}",
                     daemon=True,
                 ).start()
+                mission_path = getattr(self, "mission_path", None)
+                mission = self._read_json(mission_path) if mission_path else {}
+                mission = mission or {}
+                self._launched_mission_hash = str(mission.get("missionHash") or "")
         return self.status()
 
     def _service(self, service: str, type_name: str, request: str, timeout: int = 12) -> dict[str, Any]:
@@ -431,6 +443,149 @@ class NavigationManager:
         if not result["success"]:
             raise RuntimeError(result["output"] or "patrol start was rejected")
         return result
+
+    def start_selected_patrol(
+        self,
+        *,
+        expected_map_version: str | None = None,
+        expected_route_id: str | None = None,
+        mission_plan: dict[str, Any] | None = None,
+        readiness_timeout_s: float = 180.0,
+    ) -> dict[str, Any]:
+        """Start the selected release, wait for real readiness, then patrol.
+
+        This is the single platform-facing lifecycle operation. It never
+        accepts a path or velocity from the platform: map and route selection
+        still belongs to the commissioned field-workstation release flow.
+        """
+        candidate = self._loaded_candidate()
+        if not candidate:
+            raise RuntimeError("尚未发布可用的地图与路线，无法从平台开始巡检")
+        expected_map_version = str(expected_map_version or "").strip()
+        expected_route_id = str(expected_route_id or "").strip()
+        if expected_map_version and expected_map_version != candidate.get("map_version"):
+            raise RuntimeError("平台任务地图版本与机器狗已选版本不一致")
+        if expected_route_id and expected_route_id != candidate.get("route_id"):
+            raise RuntimeError("平台任务路线版本与机器狗已选版本不一致")
+        if not 5.0 <= float(readiness_timeout_s) <= 300.0:
+            raise ValueError("navigation readiness timeout is outside 5..300 seconds")
+
+        mission = self._configure_mission(candidate, mission_plan)
+        status = self.status()
+        if (
+            status.get("runtime_process", {}).get("running")
+            and self._launched_mission_hash != mission["missionHash"]
+        ):
+            self.stop_runtime()
+            status = self.status()
+        if not status.get("runtime_process", {}).get("running"):
+            self.start_runtime(str(candidate["candidate_id"]))
+
+        deadline = time.monotonic() + float(readiness_timeout_s)
+        last_localization_reason = "LOCALIZATION_MISSING"
+        last_costmap_reason = "COSTMAP_MISSING"
+        while time.monotonic() < deadline:
+            status = self.status()
+            if not status.get("runtime_process", {}).get("running"):
+                raise RuntimeError("定位与 Nav2 启动后退出，未向机器狗提交巡检")
+            if not status.get("motion_bridge", {}).get("running"):
+                raise RuntimeError("Unitree 运动桥未就绪，未向机器狗提交巡检")
+            localization = status.get("localization")
+            localization = localization if isinstance(localization, dict) else {}
+            runtime = status.get("runtime")
+            runtime = runtime if isinstance(runtime, dict) else {}
+            health = runtime.get("costmapHealth")
+            health = health if isinstance(health, dict) else {}
+            last_localization_reason = str(
+                localization.get("reason")
+                or localization.get("state")
+                or last_localization_reason
+            )
+            last_costmap_reason = str(health.get("reason") or last_costmap_reason)
+            if localization.get("usable") is True and health.get("healthy") is True:
+                result = self.start_patrol()
+                return {
+                    "schema": "gogoguard.selected_patrol_start.v1",
+                    "mapVersion": candidate["map_version"],
+                    "routeId": candidate["route_id"],
+                    "missionId": mission["missionId"],
+                    "checkpointCount": len(mission["checkpoints"]),
+                    "accepted": True,
+                    "nav2": result,
+                }
+            time.sleep(0.1)
+        raise RuntimeError(
+            "等待定位与代价地图就绪超时："
+            f"localization={last_localization_reason}, costmap={last_costmap_reason}；"
+            "未向机器狗提交巡检"
+        )
+
+    def _configure_mission(
+        self,
+        candidate: dict[str, Any],
+        mission_plan: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if mission_plan is None:
+            mission_plan = {}
+        if not isinstance(mission_plan, dict):
+            raise ValueError("missionPlan must be an object")
+        map_version = str(mission_plan.get("mapVersion") or candidate["map_version"])
+        route_id = str(mission_plan.get("routeId") or candidate["route_id"])
+        if map_version != candidate["map_version"] or route_id != candidate["route_id"]:
+            raise RuntimeError("平台点位任务与机器狗已选地图路线不一致")
+        mission_id = str(
+            mission_plan.get("missionId")
+            or f"selected:{candidate['map_version']}:{candidate['workspace_revision']}"
+        )
+        if not SAFE_EXTERNAL_ID.fullmatch(mission_id):
+            raise ValueError("missionId is invalid")
+        checkpoints = mission_plan.get("checkpoints", [])
+        if not isinstance(checkpoints, list) or len(checkpoints) > 256:
+            raise ValueError("mission checkpoints must be a list of at most 256 items")
+        route_point_count = int(candidate.get("execution_route_point_count") or 0)
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        previous_index = -1
+        for raw in checkpoints:
+            if not isinstance(raw, dict):
+                raise ValueError("mission checkpoint must be an object")
+            checkpoint_id = str(raw.get("checkpointId") or "")
+            route_index = raw.get("routeProgressIndex")
+            if not SAFE_EXTERNAL_ID.fullmatch(checkpoint_id) or checkpoint_id in seen:
+                raise ValueError("checkpointId is invalid or duplicated")
+            if (
+                isinstance(route_index, bool)
+                or not isinstance(route_index, int)
+                or route_index <= previous_index
+                or route_index < 0
+                or route_index >= route_point_count
+            ):
+                raise ValueError("checkpoint routeProgressIndex is outside execution route")
+            seen.add(checkpoint_id)
+            previous_index = route_index
+            normalized.append(
+                {
+                    "checkpointId": checkpoint_id,
+                    "routeProgressIndex": route_index,
+                    "action": "body_spin_360",
+                    "settleBeforeS": 0.5,
+                    "targetYawRad": round(2.0 * math.pi, 9),
+                }
+            )
+        canonical = {
+            "schema": "gogoguard.navigation_mission.v1",
+            "missionId": mission_id,
+            "mapVersion": map_version,
+            "routeId": route_id,
+            "checkpoints": normalized,
+        }
+        canonical["missionHash"] = hashlib.sha256(
+            json.dumps(
+                canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        self._atomic_json(self.mission_path, canonical)
+        return canonical
 
     def diagnostics(self) -> dict[str, Any]:
         status = self.status()
@@ -512,6 +667,7 @@ class NavigationManager:
             self._receiver_process = None
             self._log_handle = None
             self._receiver_log_handle = None
+            self._launched_mission_hash = None
         if process and process.poll() is None:
             try:
                 self._service("/go2/patrol/stop", "std_srvs/srv/Trigger", "{}")

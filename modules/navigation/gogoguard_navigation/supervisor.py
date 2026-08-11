@@ -50,6 +50,7 @@ class OperationRegistry:
                 completion_messages = {
                     "runtime.start": "运行进程启动请求已完成；定位是否可用以实时状态为准",
                     "patrol.start": "Nav2 已接收巡检请求；整条路线结果以巡检状态为准",
+                    "patrol.start_selected": "已启动选定的地图与路线，Nav2 已接收巡检请求",
                     "runtime.stop": "导航速度链和 SDK 运动桥已停止；遥控权已释放",
                     "patrol.stop": "巡检、导航速度链和 SDK 运动桥已停止；遥控权已释放",
                 }
@@ -137,6 +138,9 @@ class SupervisorService:
             "runtime.stop": self.manager.stop_runtime,
             "localization.reset": self.manager.reset_localization,
             "patrol.start": lambda: self._start_patrol(control_epoch),
+            "patrol.start_selected": lambda: self._start_selected_patrol(
+                params, control_epoch
+            ),
             "patrol.stop": self.manager.stop_patrol,
             "runtime.recover": lambda: self._recover(control_epoch),
         }
@@ -154,6 +158,18 @@ class SupervisorService:
     def _start_patrol(self, control_epoch: int) -> dict[str, Any]:
         self._require_current(control_epoch)
         result = self.manager.start_patrol()
+        self._require_current(control_epoch)
+        return result
+
+    def _start_selected_patrol(
+        self, params: dict[str, Any], control_epoch: int
+    ) -> dict[str, Any]:
+        self._require_current(control_epoch)
+        result = self.manager.start_selected_patrol(
+            expected_map_version=params.get("expected_map_version"),
+            expected_route_id=params.get("expected_route_id"),
+            mission_plan=params.get("mission_plan"),
+        )
         self._require_current(control_epoch)
         return result
 

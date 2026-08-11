@@ -2,11 +2,11 @@
   "id": "interaction",
   "responsibility": "Robot-side realtime multimodal session, half-duplex echo safety, playback interruption and platform status without motion ownership",
   "runtime": ["robot"],
-  "status": "formal_runtime_static_audio_live_deployed_video_server_receipt_and_quality_pending",
+  "status": "formal_runtime_deployed_plus_map_bound_pose_data_uplink_implemented_offline_audio_quality_pending",
   "codeRoots": ["modules/interaction", "services/interaction_edge", "config/robot/interaction-persona.json", "docs/realtime-interaction.md"],
   "entrypoints": ["gogoguard_interaction.session:InteractionManager", "gogoguard_interaction_edge.__main__:main"],
   "dependsOn": ["contracts", "device_io"],
-  "consumes": ["start_live/stop_live command", "platform finalized ASR transcript", "Z1Pro H264", "BOYA PCM", "agent-voice", "gogoguard.playback_control.v1", "gogoguard.wake_transcript.v1 from agent:*"],
-  "produces": ["robot-microphone", "z1pro-camera", "Go2 speaker PCM", "LiveKit data-connected receipt", "gogoguard.interaction_session_status.v1", "gogoguard.conversation_wake_status.v1"],
+  "consumes": ["start_live/stop_live command", "platform finalized ASR transcript", "Z1Pro H264", "BOYA PCM", "agent-voice", "gogoguard.playback_control.v1", "gogoguard.wake_transcript.v1 from agent:*", "validated map-bound gogoguard.robot_pose.v1"],
+  "produces": ["robot-microphone", "z1pro-camera", "Go2 speaker PCM", "latest-only unreliable pose DataChannel packets", "LiveKit data-connected receipt", "gogoguard.interaction_session_status.v1", "gogoguard.conversation_wake_status.v1"],
   "sourceProvenance": ["GoGoGuard P0/P1 written protocol dated 2026-08-06 and 2026-08-09", "2026-08-09 disposable BOYA/Z1Pro/Go2/LiveKit probe receipts", "selective session-state port from superseded realtime-interaction-spike branch; no stale composition merged", "2026-08-11 platform readiness receipt froze gogoguard.wake_transcript.v1 over LiveKit DataChannel and the temporary ICP fallback endpoint", "2026-08-11 combined-live-r8 deployed the formal runtime on LLYJ0001; real BOYA uplink, Z1Pro publication, agent-voice downlink and wake DataChannel reached live with zero motion; operator confirmed physical audio while wake acknowledgement, full-volume quality, server-side video receipt and concurrent patrol remain open"]
 }

@@ -67,6 +67,22 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                     self.server.application.navigation_workspace(match.group(1)),
                 )
             match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-bundle",
+                path,
+            )
+            if match and hasattr(self.server.application, "platform_map_bundle"):
+                return self._json(
+                    200, self.server.application.platform_map_bundle(match.group(1))
+                )
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-bundle/file",
+                path,
+            )
+            if match and hasattr(self.server.application, "platform_map_bundle_file"):
+                return self._stream_file(
+                    self.server.application.platform_map_bundle_file(match.group(1))
+                )
+            match = re.fullmatch(
                 r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/glim-editor",
                 path,
             )

@@ -24,8 +24,33 @@ COPY --from=interaction_livekit_wheels / /tmp/interaction-wheels/
 # current application package is installed globally without dependencies for
 # the existing edge processes; only the two realtime daemons receive this
 # additional PYTHONPATH from the entrypoint.
+# The frozen V6 image already owns this pure-Python ROS package. This release
+# changes its runtime/launch/config composition for checkpoints, so install
+# exactly those owned files without rebuilding or replacing any ROS, Nav2,
+# MPPI, localization or Unitree binary.
 RUN cd /tmp/interaction-wheels \
     && sha256sum --check /tmp/interaction-wheelhouse.sha256 \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/nav2_profile_contract.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/launch/active_map_patrol.launch.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/package.xml \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/package.xml \
+    && grep -q 'FollowPath, Spin' \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
+    && grep -q 'nav2_behaviors/Spin' \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+    && grep -q 'nav2_behaviors' \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/launch/active_map_patrol.launch.py \
     && cd /opt/gogoguard/app \
     && python3 -m pip install --no-deps --no-build-isolation . \
     && python3 -m pip install --no-index --no-deps \

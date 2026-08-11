@@ -88,4 +88,8 @@ class VerticalSliceTest(unittest.TestCase):
         self.assertTrue(status["available"])
         self.assertTrue(status["stillCapture"]["usesExistingInteractionVideo"])
         self.assertTrue(status["poseStream"]["livekitDataChannelAvailable"])
-        self.assertFalse(status["poseStream"]["posePublisherIntegrated"])
+        self.assertTrue(status["poseStream"]["posePublisherIntegrated"])
+        self.assertEqual(
+            status["poseStream"]["schema"], "gogoguard.robot_pose.v1"
+        )
+        self.assertEqual(status["poseStream"]["delivery"], "unreliable_latest_only")

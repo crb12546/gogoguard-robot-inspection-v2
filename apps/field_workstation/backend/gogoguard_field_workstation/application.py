@@ -7,7 +7,7 @@ from pathlib import Path
 from gogoguard_contracts import RecordingSession, RecordingState, json_ready
 from gogoguard_evidence import EventJournal
 from gogoguard_map_factory import GlimEditorManager, MapJobManager
-from gogoguard_route import NavigationWorkspaceStore, validate_workspace
+from gogoguard_route import NavigationWorkspaceStore, RouteManager, validate_workspace
 
 from .robot_client import RobotClient, RobotConnectionError
 
@@ -37,6 +37,7 @@ class FieldWorkstationApplication:
             self.data_root, self.maps, map_worker, cloud
         )
         self.navigation_workspaces = NavigationWorkspaceStore(self.data_root)
+        self.routes = RouteManager(self.data_root, site_id=self.site_id)
         self.catalog_path = self.data_root / "catalog.json"
         self._catalog_lock = threading.Lock()
         self._catalog = self._load_catalog()
@@ -223,12 +224,40 @@ class FieldWorkstationApplication:
         if job.get("state") != "complete":
             raise RuntimeError("only a completed GLIM map can be deployed")
         validate_workspace(self.navigation_workspaces.get(job_id), require_ready=True)
+        local_candidate = self.routes.prepare_map_job(job_id)
+        platform_bundle = self.routes.export_platform_bundle(job_id)
         self.robot.deploy_map(job, Path(str(job["artifact_root"])))
-        return self.robot.post(
+        robot_candidate = self.robot.post(
             "api/v1/navigation/prepare",
             {"job_id": job_id},
             timeout_s=max(self.robot.timeout_s, 60.0),
         )
+        return {
+            "robotCandidate": robot_candidate,
+            "localCandidate": {
+                "mapVersion": local_candidate["map_version"],
+                "routeId": local_candidate["route_id"],
+                "workspaceRevision": local_candidate["workspace_revision"],
+                "workspaceHash": local_candidate["workspace_hash"],
+            },
+            "platformBundle": platform_bundle,
+        }
+
+    def platform_map_bundle(self, job_id: str) -> dict:
+        self.maps.get(job_id)
+        try:
+            self.routes.get(job_id)
+        except KeyError:
+            self.routes.prepare_map_job(job_id)
+        return self.routes.export_platform_bundle(job_id)
+
+    def platform_map_bundle_file(self, job_id: str) -> Path:
+        descriptor = self.platform_map_bundle(job_id)
+        path = Path(descriptor["archive"]).resolve()
+        root = (self.data_root / "platform-assets").resolve()
+        if root not in path.parents or not path.is_file():
+            raise KeyError(job_id)
+        return path
 
     def start_navigation_runtime(self, candidate_id: str) -> dict:
         return self.robot.post(

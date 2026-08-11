@@ -697,6 +697,7 @@ function renderNavigation() {
   const patrolRunning = [
     'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
     'DETOURING', 'REJOINING', 'RETRYING', 'RECOVERING', 'SEARCHING_PATH',
+    'CHECKPOINT_PAUSING', 'CHECKPOINT_SETTLING', 'INSPECTING',
   ].includes(runtime.state);
   $('navigationCandidate').textContent = candidate ? `${candidate.map_version} · ${candidate.route_id}` : '等待地图与路线';
   $('runtimeBadge').textContent = runtimeRunning ? '运行中' : '未启动';
@@ -748,6 +749,9 @@ function renderNavigation() {
   if (runtime.state === 'PATROLLING' && runtime.reason === 'NAV2_GLOBAL_PATH_USING_MPPI') guidance = '已找到绕行路径：同一个 MPPI 会沿 Nav2 规划结果接回蓝色路线。';
   if (runtime.state === 'HOLDING') guidance = '定位暂时不可用，路线任务仍保留；定位恢复稳定后会从未完成位置继续。';
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
+  if (runtime.state === 'CHECKPOINT_PAUSING') guidance = '已到平台标记点，正在取消路线速度并关闭运动权。';
+  if (runtime.state === 'CHECKPOINT_SETTLING') guidance = '已到平台标记点，正在验证机器狗连续停稳，不是只记录“收到停止”。';
+  if (runtime.state === 'INSPECTING') guidance = '机器狗已停稳，正由 Nav2 在现有碰撞检测下原地旋转 360°；完成后从剩余路线继续。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；需要遥控机器狗时先点击“停止巡检并释放遥控权”，需要继续测试时再启动定位与 Nav2。`;
   if (operation?.state === 'failed') {
     guidance = `操作失败：${operation.message || operation.error || '未知错误'}。请不要重复点击，可查看下方诊断。`;
@@ -759,6 +763,11 @@ function renderNavigation() {
   $('prepareNavigation').hidden = assetReady || !selectedJobId;
   $('prepareNavigationHelp').hidden = $('prepareNavigation').hidden;
   $('prepareNavigation').disabled = !selectedJobId || !workspaceReady || operationBusy;
+  $('downloadPlatformBundle').hidden = !selectedJobId || !workspaceReady;
+  $('downloadPlatformBundleHelp').hidden = $('downloadPlatformBundle').hidden;
+  $('downloadPlatformBundle').href = selectedJobId
+    ? `/api/v1/map-jobs/${encodeURIComponent(selectedJobId)}/platform-bundle/file`
+    : '#';
   $('startRuntime').hidden = !assetReady || runtimeRunning;
   $('startRuntimeHelp').hidden = $('startRuntime').hidden;
   $('startRuntime').disabled = !candidate || operationBusy;

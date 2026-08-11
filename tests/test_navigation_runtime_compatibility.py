@@ -423,6 +423,24 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertNotIn(
             "cp -a third_party/locked_stack/src/go2_nav2_runtime", dockerfile
         )
+        combined = (
+            ROOT / "deployment/container/Dockerfile.combined"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "site-packages/go2_nav2_runtime/patrol_runtime_manager.py",
+            combined,
+        )
+        self.assertIn(
+            "share/go2_nav2_runtime/launch/active_map_patrol.launch.py",
+            combined,
+        )
+        self.assertIn(
+            "share/go2_nav2_runtime/config/go2_nav2_patrol.yaml",
+            combined,
+        )
+        self.assertNotIn(
+            "cp -a third_party/locked_stack/src/go2_nav2_runtime", combined
+        )
 
     def test_localization_v2_is_owned_without_mutating_the_frozen_source(self) -> None:
         patch = LOCALIZATION_V2_PATCH.read_text(encoding="utf-8")

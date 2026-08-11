@@ -324,6 +324,11 @@ class NavigationWorkspaceStore:
     def _legacy_path(self, job_id: str) -> Path:
         return self._artifact_root(job_id) / "navigation-workspace.json"
 
+    def path(self, job_id: str) -> Path:
+        """Return the persisted editable workspace, including legacy reads."""
+        current = self._path(job_id)
+        return current if current.is_file() else self._legacy_path(job_id)
+
     def get(self, job_id: str) -> dict[str, Any]:
         path = self._path(job_id)
         if not path.is_file():

@@ -38,6 +38,19 @@ class NavigationSupervisorClient:
     def stop_runtime(self) -> dict[str, Any]: return self._call("runtime.stop")
     def reset_localization(self) -> dict[str, Any]: return self._call("localization.reset")
     def start_patrol(self) -> dict[str, Any]: return self._call("patrol.start")
+    def start_selected_patrol(
+        self,
+        *,
+        expected_map_version: str | None = None,
+        expected_route_id: str | None = None,
+        mission_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._call(
+            "patrol.start_selected",
+            expected_map_version=expected_map_version,
+            expected_route_id=expected_route_id,
+            mission_plan=mission_plan,
+        )
     def stop_patrol(self) -> dict[str, Any]: return self._call("patrol.stop")
     def recover_runtime(self) -> dict[str, Any]: return self._call("runtime.recover")
     def profile(self) -> dict[str, Any]: return self._call("profile.get")

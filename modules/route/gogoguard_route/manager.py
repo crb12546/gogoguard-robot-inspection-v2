@@ -5,9 +5,11 @@ import json
 import math
 import os
 import re
+import shutil
 import struct
 import tempfile
 import threading
+import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -15,7 +17,7 @@ from .workspace import NavigationWorkspaceStore, validate_workspace, write_keepo
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 5
+CANDIDATE_GENERATION = 6
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -127,6 +129,42 @@ def _route_payload(route_id: str, points: list[tuple[float, float]]) -> dict[str
             yaw = math.atan2(point[1] - neighbor[1], point[0] - neighbor[0])
         waypoints.append({"x": point[0], "y": point[1], "yaw": yaw})
     return {"schema": "go2.route.v1", "routeId": route_id, "frame": "map", "waypoints": waypoints}
+
+
+def _execution_route_payload(route: dict[str, Any], spacing_m: float) -> dict[str, Any]:
+    """Mirror the runtime's sealed route interpolation for checkpoint binding."""
+    if not 0.05 <= float(spacing_m) <= 0.5:
+        raise ValueError("execution route spacing is invalid")
+    waypoints = list(route.get("waypoints") or [])
+    if len(waypoints) < 2:
+        raise ValueError("route requires at least two waypoints")
+    sampled = [dict(waypoints[0])]
+    for start, end in zip(waypoints, waypoints[1:]):
+        distance = math.hypot(float(end["x"]) - float(start["x"]), float(end["y"]) - float(start["y"]))
+        steps = max(1, int(math.ceil(distance / float(spacing_m))))
+        yaw_delta = math.atan2(
+            math.sin(float(end["yaw"]) - float(start["yaw"])),
+            math.cos(float(end["yaw"]) - float(start["yaw"])),
+        )
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            yaw = float(start["yaw"]) + yaw_delta * ratio
+            sampled.append(
+                {
+                    "routeProgressIndex": len(sampled),
+                    "x": float(start["x"]) + (float(end["x"]) - float(start["x"])) * ratio,
+                    "y": float(start["y"]) + (float(end["y"]) - float(start["y"])) * ratio,
+                    "yaw": math.atan2(math.sin(yaw), math.cos(yaw)),
+                }
+            )
+    sampled[0] = {"routeProgressIndex": 0, **sampled[0]}
+    return {
+        "schema": "gogoguard.execution_route.v1",
+        "routeId": route["routeId"],
+        "frame": "map",
+        "spacingM": float(spacing_m),
+        "waypoints": sampled,
+    }
 
 
 class RouteManager:
@@ -243,6 +281,9 @@ class RouteManager:
             }
             profile_path = destination / "runtime_profile.json"
             _atomic_json(profile_path, profile)
+            execution_route = _execution_route_payload(
+                route, float(profile["patrol"]["pathSampleSpacingM"])
+            )
             length_m = sum(
                 math.hypot(second[0] - first_point[0], second[1] - first_point[1])
                 for first_point, second in zip(planar, planar[1:])
@@ -257,6 +298,7 @@ class RouteManager:
                 "route_id": route_id,
                 "route_length_m": round(length_m, 3),
                 "route_waypoint_count": len(planar),
+                "execution_route_point_count": len(execution_route["waypoints"]),
                 "point_count": point_count,
                 "source_ply_sha256": source_ply_hash,
                 "source_map_json_sha256": source_map_json_hash,
@@ -290,3 +332,127 @@ class RouteManager:
         if not path.is_file():
             raise KeyError(candidate_id)
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def export_platform_bundle(self, candidate_id: str) -> dict[str, Any]:
+        """Build one portable map release without any robot-local paths."""
+        candidate = self.get(candidate_id)
+        workspace = validate_workspace(
+            self.workspaces.get(candidate_id), require_ready=True
+        )
+        route_id = str(candidate["route_id"])
+        output_root = self.data_root / "platform-assets" / candidate_id / route_id
+        output_root.mkdir(parents=True, exist_ok=True)
+        route_payload = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
+        runtime_profile = json.loads(
+            Path(candidate["runtime_profile"]).read_text(encoding="utf-8")
+        )
+        execution_route_path = output_root / "execution-route.json"
+        _atomic_json(
+            execution_route_path,
+            _execution_route_payload(
+                route_payload,
+                float(runtime_profile["patrol"]["pathSampleSpacingM"]),
+            ),
+        )
+        # Always materialize the validated workspace inside the portable
+        # release. Legacy jobs may still be read from the old read-only
+        # artifact location, which must never leak into a new bundle path.
+        portable_workspace_path = output_root / "navigation-workspace.json"
+        _atomic_json(portable_workspace_path, workspace)
+        sources: list[tuple[str, str, Path, str]] = [
+            ("localization_map", "map.pcd", Path(candidate["localization_map"]), "application/pcd"),
+            ("route", "route.json", Path(candidate["route"]), "application/json"),
+            (
+                "execution_route",
+                "execution-route.json",
+                execution_route_path,
+                "application/json",
+            ),
+            (
+                "allowed_area_workspace",
+                "navigation-workspace.json",
+                portable_workspace_path,
+                "application/json",
+            ),
+            (
+                "allowed_area_raster_metadata",
+                "allowed-area-mask.json",
+                Path(candidate["allowed_area_mask_metadata"]),
+                "application/json",
+            ),
+        ]
+        preview = self.data_root / "map-jobs" / candidate_id / "artifacts" / "map.svg"
+        if preview.is_file():
+            sources.append(("preview", "map.svg", preview, "image/svg+xml"))
+
+        files: list[dict[str, Any]] = []
+        for role, relative_name, source, content_type in sources:
+            if not source.is_file():
+                raise RuntimeError(f"platform map asset is missing: {role}")
+            target = output_root / relative_name
+            if source.resolve() != target.resolve():
+                temporary = target.with_name(f".{target.name}.part")
+                with source.open("rb") as reader, temporary.open("wb") as writer:
+                    shutil.copyfileobj(reader, writer, length=1024 * 1024)
+                    writer.flush()
+                    os.fsync(writer.fileno())
+                os.replace(temporary, target)
+            files.append(
+                {
+                    "role": role,
+                    "path": relative_name,
+                    "bytes": target.stat().st_size,
+                    "sha256": _file_hash(target),
+                    "contentType": content_type,
+                }
+            )
+
+        manifest = {
+            "schema": "gogoguard.map_asset_bundle.v1",
+            "siteId": self.site_id,
+            "mapVersion": candidate["map_version"],
+            "routeId": route_id,
+            "frame": "map",
+            "units": "metres",
+            "gravityAligned": True,
+            "workspaceRevision": candidate["workspace_revision"],
+            "workspaceHash": candidate["workspace_hash"],
+            "routeWaypointCount": candidate["route_waypoint_count"],
+            "executionRoutePointCount": candidate["execution_route_point_count"],
+            "routeLengthM": candidate["route_length_m"],
+            "pointCount": candidate["point_count"],
+            "allowedArea": {
+                "geometryPath": "navigation-workspace.json",
+                "robotRadiusM": workspace["robotRadiusM"],
+            },
+            "checkpointBinding": {
+                "mapVersionField": "mapVersion",
+                "routeIdField": "routeId",
+                "routeIndexField": "routeProgressIndex",
+                "executionRoutePath": "execution-route.json",
+            },
+            "files": files,
+        }
+        manifest_path = output_root / "manifest.json"
+        _atomic_json(manifest_path, manifest)
+        archive_path = output_root / f"{candidate_id}-{route_id}.zip"
+        temporary_archive = archive_path.with_name(f".{archive_path.name}.part")
+        with zipfile.ZipFile(
+            temporary_archive, "w", compression=zipfile.ZIP_STORED, allowZip64=True
+        ) as archive:
+            archive.write(manifest_path, "manifest.json")
+            for item in files:
+                archive.write(output_root / item["path"], item["path"])
+        os.replace(temporary_archive, archive_path)
+        return {
+            "schema": "gogoguard.map_asset_export.v1",
+            "mapVersion": candidate["map_version"],
+            "routeId": route_id,
+            "workspaceRevision": candidate["workspace_revision"],
+            "workspaceHash": candidate["workspace_hash"],
+            "manifest": str(manifest_path),
+            "archive": str(archive_path),
+            "archiveBytes": archive_path.stat().st_size,
+            "archiveSha256": _file_hash(archive_path),
+            "uploadState": "awaiting_platform_asset_api",
+        }

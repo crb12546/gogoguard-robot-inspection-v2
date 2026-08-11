@@ -6,6 +6,7 @@ from pathlib import Path
 
 from gogoguard_navigation.supervisor import NavigationSupervisorServer, SupervisorService
 from gogoguard_navigation.supervisor_client import NavigationSupervisorClient
+from gogoguard_navigation.manager import NavigationManager
 
 
 class FakeManager:
@@ -27,6 +28,9 @@ class FakeManager:
             "stopMoveConfirmed": True,
         }
     def start_patrol(self): return {"started": True}
+    def start_selected_patrol(self, **params):
+        self.starts += 1
+        return {"started": True, "params": params}
     def stop_patrol(self): return self.stop_runtime()
     def reset_localization(self): return {"reset": True}
     def prepare(self, job_id): return {"job_id": job_id}
@@ -37,6 +41,42 @@ class FakeManager:
 
 
 class NavigationSupervisorTest(unittest.TestCase):
+    def test_checkpoint_mission_is_bound_to_execution_route_and_360_spin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager(
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+            )
+            candidate = {
+                "map_version": "map-123456789abc",
+                "route_id": "route-r1",
+                "workspace_revision": 6,
+                "execution_route_point_count": 100,
+            }
+            mission = manager._configure_mission(
+                candidate,
+                {
+                    "missionId": "mission-1",
+                    "mapVersion": "map-123456789abc",
+                    "routeId": "route-r1",
+                    "checkpoints": [
+                        {"checkpointId": "point-1", "routeProgressIndex": 42}
+                    ],
+                },
+            )
+            self.assertEqual(mission["checkpoints"][0]["action"], "body_spin_360")
+            self.assertAlmostEqual(mission["checkpoints"][0]["targetYawRad"], 6.283185307)
+            self.assertEqual(len(mission["missionHash"]), 64)
+            with self.assertRaisesRegex(ValueError, "outside execution route"):
+                manager._configure_mission(
+                    candidate,
+                    {
+                        "missionId": "mission-2",
+                        "checkpoints": [
+                            {"checkpointId": "point-2", "routeProgressIndex": 100}
+                        ],
+                    },
+                )
+
     def test_long_operation_returns_receipt_and_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as temporary:
             socket_path = Path(temporary) / "supervisor.sock"
@@ -81,6 +121,39 @@ class NavigationSupervisorTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual(operation["state"], "complete")
             self.assertIn("整条路线结果以巡检状态为准", operation["message"])
+            server.shutdown()
+            server.server_close()
+
+    def test_platform_selected_patrol_is_version_bound_and_asynchronous(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            socket_path = Path(temporary) / "supervisor.sock"
+            manager = FakeManager()
+            server = NavigationSupervisorServer(
+                socket_path, SupervisorService(manager)
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            client = NavigationSupervisorClient(socket_path)
+            accepted = client.start_selected_patrol(
+                expected_map_version="map-v1", expected_route_id="route-v2"
+            )
+            self.assertIn(accepted["state"], {"accepted", "running", "complete"})
+            deadline = time.time() + 1.0
+            operation = None
+            while time.time() < deadline:
+                operation = client.status()["operations"][0]
+                if operation["state"] == "complete":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(operation["state"], "complete")
+            self.assertEqual(
+                operation["result"]["params"],
+                {
+                    "expected_map_version": "map-v1",
+                    "expected_route_id": "route-v2",
+                    "mission_plan": None,
+                },
+            )
             server.shutdown()
             server.server_close()
 

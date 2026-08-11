@@ -1,12 +1,12 @@
 {
   "id": "platform_edge",
-  "responsibility": "Outbound GoGoGuard heartbeat and allow-listed realtime interaction command bridge without navigation control",
+  "responsibility": "Outbound full-state GoGoGuard heartbeat plus allow-listed realtime interaction and selected-patrol lifecycle bridge",
   "runtime": ["robot"],
-  "status": "heartbeat_and_interaction_command_bridge_deployed_static_joint_test_active",
+  "status": "full_heartbeat_and_selected_patrol_lifecycle_implemented_offline_robot_release_pending",
   "codeRoots": ["services/platform_edge", "deployment/container/edge-entrypoint"],
-  "entrypoints": ["gogoguard_platform_edge.__main__:main"],
-  "dependsOn": ["contracts", "interaction"],
-  "consumes": ["navigation read-only status", "interaction read-only status", "robot capability profile", "GoGoGuard heartbeat response"],
-  "produces": ["gogoguard.robot_heartbeat.v1", "deduplicated start_live/stop_live Unix commands", "gogoguard.platform_edge_status.v1"],
+  "entrypoints": ["gogoguard_platform_edge.__main__:main", "gogoguard_platform_edge.pose_stream:main"],
+  "dependsOn": ["contracts", "interaction", "navigation", "device_io"],
+  "consumes": ["navigation read-only status", "/localization/pose", "Unitree battery status", "interaction read-only status", "robot capability profile", "GoGoGuard heartbeat response"],
+  "produces": ["gogoguard.robot_heartbeat.v1 with null-safe pose and real battery", "gogoguard.robot_pose.v1 latest-only LiveKit DataChannel stream", "deduplicated start_live/stop_live and selected-route start_patrol/stop_patrol Unix commands", "sanitized gogoguard command accepted/failed result receipts", "gogoguard.platform_edge_status.v1"],
   "sourceProvenance": ["GoGoGuard P1.5 platform delivery dated 2026-08-09", "current platform test endpoint accepts robotId only; optional per-device bearer support is implemented but production device authentication remains an explicit platform gap", "2026-08-11 LLYJ0001 r8 posts complete five-second heartbeats to the platform-frozen HTTP IP endpoint, receives start_live, and reports online without motion authority; production TLS and per-device authentication remain open"]
 }
