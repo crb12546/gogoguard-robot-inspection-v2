@@ -17,13 +17,13 @@ robot loop has produced real maps and completed real route patrols. V6 mobility
 is now frozen as the operator-accepted release baseline. The previously
 independent realtime-dialogue implementation has been merged. The selected-
 patrol platform lifecycle, complete heartbeat, real battery observation, 10 Hz
-map-bound pose uplink and true-stop/body-spin checkpoint slice are deployed in
-the current local-checkpoint-r1 release while retaining separate module
-boundaries and no unsolicited motion. The frozen-contract recording-as-
-configuration closure and the local operator checkpoint-validation workflow
-are built for ARM64, deployed to the robot and running on the Mac workstation.
-They have not yet executed or physically accepted an end-to-end checkpoint
-mission.
+map-bound pose uplink and true-stop checkpoint slice are deployed while
+retaining separate module boundaries and no unsolicited motion. The current
+checkpoint-view-r1 release aligns one recorded photo camera-first, uses only a
+minimum body-turn fallback and supports safe repeated publication after route,
+green-area or checkpoint edits. The workflow is deployed to the robot and Mac
+workstation but has not yet physically completed and accepted an end-to-end
+checkpoint mission.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -31,14 +31,14 @@ mission.
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active | Long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area, and has published a real generation-5 Nav2 keepout candidate. Deployed generation 7 also binds recorded checkpoints to the optimized execution route and creates a checksummed PCD/route/allowed-area/checkpoint/sample bundle with resumable SaaS upload | No generation-7 bundle has been platform-verified or activated; activation remains platform/operator owned |
+| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area. Generation 7 binds recorded checkpoints to the optimized execution route and creates a checksummed PCD/route/allowed-area/checkpoint/sample bundle. Real map `map-70fb209b5b20` revision 4 is published to the robot and verified by GoGoGuard SaaS | Platform activation remains platform/operator owned; repeat edits need field repetition |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is running at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, hold-to-adjust Z1Pro controls, recording-time checkpoint/sample capture, checkpoint audit, resumable platform upload and local checkpoint validation. At a checkpoint it shows the recorded JPEG beside the live Z1Pro view and offers continue/retake/skip. The LLYJ0001 token is injected only into the current process environment | New controls remain an engineering/field UI until operator acceptance; restart requires secure token reinjection because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
-| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime can true-stop and body-spin, record the camera pose/sample, restore recorded body/gimbal pose, expose `capture_ready`, accept continue/retake/skip and resume the retained suffix. Local-operator missions remain stopped indefinitely until the workstation decision; platform missions retain their frozen announcement/verdict/timeout behavior | The new closure is deployed but dormant; physical checkpoint, Z1Pro movement and captured-evidence acceptance remain pending |
+| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime can true-stop, restore one recorded optical direction camera-first, use a minimum body-turn fallback, verify Z1Pro feedback, expose `capture_ready`, accept continue/retake/skip and resume the retained suffix. Local-operator missions remain stopped indefinitely until the workstation decision; platform missions retain their frozen announcement/verdict/timeout behavior | Physical camera-first checkpoint, captured-evidence and suffix-completion acceptance remain pending |
 | Mission/task system | The deployed platform adapter may start/stop only the selected map-bound route and implements the frozen reliable checkpoint event sequence, announcement wait, verdict dedupe/ack, retake limit, timeout and mission-context pose stream. A separate `local_operator` decision mode composes the same executor without letting the platform adapter race the workstation | Run and accept one real local checkpoint mission and one frozen platform MissionPlan; complete mission/report aggregation remains platform work |
-| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed without automatic activation | Real SaaS upload verification, activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
+| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The real revision-4 bundle is SaaS-verified without automatic activation | Activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
@@ -172,20 +172,22 @@ boundaries and receipts to distinguish them.
   `agent/three-end-field-workstation`. Operator-accepted V6 was frozen in
   `922b301`; the independent interaction branch was merged in `6e842d1`; the
   complete recording-to-checkpoint closure is `f4dd9ac`; and the local operator
-  checkpoint-validation workflow is source commit `cadba9b`. These commits
-  remain local until explicitly pushed. Always check `git status` for a later
-  handoff commit. Checkpoint inspection code is deployed but remains dormant
-  until the operator explicitly starts a physical test.
+  checkpoint-validation workflow is source commit `cadba9b`; camera-first
+  alignment and revision-safe publication are source commit `074f379`. These
+  commits remain local until explicitly pushed. Always check `git status` for
+  a later handoff commit. Checkpoint inspection code is deployed but remains
+  dormant until the operator explicitly starts a physical test.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260811-local-checkpoint-r1`, built
-  from `cadba9b` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-
+  `gogoguard-robot-inspection:v2-edge-20260811-checkpoint-view-r1`, built
+  from `074f379` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-
   list ID is
-  `sha256:1849c62b61a2b0d3e4ca7bc50718581e9f96505cb825b8c0e44cbc002273d6b0`;
+  `sha256:fab68484208b1ce28363543fe0bd00ffe5938c92ded93678c33678dcca1e435f`;
   the robot-loaded config ID is
-  `sha256:1311b71ffc1b137e0326fdecec29ce7cb58ab49d3041a8689279c79fd6f8ed23`.
+  `sha256:da8518de4839422d138db342de498f63916adb4c41dd5c381e20b0b6610b4dda`.
   The enabled service is active with zero restarts, platform heartbeat is
   online through the frozen HTTP IP endpoint, Z1Pro status is ready and the
-  live static device receipt reported LiDAR 10.8 Hz and odometry 9.8 Hz. The r5
+  live static device receipt reported LiDAR 10.9 Hz, IMU 33.8 Hz and odometry
+  9.9 Hz. The r5
   realtime audio/video behavior and peak-limited `outputGain=3.0` are retained.
   Nav2, patrol runtime and the Unitree motion bridge are stopped and UDP 5005
   is unbound. Always re-read live robot state before deployment or motion
@@ -193,10 +195,11 @@ boundaries and receipts to distinguish them.
 - The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
   deployed and has received an operator-accepted physical patrol. The selected
   robot candidate is
-  generation 5 for `map-6855ba54ae11`, bound to saved workspace revision 4 and
-  its green allowed area. The KeepoutFilter assets were generated and verified; starting the
-  runtime and completing further physical patrols remain explicit operator
-  actions.
+  generation 7 for `map-70fb209b5b20`, bound to
+  `route-70fb209b5b20-workspace-r4`, its saved green allowed area and two
+  route-bound checkpoints. Repeated robot import succeeded while immutable
+  `map.ply`/`map.json` hashes remained authoritative. Starting the runtime and
+  completing further physical patrols remain explicit operator actions.
 - The commissioned Mac workstation was restarted from this worktree and is
   listening on `http://127.0.0.1:8080/`. Robot, map catalog, Z1Pro and new
   checkpoint/platform routes return valid responses. The selected real map
@@ -2006,7 +2009,7 @@ requires an explicit success receipt.
   capabilities and platform proxies returned HTTP 200. No patrol, localization
   reset, body motion or gimbal action was started during deployment.
 
-## 2026-08-11 camera-first checkpoint and map-revision republish correction implemented locally
+## 2026-08-11 camera-first checkpoint and map-revision republish correction deployed statically
 
 - The first real two-point local-checkpoint attempt reached `cp_01`, proved a
   true stop and accepted a Nav2 Spin goal, but the Go2 did not physically turn
@@ -2051,33 +2054,51 @@ requires an explicit success receipt.
   edited asset and isolates the former failure to robot-side repeated import.
 - Offline receipt: all 198 repository unit/integration tests pass, Python
   compilation and JavaScript/UI smoke pass, generated repository knowledge and
-  container contracts validate, and `git diff --check` is clean. The correction
-  is not yet a robot deployment receipt; build/install and static robot
-  acceptance follow separately, with no autonomous motion authorized.
+  container contracts validate, and `git diff --check` is clean. Source commit
+  `074f379` produced the 44-layer Linux/ARM64 image
+  `gogoguard-robot-inspection:v2-edge-20260811-checkpoint-view-r1`, manifest-list
+  ID `sha256:fab68484208b1ce28363543fe0bd00ffe5938c92ded93678c33678dcca1e435f`
+  and robot config ID
+  `sha256:da8518de4839422d138db342de498f63916adb4c41dd5c381e20b0b6610b4dda`.
+  Its 1,389,732,864-byte archive passed SHA-256
+  `8fc719030fc7ac8069c551260d86e4b24d7d18f5406e61a97c2c13c596cc53cf`
+  on Mac and robot.
+- LLYJ0001 installed and started the image with the commissioned values and
+  temporary ICP/IP joint-test profile preserved. The service is enabled,
+  active and at zero restarts; platform, Z1Pro and camera are online, LiDAR is
+  10.9 Hz and odometry is 9.9 Hz. Nav2, patrol runtime and the Unitree motion
+  bridge are absent, UDP 5005 is unbound and no motion was authorized. Repeated
+  publication then committed workspace revision 4 and its current
+  `checkpoints.json` to the robot; both Mac and robot now select
+  `route-70fb209b5b20-workspace-r4`. The workstation was restarted from the same
+  source with the device token only in process memory, and the platform upload
+  remains `verified`, 100 percent complete and not stale.
 
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
 `agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
 source, `6e842d1` as the historical interaction merge, `f4dd9ac` as the
-recording-to-checkpoint closure and `cadba9b` as the local checkpoint-validation
-workflow. Treat `703576c` and start-fence-r1 with the digests above as the latest
-verified robot deployment. The old
+recording-to-checkpoint closure, `cadba9b` as the local checkpoint-validation
+workflow and `074f379` as the camera-first/revision-publication correction.
+Treat checkpoint-view-r1 with the digests above as the latest verified robot
+deployment. The old
 realtime worktrees are evidence/provenance only and must not be deployed.
 
-Start-fence-r1 remains the installed and statically accepted robot release,
+Checkpoint-view-r1 remains the installed and statically accepted robot release,
 and the LLYJ0001 device token is injected only into the currently running Mac
 workstation. Physical acceptance must begin only when the operator has stood
 the dog up, started localization/Nav2 and explicitly clicks the local validation
 start. Use the real two-point `map-70fb209b5b20` mission: verify true stop,
-recorded body/camera pose, optional spin, left-reference/right-live comparison,
+camera-first recorded optical direction, minimum body-turn fallback only when
+needed, left-reference/right-live comparison,
 indefinite hold, continue/retake/skip, retained-suffix continuation and final
 route completion. Then upload and have the platform activate the generation-7
 bundle and repeat one platform-owned checkpoint mission against the frozen
 event/verdict contract.
 
 First have the operator listen to a normal multi-sentence platform response on
-local-checkpoint-r1. Compare the source/output RMS and speaker-buffer counters with the
+checkpoint-view-r1. Compare the source/output RMS and speaker-buffer counters with the
 physical result; do not increase hardware volume beyond 10. If loudness is
 still inconsistent, freeze platform TTS loudness and correlate one round's
 pre-LiveKit PCM, LiveKit loss/jitter/NACK/concealment and dog decoded timing.
@@ -2091,9 +2112,9 @@ realtime path; the server already proved the selected pair is UDP 7882 direct,
 while TURN remains fallback. Do not change the frozen V6 mobility parameters or
 give interaction arbitrary motion authority while closing these receipts.
 
-The last recorded robot state had local-checkpoint-r1 active with zero restarts,
+The last recorded robot state had checkpoint-view-r1 active with zero restarts,
 platform online and the r5 peak-limited 3x playback code retained. Static device
-status reported LiDAR 10.8 Hz, IMU 25.5 Hz and odometry 9.8 Hz. Nav2, patrol
+status reported LiDAR 10.9 Hz, IMU 33.8 Hz and odometry 9.9 Hz. Nav2, patrol
 runtime and the Unitree motion bridge were stopped and UDP 5005 was unbound.
 This is a receipt, not a promise of current live state: a new task must re-read
 the robot before any deployment, and must obtain explicit authorization before

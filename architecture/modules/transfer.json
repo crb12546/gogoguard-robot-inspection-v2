@@ -2,7 +2,7 @@
   "id": "transfer",
   "responsibility": "Immutable map artifact and revisioned navigation/checkpoint exchange across robot, workstation and cloud boundaries",
   "runtime": ["robot", "workstation"],
-  "status": "immutable_map_plus_mutable_navigation_workspace_and_route_bound_checkpoints_republish_implemented_deployment_pending",
+  "status": "immutable_map_plus_mutable_navigation_workspace_and_route_bound_checkpoints_republish_field_verified",
   "codeRoots": ["modules/transfer"],
   "entrypoints": ["gogoguard_transfer.edge:EdgeArtifactExchange", "gogoguard_field_workstation.robot_client:RobotClient"],
   "dependsOn": ["contracts", "evidence"],
