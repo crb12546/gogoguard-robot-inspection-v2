@@ -27,7 +27,6 @@ SDK_MOTION_PROBE = Path(
     "go2_sdk2_motion_probe"
 )
 UNITREE_SDK_LIBRARY_PATH = "/opt/gogoguard/deps/lib:/usr/local/lib"
-RUNTIME_MANAGER_READY_TIMEOUT_S = 12.0
 
 
 class NavigationManager:
@@ -422,35 +421,14 @@ class NavigationManager:
                 receiver_process = self._receiver_process
                 log_handle = self._log_handle
                 receiver_log_handle = self._receiver_log_handle
-                # The launch process can stay alive for several seconds while
-                # a required child fails.  Do not report startup complete until
-                # the runtime manager has published this generation's ID.
-                ready = False
-                readiness_deadline = (
-                    time.monotonic() + RUNTIME_MANAGER_READY_TIMEOUT_S
-                )
-                while (
-                    process.poll() is None
-                    and time.monotonic() < readiness_deadline
-                ):
-                    observed = (
-                        self._read_json(Path(status_path))
-                        if status_path is not None
-                        else None
-                    )
-                    if observed and observed.get("runtimeInstanceId"):
-                        ready = True
-                        break
-                    time.sleep(0.1)
-                if not ready:
-                    if process.poll() is None:
-                        exit_code = self._terminate_process(
-                            process, interrupt_timeout=5, terminate_timeout=3
-                        )
-                        failure = "runtime manager readiness timeout"
-                    else:
-                        exit_code = process.returncode
-                        failure = f"exit {exit_code}"
+                # Starting the process and proving that localization/costmaps
+                # are ready are separate lifecycle boundaries.  Catch an
+                # immediate launch/configuration failure here; the selected-
+                # patrol operation below owns the generation, localization and
+                # post-clear costmap readiness checks before motion is allowed.
+                time.sleep(1.25)
+                if process.poll() is not None:
+                    exit_code = process.returncode
                     self._process = None
                     self._receiver_process = None
                     self._log_handle = None
@@ -465,7 +443,7 @@ class NavigationManager:
                     detail = self._runtime_failure_detail(log_path)
                     suffix = f": {detail}" if detail else ""
                     raise RuntimeError(
-                        f"Nav2 failed readiness check: {failure}{suffix}"
+                        f"Nav2 failed readiness check: exit {exit_code}{suffix}"
                     )
                 threading.Thread(
                     target=self._reap_runtime_generation,

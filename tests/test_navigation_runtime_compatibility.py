@@ -589,6 +589,86 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertEqual(manager._last_runtime_exit, 1)
         self.assertEqual(manager._last_receiver_exit, -2)
 
+    def test_running_launch_is_not_killed_while_localization_initializes(self) -> None:
+        class Process:
+            def __init__(self, pid):
+                self.returncode = None
+                self.pid = pid
+
+            def poll(self):
+                return self.returncode
+
+        receiver = Process(999998)
+        runtime = Process(999999)
+        candidate = {
+            "candidate_generation": 5,
+            "candidate_id": "map-123456789abc",
+            "map_version": "map-123456789abc",
+            "route_id": "route-r5",
+            "localization_map": "/tmp/map.pcd",
+            "route": "/tmp/route.json",
+            "runtime_profile": "/tmp/runtime_profile.json",
+            "allowed_area_mask": "/tmp/allowed-area-mask.yaml",
+            "allowed_area_mask_image": "/tmp/allowed-area-mask.pgm",
+            "localization_map_hash": "a",
+            "route_hash": "b",
+            "runtime_profile_hash": "c",
+            "allowed_area_mask_hash": "d",
+            "allowed_area_mask_image_hash": "e",
+        }
+
+        class Routes:
+            def get(self, candidate_id):
+                return candidate
+
+        class Profiles:
+            def get(self):
+                return DEFAULT_PROFILE
+
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager.__new__(NavigationManager)
+            manager.site_id = "site"
+            manager.robot_id = "robot"
+            manager.sensor_id = "sensor"
+            manager.log_root = Path(temporary)
+            manager.status_path = Path(temporary) / "status.json"
+            manager.routes = Routes()
+            manager.profiles = Profiles()
+            manager._lock = threading.Lock()
+            manager._candidate = None
+            manager._process = None
+            manager._receiver_process = None
+            manager._log_handle = None
+            manager._receiver_log_handle = None
+            manager._last_runtime_exit = None
+            manager._last_receiver_exit = None
+            manager._launched_mission_hash = None
+            manager.status = lambda: {
+                "runtime_process": {"running": runtime.poll() is None},
+                "motion_bridge": {"running": receiver.poll() is None},
+            }
+
+            with mock.patch(
+                "gogoguard_navigation.manager.subprocess.Popen",
+                side_effect=[receiver, runtime],
+            ), mock.patch(
+                "gogoguard_navigation.manager.time.sleep"
+            ), mock.patch(
+                "gogoguard_navigation.manager.threading.Thread"
+            ) as thread, mock.patch.object(
+                manager, "_terminate_process"
+            ) as terminate:
+                result = manager.start_runtime("map-123456789abc")
+
+            self.assertTrue(result["runtime_process"]["running"])
+            self.assertTrue(result["motion_bridge"]["running"])
+            self.assertEqual(manager._launched_mission_hash, "")
+            thread.return_value.start.assert_called_once_with()
+            terminate.assert_not_called()
+
+            manager._log_handle.close()
+            manager._receiver_log_handle.close()
+
     def test_old_candidate_is_rejected_before_motion_bridge_start(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "重新点击"):
             NavigationManager._validate_runtime_candidate(
