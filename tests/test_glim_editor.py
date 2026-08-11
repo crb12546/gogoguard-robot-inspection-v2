@@ -54,6 +54,10 @@ class GlimEditorTest(unittest.TestCase):
         (root / "map.ply").write_bytes(b"ply\n")
         (root / "overview.svg").write_text("<svg/>", encoding="utf-8")
         (root / "glim-build.json").write_text("{}", encoding="utf-8")
+        (root / "trajectory-poses.json").write_text(
+            '{"schema":"gogoguard.optimized_trajectory.v1","poses":[]}',
+            encoding="utf-8",
+        )
         return root
 
     def test_cleaned_map_is_registered_as_a_new_immutable_child(self):

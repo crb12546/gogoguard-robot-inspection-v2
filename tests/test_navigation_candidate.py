@@ -4,6 +4,7 @@ import struct
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from gogoguard_route import NavigationWorkspaceError, NavigationWorkspaceStore, RouteManager
@@ -33,13 +34,51 @@ class NavigationCandidateTest(unittest.TestCase):
             for point in points:
                 handle.write(struct.pack("<ffff", *point))
         trajectory = []
+        optimized_poses = []
+        self.trajectory_start = datetime(2026, 8, 11, 1, 2, 3, tzinfo=timezone.utc)
         for index in range(21):
             trajectory.append([index * 0.10, 0.0, 0.0])
+            yaw = math.radians(-72.447) if index == 10 else 0.0
+            optimized_poses.append(
+                {
+                    "timestamp": self.trajectory_start.timestamp() + index * 0.1,
+                    "x": index * 0.10,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "qx": 0.0,
+                    "qy": 0.0,
+                    "qz": math.sin(yaw / 2.0),
+                    "qw": math.cos(yaw / 2.0),
+                }
+            )
         # The final vertical posture change has no planar motion and must not
         # create a route tail.
-        trajectory.extend([[2.0, 0.0, -index * 0.02] for index in range(10)])
+        for index in range(10):
+            trajectory.append([2.0, 0.0, -index * 0.02])
+            optimized_poses.append(
+                {
+                    "timestamp": self.trajectory_start.timestamp() + (21 + index) * 0.1,
+                    "x": 2.0,
+                    "y": 0.0,
+                    "z": -index * 0.02,
+                    "qx": 0.0,
+                    "qy": 0.0,
+                    "qz": 0.0,
+                    "qw": 1.0,
+                }
+            )
         (self.artifacts / "map.json").write_text(
             json.dumps({"source": "cloud-glim", "trajectory": trajectory}),
+            encoding="utf-8",
+        )
+        (self.artifacts / "trajectory-poses.json").write_text(
+            json.dumps(
+                {
+                    "schema": "gogoguard.optimized_trajectory.v1",
+                    "frame": "map",
+                    "poses": optimized_poses,
+                }
+            ),
             encoding="utf-8",
         )
         self.artifacts.chmod(0o550)
@@ -89,7 +128,7 @@ class NavigationCandidateTest(unittest.TestCase):
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 7)
+        self.assertEqual(candidate["candidate_generation"], 8)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -134,7 +173,13 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(after, before)
         self.assertEqual(len(second["source_map_json_sha256"]), 64)
+        self.assertEqual(len(second["source_trajectory_poses_sha256"]), 64)
         self.assertIsNone(second["source_checkpoint_sha256"])
+
+        rebound = RouteManager(self.root, site_id="other-site").prepare_map_job(
+            self.job_id
+        )
+        self.assertEqual(rebound["site_id"], "other-site")
 
     def test_prepare_rebuilds_when_source_checkpoint_asset_changes(self):
         manager = RouteManager(self.root, site_id="test-site")
@@ -225,7 +270,17 @@ class NavigationCandidateTest(unittest.TestCase):
         inspection.mkdir(parents=True)
         with (recording / "snapshots.jsonl").open("w", encoding="utf-8") as handle:
             for index in range(21):
-                handle.write(json.dumps({"pose": {"x": index * 0.1, "y": 0, "yaw": 0}}) + "\n")
+                handle.write(
+                    json.dumps(
+                        {
+                            "captured_at": (
+                                self.trajectory_start + timedelta(seconds=index * 0.1)
+                            ).isoformat(timespec="milliseconds"),
+                            "pose": {"x": index * 0.1, "y": 0, "yaw": 0},
+                        }
+                    )
+                    + "\n"
+                )
         (inspection / "cp_01-main.jpg").write_bytes(b"\xff\xd8sample\xff\xd9")
         (inspection / "checkpoints.json").write_text(
             json.dumps(
@@ -256,9 +311,52 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertTrue(checkpoints["audit"]["ready"])
         self.assertEqual(checkpoints["checkpoints"][0]["checkpointId"], "cp_01")
         self.assertEqual(checkpoints["checkpoints"][0]["camera"]["tilt"], 22.5)
+        self.assertAlmostEqual(
+            math.degrees(checkpoints["checkpoints"][0]["bodyYaw"]),
+            -72.447,
+            places=3,
+        )
+        self.assertEqual(
+            checkpoints["checkpoints"][0]["binding"]["orientationSource"],
+            "glim_quaternion",
+        )
+        self.assertEqual(
+            checkpoints["checkpoints"][0]["binding"]["optimizedTrajectoryIndex"],
+            10,
+        )
+        self.assertLessEqual(
+            checkpoints["checkpoints"][0]["binding"]["timestampDeltaS"], 0.001
+        )
         with zipfile.ZipFile(descriptor["archive"]) as archive:
             self.assertIn("checkpoints.json", archive.namelist())
             self.assertIn("samples/cp_01-cp_01-main.jpg", archive.namelist())
+
+    def test_checkpoint_binding_fails_closed_without_capture_timestamp(self):
+        session_id = "20260811T010203Z-1234abcd"
+        (self.artifacts.parent / "job.json").write_text(
+            json.dumps({"session_id": session_id}), encoding="utf-8"
+        )
+        recording = self.root / "recordings" / session_id / "samples"
+        inspection = recording / "inspection"
+        inspection.mkdir(parents=True)
+        (recording / "snapshots.jsonl").write_text(
+            json.dumps({"pose": {"x": 0.0, "y": 0.0, "yaw": 0.0}}) + "\n",
+            encoding="utf-8",
+        )
+        (inspection / "checkpoints.json").write_text(
+            json.dumps(
+                {
+                    "checkpoints": [
+                        {"checkpointId": "cp_01", "recordingSampleIndex": 0}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = RouteManager(self.root, site_id="test-site")
+        manager.prepare_map_job(self.job_id)
+        with self.assertRaisesRegex(ValueError, "no capture timestamp"):
+            manager.checkpoint_descriptor(self.job_id)
 
 
 if __name__ == "__main__":

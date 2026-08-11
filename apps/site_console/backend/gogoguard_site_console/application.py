@@ -40,6 +40,11 @@ class InspectionApplication:
             port=int(gimbal_config.get("port") or 2332),
             timeout_s=float(gimbal_config.get("timeout_s") or 1.5),
             command_hz=float(gimbal_config.get("command_hz") or 40.0),
+            move_timeout_s=float(gimbal_config.get("move_timeout_s") or 3.0),
+            angle_tolerance_deg=float(
+                gimbal_config.get("angle_tolerance_deg") or 2.0
+            ),
+            confirmation_samples=int(gimbal_config.get("confirmation_samples") or 3),
             commissioned=mode == "demo" or bool(gimbal_config.get("commissioned", False)),
         )
         self._gimbal_angles = {"pan": 0.0, "tilt": 0.0, "roll": 0.0}
@@ -105,14 +110,40 @@ class InspectionApplication:
         with self._gimbal_lock:
             angles = self._validated_gimbal_angles(payload)
             pan, tilt, roll = angles["pan"], angles["tilt"], angles["roll"]
-            if self.mode != "demo":
-                self.gimbal.move_for_inspection(
-                    pan_body_deg=pan,
-                    tilt_euler_deg=tilt,
-                    roll_euler_deg=roll,
+            try:
+                if self.mode == "demo":
+                    actual = {"pan": pan, "tilt": tilt, "roll": roll}
+                else:
+                    reply = self.gimbal.move_for_inspection(
+                        pan_body_deg=pan,
+                        tilt_euler_deg=tilt,
+                        roll_euler_deg=roll,
+                    )
+                    actual = {
+                        "pan": float(reply.relative_pan_deg),
+                        "tilt": float(reply.relative_tilt_deg),
+                        "roll": float(reply.relative_roll_deg),
+                    }
+                self._gimbal_angles = actual
+                self.journal.append(
+                    "gimbal.move_converged",
+                    target=angles,
+                    actual=actual,
+                    tolerance_deg=self.gimbal.angle_tolerance_deg,
                 )
-            self._gimbal_angles = {"pan": pan, "tilt": tilt, "roll": roll}
-            return self.gimbal_status()
+                return {
+                    **self.gimbal.capability(),
+                    "online": True,
+                    "angles": dict(self._gimbal_angles),
+                }
+            except Exception as exc:
+                self.journal.append(
+                    "gimbal.move_failed",
+                    target=angles,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+                raise
 
     def _validated_gimbal_angles(self, payload: dict) -> dict[str, float]:
         if not isinstance(payload, dict):

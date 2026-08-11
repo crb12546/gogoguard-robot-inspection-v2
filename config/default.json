@@ -19,6 +19,9 @@
     "port": 2332,
     "timeout_s": 1.5,
     "command_hz": 40,
+    "move_timeout_s": 3.0,
+    "angle_tolerance_deg": 2.0,
+    "confirmation_samples": 3,
     "commissioned": true
   }
 }

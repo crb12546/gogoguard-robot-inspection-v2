@@ -18,12 +18,13 @@ is now frozen as the operator-accepted release baseline. The previously
 independent realtime-dialogue implementation has been merged. The selected-
 patrol platform lifecycle, complete heartbeat, real battery observation, 10 Hz
 map-bound pose uplink and true-stop checkpoint slice are deployed while
-retaining separate module boundaries and no unsolicited motion. The current
-checkpoint-view-r1 release aligns one recorded photo camera-first, uses only a
-minimum body-turn fallback and supports safe repeated publication after route,
-green-area or checkpoint edits. The workflow is deployed to the robot and Mac
-workstation but has not yet physically completed and accepted an end-to-end
-checkpoint mission.
+retaining separate module boundaries and no unsolicited motion. The installed
+checkpoint release aligns one recorded photo camera-first, but its published
+checkpoint yaw was field-proven wrong. The local generation-8 correction now
+binds the recorded sample directly to GLIM timestamp/quaternion orientation and
+streams Z1Pro control until feedback converges. It is prepared and tested on
+the Mac, not yet deployed to the robot or accepted in a complete checkpoint
+mission.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -31,12 +32,12 @@ checkpoint mission.
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active | Long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area. Generation 7 binds recorded checkpoints to the optimized execution route and creates a checksummed PCD/route/allowed-area/checkpoint/sample bundle. Real map `map-70fb209b5b20` revision 4 is published to the robot and verified by GoGoGuard SaaS | Platform activation remains platform/operator owned; repeat edits need field repetition |
+| Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area. Local generation 8 preserves the GLIM timestamp/quaternion timeline and binds recorded checkpoints by time. Real map `map-70fb209b5b20` revision 6 is prepared locally; revision 5 remains on the robot | Deploy revision 6, repeat both checkpoints, then upload/activate only after local acceptance |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is running at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, hold-to-adjust Z1Pro controls, recording-time checkpoint/sample capture, checkpoint audit, resumable platform upload and local checkpoint validation. At a checkpoint it shows the recorded JPEG beside the live Z1Pro view and offers continue/retake/skip. The LLYJ0001 token is injected only into the current process environment | New controls remain an engineering/field UI until operator acceptance; restart requires secure token reinjection because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
-| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime has now reached the first real local checkpoint, produced a true-stop receipt and restored its recorded optical direction camera-only with zero body turn. It can expose `capture_ready`, accept continue/retake/skip and resume the retained suffix. Local-operator missions remain stopped indefinitely until the workstation decision; platform missions retain their frozen announcement/verdict/timeout behavior | Operator comparison/capture, suffix continuation, second checkpoint and final mission completion remain pending |
+| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime reached the first real local checkpoint and produced a true-stop receipt. Field comparison proved the generation-7 checkpoint yaw was wrong. Local generation 8 resolves `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions, sends Z1Pro at the official bounded rate until three feedback samples converge, journals target/actual/error and records map-frame localization pose | Build/deploy the local correction tomorrow and verify comparison/capture, suffix continuation, second checkpoint and final mission completion |
 | Mission/task system | The deployed platform adapter may start/stop only the selected map-bound route and implements the frozen reliable checkpoint event sequence, announcement wait, verdict dedupe/ack, retake limit, timeout and mission-context pose stream. A separate `local_operator` decision mode composes the same executor without letting the platform adapter race the workstation | Run and accept one real local checkpoint mission and one frozen platform MissionPlan; complete mission/report aggregation remains platform work |
 | SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The real revision-4 bundle is SaaS-verified without automatic activation | Activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
@@ -192,11 +193,13 @@ boundaries and receipts to distinguish them.
   live static device receipt reported LiDAR 10.0 Hz, IMU 44.9 Hz and odometry
   9.0 Hz. The r5
   realtime audio/video behavior and peak-limited `outputGain=3.0` are retained.
-  The operator subsequently started the real local mission. The latest receipt
-  has the runtime paused and motion-unauthorized at checkpoint `cp_01`, with a
-  true zero-speed stop and camera-only observation alignment. Always re-read
-  live robot state before deployment or motion because the operator can change
-  it between tasks.
+  The operator subsequently started the real local mission. It produced a true
+  zero-speed stop at `cp_01`, but the camera comparison failed because the
+  published checkpoint yaw was 16.623 degrees left of the timestamp-matched
+  GLIM quaternion yaw. The mission was then explicitly stopped: patrol runtime,
+  Nav2 motion path and Unitree motion bridge stopped, UDP 5005 was released and
+  the robot was removed for charging. Always re-read live robot state before
+  deployment or motion because the operator can change it between tasks.
 - The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
   deployed and has received an operator-accepted physical patrol. The selected
   robot candidate is
@@ -205,14 +208,21 @@ boundaries and receipts to distinguish them.
   route-bound checkpoints. Repeated robot import succeeded while immutable
   `map.ply`/`map.json` hashes remained authoritative. Starting the runtime and
   completing further physical patrols remain explicit operator actions.
+- A Mac-only generation-8 candidate is now prepared for the same map as
+  `route-70fb209b5b20-workspace-r6`. It keeps the accepted blue route, green
+  area and V6 mobility parameters unchanged, while correcting checkpoint yaw
+  from GLIM timestamps/quaternions. This local asset is not installed on the
+  robot and does not supersede the deployed revision-5 receipt until tomorrow's
+  explicitly authorized deployment succeeds.
 - The commissioned Mac workstation was restarted from this worktree and is
   listening on `http://127.0.0.1:8080/`. Robot, map catalog, Z1Pro and new
   checkpoint/platform routes return valid responses. The selected real map
-  `map-70fb209b5b20` is on workspace revision 5 and reports two route-bound
-  checkpoints. The revision-4 platform upload remains verified but is now
-  correctly stale until revision 5 is uploaded. The separately delivered
-  LLYJ0001 asset-upload token is present only in the current workstation process
-  environment; it was not written to the repository, Markdown, logs or robot.
+  `map-70fb209b5b20` is now on local workspace revision 6 and reports two
+  timestamp/quaternion-bound checkpoints. The older platform upload is
+  correctly stale until revision 6 is locally accepted and uploaded. The
+  separately delivered LLYJ0001 asset-upload token is present only in the
+  current workstation process environment; it was not written to the
+  repository, Markdown, logs or robot.
 - Alibaba Cloud has the official GLIM editor launcher and exporter with hashes
   `b73d22d8c75654ee931df5f962063378688f81a9b20490701c29aa87cb2fdb78`
   and `4e571d1816adad1e5438dffe18a3f14223e83021d90028c1ce727a08ed1907d9`.
@@ -2188,6 +2198,102 @@ requires an explicit success receipt.
   operator comparison, continue/retake/skip, suffix, second checkpoint and
   final completion are still pending.
 
+## 2026-08-12 checkpoint orientation root cause (analysis only; not fixed)
+
+- The first camera-only field comparison did **not** restore the recorded view.
+  Horizontal Z1Pro feedback reached the requested approximately +21.3 degree
+  pan, but the operator correctly observed that the camera still needed to look
+  farther right. The UI remained in `WAITING_PLATFORM` because its strict
+  whole-axis feedback check did not converge.
+- The complete robot runtime trace, original recording and JPEGs, exact r5
+  platform asset and returned map job were copied to
+  `runtime-data/analysis/checkpoint-angle-20260812/`. The original 1.47 MB GLIM
+  dump was also copied read-only from the Alibaba Cloud job. It contains all 865
+  optimized timestamps, positions and quaternions in `traj_lidar.txt`; these
+  orientations were absent from the workstation `map.json` contract.
+- Timestamp matching proves the root cause. At `cp_01`, GLIM pose 306 is 0.004
+  seconds from the recorded sample and has yaw -72.447 degrees; the published
+  checkpoint yaw is -55.824 degrees, an error of +16.623 degrees. With the
+  runtime body pose of -34.515 degrees, the correct camera pan was +38.012
+  degrees, while the program requested +21.389 degrees: the exact same 16.623
+  degree shortfall seen in the live image. At `cp_02`, the correct timestamp-
+  matched GLIM yaw is -21.862 degrees but the asset contains -177.021 degrees,
+  a wrapped error of -155.159 degrees.
+- The route publisher caused this by discarding optimized pose orientation and
+  reconstructing yaw from adjacent XY tangents. Both checkpoints were marked
+  while the robot was stopped, so millimetre-scale XY noise made those tangents
+  arbitrary. It also used global sample-count ratio rather than timestamps;
+  the raw recording begins about 6.287 seconds before the GLIM trajectory.
+  Checkpoint positions remain within 0.132/0.123 m of the execution route, so
+  this does not invalidate the map or route position.
+- This run does not support changing VGICP. All eight localization records in
+  the two seconds around the true stop were `TRACKING / accepted`, confidence
+  was 0.893-0.904 and maximum reported rotational correction was 2.204 degrees.
+  The asset error independently and exactly predicts the observed camera error.
+- A separate Z1Pro convergence defect remains: the adapter advertises a 40 Hz
+  official angle-command rate but `move_for_inspection()` sends one packet.
+  Fixing that retry/receipt path is required for the UI to leave "adjusting
+  camera", but it cannot correct a wrong horizontal target.
+- No product code or deployed configuration changed in this analysis. The next
+  bounded implementation must preserve timestamped GLIM quaternions, bind by
+  timestamp and direct yaw, reject missing orientation instead of using a
+  stationary tangent, stream the bounded gimbal target until verified, add
+  pose/gimbal evidence and republish a new checkpoint revision. V6 mobility,
+  localization, MPPI, obstacle, speed and allowed-area parameters remain frozen.
+- The operator explicitly stopped the mission before taking the robot to
+  charge. Stop receipts confirm patrol/runtime/Nav2 motion and the motion bridge
+  stopped, UDP 5005 was released and no further movement is authorized.
+
+## 2026-08-12 checkpoint orientation and Z1Pro convergence correction (local only)
+
+- Cloud GLIM production and official-editor export contracts now add the
+  immutable workstation companion `trajectory-poses.json`, preserving every
+  `traj_lidar.txt` timestamp, XYZ position and quaternion while leaving the
+  existing robot `map.json`/`map.ply` contract unchanged. New cloud downloads
+  fail closed when this companion is absent. Robot publication explicitly
+  excludes it because the robot consumes the already-bound checkpoint yaw.
+- Route candidate generation 8 indexes the original recording snapshot by
+  `recordingSampleIndex`, matches its timezone-aware `captured_at` to the
+  nearest GLIM pose within 0.5 seconds and uses the normalized GLIM quaternion
+  yaw directly. Missing timestamps, orientation, a malformed timeline or an
+  excessive time delta reject publication; stationary XY tangent and global
+  sample-count ratio are no longer fallback orientation sources.
+- The complete retained cloud dump backfilled the new companion for real map
+  `map-70fb209b5b20` without changing the immutable map JSON/PLY. The unchanged
+  blue route and green area advanced to local workspace revision 6. Its two
+  bindings are independently reproducible: `cp_01` -> GLIM pose 306, 0.003506 s
+  delta, -72.446971 degrees and 0.126 m execution-route distance; `cp_02` ->
+  pose 689, 0.027386 s delta, -21.861693 degrees and 0.124 m distance. The new
+  route ID is `route-70fb209b5b20-workspace-r6` and its local portable bundle
+  SHA-256 is
+  `5d08683722cfd2a75de8cab67b7079af8d478711727119e23f69e9c9517fcca7`.
+  A direct revision-5/revision-6 comparison confirms identical blue-route
+  waypoints, interpolated execution waypoints, green polygon, robot radius and
+  allowed-area raster geometry; only version-bound metadata/checkpoints differ.
+- Z1Pro inspection control now keeps one bounded GCU connection and publishes
+  the official angle command at 40 Hz for at most three seconds. Success
+  requires pan, tilt and roll to remain within two degrees for three consecutive
+  feedback samples; timeout names each final axis error. The local HTTP boundary
+  journals target/actual/tolerance or the exact failure, and the platform-edge
+  localhost client has a five-second budget around this bounded operation.
+- The navigation runtime trace now records `/localization/pose` map-frame XYZ,
+  yaw and x/y/yaw covariance at a bounded rate. This is evidence only: route
+  following, VGICP decisions, MPPI, Smac bypass, costmaps, collision radius,
+  speed, acceleration and the Unitree receiver are unchanged. Normal patrol and
+  avoidance do not consume checkpoint `bodyYaw`; they therefore cannot suffer
+  this same asset-binding defect, although any independent live-localization
+  problem will now be easier to separate from planning and control.
+- Offline verification passed all 205 repository unit/integration tests,
+  Python compilation, Site Console UI smoke, cloud/robot container-contract
+  validation, generated repository knowledge, bundled-Node JavaScript syntax,
+  shell syntax, JSON parsing, diff whitespace and a direct manifest/file/ZIP
+  hash audit of the real revision-6 bundle.
+- This is local work only. No robot connection, image build, deployment,
+  localization start, Nav2 start, gimbal motion or body motion occurred. The
+  installed robot remains on mission-isolation-r3 with the generation-7,
+  revision-5 checkpoint asset until the operator authorizes tomorrow's
+  deployment.
+
 ## Current next-task handoff (2026-08-12; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
@@ -2202,16 +2308,18 @@ readiness. Treat mission-isolation-r3 with the digests above as the latest
 verified robot deployment. The old realtime worktrees are evidence/provenance
 only and must not be deployed.
 
-Mission-isolation-r3 remains the installed robot release. Its process-start
-correction and first camera-only checkpoint stop now have real field receipts,
-and the LLYJ0001 device token is injected only into the currently running Mac
-workstation. The real two-point `map-70fb209b5b20` mission is currently paused
-at `cp_01` after a verified true stop and camera-only recorded-view alignment.
-Continue with the left-reference/right-live comparison and explicit operator
-decision, then verify retained-suffix continuation, the second checkpoint and
-final route completion. After that, upload and have the platform activate the
-generation-7 bundle and repeat one platform-owned checkpoint mission against
-the frozen event/verdict contract.
+Mission-isolation-r3 remains the last installed robot release. Its process-start
+correction and first checkpoint true stop have real field receipts, but the
+recorded-view alignment is not accepted. The mission is stopped and the robot
+was removed for charging. The complete analysis remains at
+`runtime-data/analysis/checkpoint-angle-20260812/ANALYSIS.md`; its bounded fix is
+implemented locally as generation 8 and real workspace revision 6 with the
+bindings/digest above. Do not retune localization or frozen V6 mobility for this
+incident. Tomorrow, first re-read live robot state, build/install the correction
+only after explicit authorization, publish revision 6, and run one local
+two-checkpoint validation. Only after reference/live comparison, first suffix
+continuation, second checkpoint and final completion pass should the platform
+upload/activate the asset and run a platform-owned checkpoint mission.
 
 First have the operator listen to a normal multi-sentence platform response on
 mission-isolation-r3. Compare the source/output RMS and speaker-buffer counters with the
@@ -2230,9 +2338,9 @@ give interaction arbitrary motion authority while closing these receipts.
 
 The last recorded robot state had mission-isolation-r3 active with zero restarts,
 platform online and the r5 peak-limited 3x playback code retained. The local
-mission was paused at checkpoint `cp_01`; Nav2 and the motion bridge were alive
-but motion was unauthorized and the final command was zero while waiting for
-the workstation decision.
+mission was explicitly stopped after `cp_01`; Nav2 motion and the motion bridge
+were stopped, UDP 5005 was released and the final command was zero before the
+robot was taken for charging.
 This is a receipt, not a promise of current live state: a new task must re-read
 the robot before any deployment, and must obtain explicit authorization before
 starting localization, Nav2 or physical motion.

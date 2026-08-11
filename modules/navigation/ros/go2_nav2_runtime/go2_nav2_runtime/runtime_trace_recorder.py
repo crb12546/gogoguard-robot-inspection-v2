@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -156,6 +156,12 @@ class RuntimeTraceRecorder(Node):
         )
         self.create_subscription(
             String, "/localization/status", self._localization, 10
+        )
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/localization/pose",
+            self._localization_pose,
+            10,
         )
         self.create_subscription(
             String, "/go2/runtime/status", self._runtime, 10
@@ -326,6 +332,30 @@ class RuntimeTraceRecorder(Node):
             payload.get("searchMode"),
         )
         self._write_bounded("localization", signature, payload, 0.4)
+
+    def _localization_pose(self, message):
+        pose = message.pose.pose
+        covariance = list(message.pose.covariance)
+        payload = {
+            "stamp": {
+                "sec": int(message.header.stamp.sec),
+                "nanosec": int(message.header.stamp.nanosec),
+            },
+            "frameId": message.header.frame_id,
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "z": float(pose.position.z),
+            "yaw": _yaw(pose.orientation),
+            "covariance": {
+                "x": float(covariance[0]),
+                "y": float(covariance[7]),
+                "yaw": float(covariance[35]),
+            },
+        }
+        signature = tuple(
+            round(payload[name], 3) for name in ("x", "y", "yaw")
+        )
+        self._write_bounded("localization_pose", signature, payload, 0.2)
 
     def _runtime(self, message):
         payload = self._json_payload(message)

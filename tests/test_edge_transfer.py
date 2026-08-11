@@ -115,6 +115,7 @@ class EdgeTransferTest(unittest.TestCase):
                 "map.ply": b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n",
                 "overview.svg": b"<svg xmlns='http://www.w3.org/2000/svg'/>",
                 "glim-build.json": b'{"worker":"glim"}',
+                "trajectory-poses.json": b'{"schema":"gogoguard.optimized_trajectory.v1","poses":[]}',
             }
             for name, value in values.items():
                 (artifacts / name).write_bytes(value)
@@ -148,6 +149,15 @@ class EdgeTransferTest(unittest.TestCase):
             )
             self.assertEqual(committed["stage"], "deployed_to_robot")
             self.assertTrue((self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply").is_file())
+            self.assertFalse(
+                (
+                    self.root
+                    / "map-jobs"
+                    / JOB_ID
+                    / "artifacts"
+                    / "trajectory-poses.json"
+                ).exists()
+            )
             self.assertEqual(
                 (
                     self.root

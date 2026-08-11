@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import struct
 import unittest
+from unittest.mock import patch
 
 from gogoguard_device_io import (
     Z1ProGimbal,
     build_gcu_packet,
+    crc16_ccitt_nibble,
     parse_gcu_reply,
 )
 
@@ -15,6 +18,43 @@ OFFICIAL_REPLY = bytes.fromhex(
     "06 17 00 00 24 F2 DF 65 16 EE AA 16 A3 A0 00 00 2B 01 14 00 00 "
     "00 00 08 00 00 20 00 EC 85"
 )
+
+
+def reply_with_angles(roll: float, tilt: float, pan: float) -> bytes:
+    frame = bytearray(OFFICIAL_REPLY)
+    struct.pack_into(
+        "<hhh",
+        frame,
+        12,
+        int(round(roll * 100)),
+        int(round(tilt * 100)),
+        int(round(pan * 100)),
+    )
+    crc = crc16_ccitt_nibble(bytes(frame[:-2]))
+    frame[-2:] = bytes([(crc >> 8) & 0xFF, crc & 0xFF])
+    return bytes(frame)
+
+
+class FakeGcuSocket:
+    def __init__(self, responses: list[bytes]) -> None:
+        self.responses = list(responses)
+        self.last = responses[-1]
+        self.sent: list[bytes] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def settimeout(self, _timeout: float) -> None:
+        return None
+
+    def sendall(self, packet: bytes) -> None:
+        self.sent.append(packet)
+
+    def recv(self, _size: int) -> bytes:
+        return self.responses.pop(0) if self.responses else self.last
 
 
 class Z1ProGimbalProtocolTest(unittest.TestCase):
@@ -61,10 +101,57 @@ class Z1ProGimbalProtocolTest(unittest.TestCase):
             capability["commissioningStatus"],
             "enabled_field_acceptance_pending",
         )
+        self.assertEqual(capability["moveTimeoutSec"], 3.0)
+        self.assertEqual(capability["angleToleranceDeg"], 2.0)
+        self.assertEqual(capability["confirmationSamples"], 3)
 
     def test_rejects_frequency_outside_official_range(self) -> None:
         with self.assertRaisesRegex(ValueError, "30-50 Hz"):
             Z1ProGimbal(command_hz=20.0)
+
+    def test_angle_move_repeats_official_rate_until_feedback_converges(self) -> None:
+        fake = FakeGcuSocket(
+            [
+                reply_with_angles(0.0, 0.0, 0.0),
+                reply_with_angles(0.0, -5.0, 20.0),
+                reply_with_angles(0.0, -5.0, 20.0),
+                reply_with_angles(0.0, -5.0, 20.0),
+            ]
+        )
+        gimbal = Z1ProGimbal(
+            commissioned=True,
+            move_timeout_s=0.5,
+            confirmation_samples=3,
+        )
+        with patch(
+            "gogoguard_device_io.z1pro_gimbal.socket.create_connection",
+            return_value=fake,
+        ):
+            reply = gimbal.move_for_inspection(
+                pan_body_deg=20.0, tilt_euler_deg=-5.0
+            )
+        self.assertAlmostEqual(reply.relative_pan_deg, 20.0)
+        self.assertGreaterEqual(len(fake.sent), 4)
+        self.assertTrue(all(packet[69] == 0x10 for packet in fake.sent))
+
+    def test_angle_move_reports_axis_errors_when_feedback_never_converges(self) -> None:
+        fake = FakeGcuSocket([reply_with_angles(0.0, 0.0, 0.0)])
+        gimbal = Z1ProGimbal(
+            commissioned=True,
+            move_timeout_s=0.25,
+            confirmation_samples=2,
+        )
+        with patch(
+            "gogoguard_device_io.z1pro_gimbal.socket.create_connection",
+            return_value=fake,
+        ):
+            with self.assertRaisesRegex(
+                TimeoutError, "tilt error 5.00deg, pan error 20.00deg"
+            ):
+                gimbal.move_for_inspection(
+                    pan_body_deg=20.0, tilt_euler_deg=-5.0
+                )
+        self.assertGreaterEqual(len(fake.sent), 2)
 
 
 if __name__ == "__main__":

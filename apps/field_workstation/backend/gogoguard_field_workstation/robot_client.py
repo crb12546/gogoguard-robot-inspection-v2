@@ -250,10 +250,19 @@ class RobotClient:
         additional_files: dict[str, Path] | None = None,
     ) -> dict:
         artifact_root = Path(artifact_root)
+        # trajectory-poses.json is a workstation/cloud binding asset. The
+        # robot receives the already-bound checkpoint bodyYaw and must not be
+        # asked to mutate an existing immutable GLIM map with this companion.
+        robot_artifact_names = {
+            "map.json",
+            "map.ply",
+            "overview.svg",
+            "glim-build.json",
+        }
         sources = {
             path.name: path
             for path in artifact_root.iterdir()
-            if path.is_file() and not path.name.startswith(".")
+            if path.is_file() and path.name in robot_artifact_names
         }
         for name, path in (additional_files or {}).items():
             source = Path(path)

@@ -9,7 +9,7 @@ checks = {
     dockerfile: ["ros:humble-ros-base-jammy", "linux/arm64", "ros-humble-rosbag2", "ros-humble-rosbag2-storage-mcap", "ffmpeg", "alsa-utils", "Livox-SDK2", "fast_lio", "modules/navigation/ros/go2_nav2_runtime", "modules/device_io/ros/go2_cmd_vel_bridge", "go2_vui_control", "interaction-requirements.txt", "2da379972ba86627632aa7e3f779c680ba04a5ee26ef2a20dc61cefcc24f73b8", "8189/udp", "LD_LIBRARY_PATH=/opt/gogoguard/deps/lib:/usr/local/lib", "gogoguard-edge-entrypoint"],
     service: ["/opt/gogoguard/bin/run-edge", "ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60", "systemd-timesyncd.service", "ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge", "SuccessExitStatus=143", "Restart=on-failure", "StartLimitBurst=3", "After=docker.service"],
     installer: ["sha256sum --check", "docker load --input", "configure-combined-joint-test", "runtime.env.install", "wait-clock-sync", "systemctl daemon-reload", "Service is not started or enabled"],
-    cloud_adapter: ["/opt/go2/jobs/map-", "run_pipeline prepare-session", "run_pipeline run-session", "run_pipeline produce-review-artifacts", "overview.svg", "map.json"],
+    cloud_adapter: ["/opt/go2/jobs/map-", "run_pipeline prepare-session", "run_pipeline run-session", "run_pipeline produce-review-artifacts", "overview.svg", "map.json", "trajectory-poses.json", "gogoguard.optimized_trajectory.v1"],
 }
 cloud_editor = cloud_adapter.parent / "gogoguard-glim-editor"
 cloud_exporter = cloud_adapter.parent / "export_glim_artifact.py"
@@ -28,6 +28,8 @@ checks[cloud_exporter] = [
     "official-glim-map-editor",
     "map.ply",
     "glim-build.json",
+    "trajectory-poses.json",
+    "gogoguard.optimized_trajectory.v1",
 ]
 for path, needles in checks.items():
     if not path.is_file():

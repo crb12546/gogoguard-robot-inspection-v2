@@ -10,6 +10,7 @@ import struct
 import tempfile
 import threading
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,7 +20,8 @@ from .workspace import NavigationWorkspaceStore, validate_workspace, write_keepo
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 7
+CANDIDATE_GENERATION = 8
+CHECKPOINT_TIMESTAMP_TOLERANCE_S = 0.5
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -192,12 +194,39 @@ def _wrap_angle(value: float) -> float:
     return math.atan2(math.sin(value), math.cos(value))
 
 
-def _path_yaw(points: list[tuple[float, float]], index: int) -> float:
-    if len(points) < 2:
-        return 0.0
-    before = points[max(0, index - 1)]
-    after = points[min(len(points) - 1, index + 1)]
-    return math.atan2(after[1] - before[1], after[0] - before[0])
+def _timestamp(value: Any) -> float:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("recording checkpoint sample has no capture timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("recording checkpoint sample timestamp is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("recording checkpoint sample timestamp has no timezone")
+    result = parsed.timestamp()
+    if not math.isfinite(result):
+        raise ValueError("recording checkpoint sample timestamp is invalid")
+    return result
+
+
+def _quaternion_yaw(pose: dict[str, Any]) -> float:
+    try:
+        qx = float(pose["qx"])
+        qy = float(pose["qy"])
+        qz = float(pose["qz"])
+        qw = float(pose["qw"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("GLIM optimized pose orientation is invalid") from exc
+    if not all(math.isfinite(value) for value in (qx, qy, qz, qw)):
+        raise ValueError("GLIM optimized pose orientation is invalid")
+    norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if norm < 0.5:
+        raise ValueError("GLIM optimized pose orientation is invalid")
+    qx, qy, qz, qw = (value / norm for value in (qx, qy, qz, qw))
+    return math.atan2(
+        2.0 * (qw * qz + qx * qy),
+        1.0 - 2.0 * (qy * qy + qz * qz),
+    )
 
 
 class RouteManager:
@@ -215,13 +244,15 @@ class RouteManager:
         artifact_root = self.data_root / "map-jobs" / job_id / "artifacts"
         map_json = artifact_root / "map.json"
         map_ply = artifact_root / "map.ply"
-        if not map_json.is_file() or not map_ply.is_file():
+        trajectory_poses = artifact_root / "trajectory-poses.json"
+        if not map_json.is_file() or not map_ply.is_file() or not trajectory_poses.is_file():
             raise ValueError("completed GLIM artifacts are unavailable")
         with self._lock:
             destination = self.root / job_id
             destination.mkdir(parents=True, exist_ok=True)
             source_map_json_hash = _file_hash(map_json)
             source_ply_hash = _file_hash(map_ply)
+            source_trajectory_poses_hash = _file_hash(trajectory_poses)
             # On the robot, route-bound checkpoints advance with the editable
             # workspace and live beside immutable GLIM artifacts.  Mac map
             # jobs retain the recording-time source in artifacts/.
@@ -280,8 +311,12 @@ class RouteManager:
                     if (
                         existing.get("candidate_generation") == CANDIDATE_GENERATION
                         and
+                        existing.get("site_id") == self.site_id
+                        and
                         existing.get("source_ply_sha256") == source_ply_hash
                         and existing.get("source_map_json_sha256") == source_map_json_hash
+                        and existing.get("source_trajectory_poses_sha256")
+                        == source_trajectory_poses_hash
                         and existing.get("source_checkpoint_sha256")
                         == source_checkpoint_hash
                         and existing.get("workspace_hash") == workspace_hash
@@ -374,6 +409,7 @@ class RouteManager:
                 "point_count": point_count,
                 "source_ply_sha256": source_ply_hash,
                 "source_map_json_sha256": source_map_json_hash,
+                "source_trajectory_poses_sha256": source_trajectory_poses_hash,
                 "source_checkpoint_sha256": source_checkpoint_hash,
                 "workspace_hash": workspace_hash,
                 "workspace_revision": workspace["revision"],
@@ -450,33 +486,53 @@ class RouteManager:
         raw_items = source.get("checkpoints")
         if not isinstance(raw_items, list):
             raise ValueError("recording checkpoints are invalid")
-        map_json = json.loads(
-            (self.data_root / "map-jobs" / candidate_id / "artifacts" / "map.json").read_text(
-                encoding="utf-8"
-            )
+        optimized_path = (
+            self.data_root
+            / "map-jobs"
+            / candidate_id
+            / "artifacts"
+            / "trajectory-poses.json"
         )
-        optimized = [
-            (float(item[0]), float(item[1]))
-            for item in map_json.get("trajectory") or []
-            if isinstance(item, list) and len(item) >= 2
-        ]
+        try:
+            optimized_contract = json.loads(optimized_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+            raise ValueError("GLIM optimized pose timeline is unavailable") from exc
+        if optimized_contract.get("schema") != "gogoguard.optimized_trajectory.v1":
+            raise ValueError("GLIM optimized pose timeline schema is invalid")
+        optimized: list[dict[str, Any]] = []
+        previous_timestamp = -math.inf
+        for item in optimized_contract.get("poses") or []:
+            if not isinstance(item, dict):
+                raise ValueError("GLIM optimized pose timeline is invalid")
+            try:
+                timestamp = float(item["timestamp"])
+                x, y = float(item["x"]), float(item["y"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("GLIM optimized pose timeline is invalid") from exc
+            if (
+                not all(math.isfinite(value) for value in (timestamp, x, y))
+                or timestamp <= previous_timestamp
+            ):
+                raise ValueError("GLIM optimized pose timeline is invalid")
+            _quaternion_yaw(item)
+            optimized.append(item)
+            previous_timestamp = timestamp
         if len(optimized) < 2 and raw_items:
-            raise ValueError("GLIM trajectory is unavailable for checkpoint binding")
-        raw_path: list[tuple[float, float]] = []
+            raise ValueError("GLIM optimized pose timeline is unavailable")
+        snapshots: list[dict[str, Any] | None] = []
         snapshots_path = recording_root / "samples" / "snapshots.jsonl"
         if snapshots_path.is_file():
             with snapshots_path.open("r", encoding="utf-8") as handle:
                 for line in handle:
                     try:
-                        pose = json.loads(line).get("pose") or {}
-                        raw_path.append((float(pose["x"]), float(pose["y"])))
-                    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
-                        continue
+                        snapshot = json.loads(line)
+                        snapshots.append(snapshot if isinstance(snapshot, dict) else None)
+                    except json.JSONDecodeError:
+                        snapshots.append(None)
         execution = list(execution_route.get("waypoints") or [])
         bound: list[dict[str, Any]] = []
         needs_review = 0
         checkpoint_ids: set[str] = set()
-        denominator = max(1, len(raw_path) - 1)
         for ordinal, raw in enumerate(raw_items, start=1):
             checkpoint_id = str(raw.get("checkpointId") or f"cp_{ordinal:02d}")
             if (
@@ -486,9 +542,25 @@ class RouteManager:
                 raise ValueError("recording checkpoint identity is invalid or duplicated")
             checkpoint_ids.add(checkpoint_id)
             sample_index = max(0, int(raw.get("recordingSampleIndex") or 0))
-            ratio = min(1.0, sample_index / denominator)
-            optimized_index = min(len(optimized) - 1, int(round(ratio * (len(optimized) - 1))))
-            target = optimized[optimized_index]
+            if sample_index >= len(snapshots) or snapshots[sample_index] is None:
+                raise ValueError(
+                    f"checkpoint {checkpoint_id} recording sample is unavailable"
+                )
+            snapshot = snapshots[sample_index] or {}
+            captured_at = str(snapshot.get("captured_at") or "")
+            captured_timestamp = _timestamp(captured_at)
+            optimized_index, optimized_pose = min(
+                enumerate(optimized),
+                key=lambda pair: abs(float(pair[1]["timestamp"]) - captured_timestamp),
+            )
+            optimized_timestamp = float(optimized_pose["timestamp"])
+            timestamp_delta = abs(optimized_timestamp - captured_timestamp)
+            if timestamp_delta > CHECKPOINT_TIMESTAMP_TOLERANCE_S:
+                raise ValueError(
+                    f"checkpoint {checkpoint_id} has no time-aligned GLIM pose "
+                    f"(delta {timestamp_delta:.3f}s)"
+                )
+            target = (float(optimized_pose["x"]), float(optimized_pose["y"]))
             route_index, route_point = min(
                 enumerate(execution),
                 key=lambda pair: math.hypot(
@@ -500,13 +572,7 @@ class RouteManager:
                 float(route_point["x"]) - target[0],
                 float(route_point["y"]) - target[1],
             )
-            raw_pose = raw.get("rawPose") if isinstance(raw.get("rawPose"), dict) else {}
-            raw_yaw = float(raw_pose.get("yaw") or 0.0)
-            if not math.isfinite(raw_yaw):
-                raise ValueError("recording checkpoint yaw is invalid")
-            raw_tangent = _path_yaw(raw_path, min(sample_index, len(raw_path) - 1)) if raw_path else raw_yaw
-            optimized_tangent = _path_yaw(optimized, optimized_index)
-            body_yaw = _wrap_angle(optimized_tangent + _wrap_angle(raw_yaw - raw_tangent))
+            body_yaw = _quaternion_yaw(optimized_pose)
             review = distance > 1.0
             needs_review += int(review)
             sample_frames = []
@@ -529,7 +595,11 @@ class RouteManager:
                     "sampleFrames": sample_frames,
                     "binding": {
                         "recordingSampleIndex": sample_index,
+                        "recordingCapturedAt": captured_at,
                         "optimizedTrajectoryIndex": optimized_index,
+                        "optimizedTimestamp": optimized_timestamp,
+                        "timestampDeltaS": round(timestamp_delta, 6),
+                        "orientationSource": "glim_quaternion",
                         "distanceToExecutionRouteM": round(distance, 3),
                         "needsReview": review,
                     },

@@ -2,11 +2,11 @@
   "id": "map_factory",
   "responsibility": "Submit a sealed recording to cloud GLIM, provide isolated official map editing, and return immutable map versions",
   "runtime": ["workstation", "cloud"],
-  "status": "cloud_glim_roundtrip_and_official_editor_export_verified",
+  "status": "timestamped_quaternion_glim_export_contract_implemented_cloud_rollout_pending",
   "codeRoots": ["services/map_factory", "deployment/cloud"],
   "entrypoints": ["gogoguard_map_factory.manager:MapJobManager", "gogoguard_map_factory.editor:GlimEditorManager", "deployment/cloud/gogoguard-map-job", "deployment/cloud/gogoguard-glim-editor"],
   "dependsOn": ["contracts", "evidence"],
   "consumes": ["RecordingBundle"],
-  "produces": ["MapJob", "map.ply", "map.json", "overview.svg", "isolated official GLIM editor session"],
-  "sourceProvenance": ["V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline", "2026-08-10 the official GLIM map_editor is available through a loopback-only noVNC service and Mac SSH tunnel; edited dumps export as new immutable map versions while the source job remains unchanged"]
+  "produces": ["MapJob", "map.ply", "map.json", "trajectory-poses.json with GLIM timestamps and quaternions", "overview.svg", "isolated official GLIM editor session"],
+  "sourceProvenance": ["V2 workstation adapter over the existing pinned Alibaba Cloud Jazzy GLIM pipeline", "2026-08-10 the official GLIM map_editor is available through a loopback-only noVNC service and Mac SSH tunnel; edited dumps export as new immutable map versions while the source job remains unchanged", "2026-08-12 both normal and edited GLIM exporters preserve traj_lidar timestamp/XYZ/quaternion in a workstation-only optimized-trajectory companion; incomplete new cloud results fail before publication"]
 }

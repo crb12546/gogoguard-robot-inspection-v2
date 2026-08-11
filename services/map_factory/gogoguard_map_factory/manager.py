@@ -236,8 +236,16 @@ class MapJobManager:
                 message="下载并校验 GLIM 产物",
                 total_bytes=0,
             )
-            if not (artifact_root / "map.json").exists():
-                raise MapWorkerError("cloud worker returned no map.json contract")
+            required = {
+                "map.json",
+                "map.ply",
+                "overview.svg",
+                "glim-build.json",
+                "trajectory-poses.json",
+            }
+            returned = {path.name for path in artifact_root.iterdir() if path.is_file()}
+            if not required.issubset(returned):
+                raise MapWorkerError("cloud worker returned an incomplete GLIM artifact set")
             prefix = f"/artifacts/{job_id}"
             self._update(job_id, MapJobState.COMPLETE, 100, "云端 GLIM 地图已返回", stage="complete",
                          artifact_root=str(artifact_root), overview_url=prefix + "/overview.svg",
@@ -334,7 +342,13 @@ class MapJobManager:
         if not re.fullmatch(r"map-[A-Za-z0-9]{12}", job_id):
             raise MapWorkerError("edited GLIM map id is invalid")
         artifact_root = Path(artifact_root)
-        required = {"map.json", "map.ply", "overview.svg", "glim-build.json"}
+        required = {
+            "map.json",
+            "map.ply",
+            "overview.svg",
+            "glim-build.json",
+            "trajectory-poses.json",
+        }
         if not required.issubset({path.name for path in artifact_root.iterdir()}):
             raise MapWorkerError("edited GLIM artifact set is incomplete")
         artifact = json.loads((artifact_root / "map.json").read_text(encoding="utf-8"))

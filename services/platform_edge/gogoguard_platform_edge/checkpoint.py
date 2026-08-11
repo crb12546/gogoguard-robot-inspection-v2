@@ -30,7 +30,7 @@ class LocalGimbalClient:
         self,
         url: str = "http://127.0.0.1:8080/api/v1/gimbal/move",
         *,
-        timeout_s: float = 3.0,
+        timeout_s: float = 5.0,
     ) -> None:
         self.url = url
         self.timeout_s = float(timeout_s)

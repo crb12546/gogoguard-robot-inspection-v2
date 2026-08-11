@@ -125,10 +125,24 @@ if len(points_array) > 50000:
 points = [[float(x), float(y), float(z), 0.7] for x, y, z in points_array]
 
 trajectory = []
+optimized_poses = []
 for raw in trajectory_path.read_text(encoding="utf-8").splitlines():
     values = raw.split()
     if len(values) == 8:
-        trajectory.append([float(values[1]), float(values[2]), float(values[3])])
+        timestamp, x, y, z, qx, qy, qz, qw = (float(value) for value in values)
+        trajectory.append([x, y, z])
+        optimized_poses.append(
+            {
+                "timestamp": timestamp,
+                "x": x,
+                "y": y,
+                "z": z,
+                "qx": qx,
+                "qy": qy,
+                "qz": qz,
+                "qw": qw,
+            }
+        )
 if len(trajectory) < 2:
     raise SystemExit("GLIM trajectory contains fewer than two poses")
 
@@ -143,6 +157,19 @@ artifact = {
 }
 (output_root / "map.json").write_text(
     json.dumps(artifact, ensure_ascii=False, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+(output_root / "trajectory-poses.json").write_text(
+    json.dumps(
+        {
+            "schema": "gogoguard.optimized_trajectory.v1",
+            "frame": "map",
+            "poses": optimized_poses,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    + "\n",
     encoding="utf-8",
 )
 shutil.copy2(ply_path, output_root / "map.ply")
