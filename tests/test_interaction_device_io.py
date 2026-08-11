@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,6 +80,33 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertEqual(command.count("pcm_s24le"), 2)
         self.assertEqual(command[-2:], ["s24le", "pipe:1"])
 
+    def test_unitree_rtc_loads_before_other_native_media_runtime(self) -> None:
+        native = (
+            ROOT
+            / "modules/device_io/gogoguard_device_io/interaction_native.py"
+        ).read_text(encoding="utf-8")
+        service = (
+            ROOT
+            / "services/interaction_edge/gogoguard_interaction_edge/service.py"
+        ).read_text(encoding="utf-8")
+        dockerfile = (
+            ROOT / "deployment/container/Dockerfile.combined"
+        ).read_text(encoding="utf-8")
+        unitree = native.index("from unitree_webrtc_connect import")
+        av = native.index("import av")
+        livekit = native.index("from livekit import rtc")
+        self.assertLess(unitree, av)
+        self.assertLess(av, livekit)
+        self.assertLess(
+            service.index("volume_controller.set_and_verify"),
+            service.index("real_transport.preload_dependencies()"),
+        )
+        self.assertIn("real_transport.preload_dependencies()", service)
+        self.assertIn(
+            "gogoguard_device_io.interaction_native import NATIVE_DEPENDENCIES",
+            dockerfile,
+        )
+
     def test_speaker_prebuffers_and_reprime_after_underflow(self) -> None:
         buffer = SpeakerJitterBuffer(prebuffer_ms=60, max_buffer_ms=100)
         frame = b"\x01\x00" * 960
@@ -156,6 +184,23 @@ class InteractionDeviceIoTest(unittest.TestCase):
             )
         )
 
+    def test_audio_timing_separates_network_gaps_from_response_latency(self) -> None:
+        profile = load_interaction_hardware_profile(
+            ROOT / "config/robot/interaction-hardware.json"
+        )
+        transport = LiveKitGo2Transport(
+            profile=profile, unitree_aes_128_key="test-only"
+        )
+        transport._accepted_transcript(now=10.0)
+        transport._observe_agent_audio_frame(active=False, now=10.02)
+        transport._observe_agent_audio_frame(active=True, now=10.42)
+        timing = transport.status()["audioTiming"]
+        self.assertEqual(timing["agentFrames"], 2)
+        self.assertEqual(timing["agentFrameGapOver40ms"], 1)
+        self.assertEqual(timing["agentFrameGapMaxMs"], 400.0)
+        self.assertEqual(timing["transcriptToAudioSamples"], 1)
+        self.assertEqual(timing["lastTranscriptToAudioMs"], 420.0)
+
     @patch("gogoguard_device_io.interaction_media.subprocess.run")
     def test_volume_ten_is_set_and_verified(self, run) -> None:
         run.return_value.stdout = json.dumps({
@@ -164,6 +209,32 @@ class InteractionDeviceIoTest(unittest.TestCase):
         result = Go2VolumeController(Path("/opt/go2_vui_control"), "eth0").set_and_verify(10)
         self.assertEqual(result["observed"], 10)
         self.assertEqual(run.call_args.args[0][-2:], ["set-volume", "10"])
+        self.assertTrue(
+            run.call_args.kwargs["env"]["LD_LIBRARY_PATH"].startswith(
+                "/opt/gogoguard/deps/lib"
+            )
+        )
+
+    @patch("gogoguard_device_io.interaction_media.time.sleep")
+    @patch("gogoguard_device_io.interaction_media.subprocess.run")
+    def test_volume_initialization_retries_a_transient_command_failure(
+        self, run, sleep
+    ) -> None:
+        success = type("Completed", (), {
+            "stdout": json.dumps({
+                "requested": 10, "setCode": 0, "getCode": 0, "observed": 10,
+            })
+        })()
+        run.side_effect = [
+            subprocess.TimeoutExpired(["go2_vui_control"], 6),
+            success,
+        ]
+        result = Go2VolumeController(
+            Path("/opt/go2_vui_control"), "eth0"
+        ).set_and_verify(10)
+        self.assertEqual(result["observed"], 10)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(0.25)
 
 
 if __name__ == "__main__":

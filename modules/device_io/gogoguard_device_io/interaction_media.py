@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -282,21 +284,51 @@ class NavigationReadOnlyGuard:
 class Go2VolumeController:
     """Invoke the commissioned VUI boundary and verify the requested 0..10 value."""
 
-    def __init__(self, executable: Path, interface: str) -> None:
+    def __init__(
+        self,
+        executable: Path,
+        interface: str,
+        *,
+        library_path: Path = Path("/opt/gogoguard/deps/lib"),
+    ) -> None:
         self.executable = executable
         self.interface = interface
+        self.library_path = library_path
 
     def set_and_verify(self, volume: int) -> dict[str, Any]:
         if not 0 <= volume <= 10:
             raise ValueError("Go2 VUI volume must be in 0..10")
-        completed = subprocess.run(
-            [str(self.executable), self.interface, "set-volume", str(volume)],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=6,
+        last_error: Exception | None = None
+        environment = os.environ.copy()
+        inherited_library_path = environment.get("LD_LIBRARY_PATH", "")
+        environment["LD_LIBRARY_PATH"] = str(self.library_path) + (
+            f":{inherited_library_path}" if inherited_library_path else ""
         )
-        payload = json.loads(completed.stdout.strip())
-        if payload.get("observed") != volume or payload.get("setCode") != 0 or payload.get("getCode") != 0:
-            raise RuntimeError("Go2 VUI volume verification failed")
-        return payload
+        for attempt in range(3):
+            try:
+                completed = subprocess.run(
+                    [str(self.executable), self.interface, "set-volume", str(volume)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=6,
+                    env=environment,
+                )
+                payload = json.loads(completed.stdout.strip())
+                if (
+                    payload.get("observed") != volume
+                    or payload.get("setCode") != 0
+                    or payload.get("getCode") != 0
+                ):
+                    raise RuntimeError("Go2 VUI volume verification failed")
+                return payload
+            except (
+                OSError,
+                subprocess.SubprocessError,
+                json.JSONDecodeError,
+                RuntimeError,
+            ) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.25 * (attempt + 1))
+        raise RuntimeError("Go2 VUI volume verification failed") from last_error

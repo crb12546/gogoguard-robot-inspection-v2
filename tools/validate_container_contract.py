@@ -63,10 +63,10 @@ if "platform heartbeat requires the interaction service" not in entrypoint.read_
 joint_text = joint_test.read_text(encoding="utf-8")
 for required in (
     "--temporary-icp-fallback",
-    "https://39.96.37.187/api/v1/robot/heartbeat",
+    "http://39.96.37.187/api/v1/robot/heartbeat",
     "GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 1",
-    "GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 1",
-    "GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0",
+    "GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0",
+    "GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 1",
 ):
     if required not in joint_text:
         raise SystemExit(f"temporary joint-test profile is incomplete: {required}")

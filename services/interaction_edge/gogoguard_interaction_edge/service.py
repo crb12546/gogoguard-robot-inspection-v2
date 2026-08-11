@@ -40,11 +40,19 @@ class InteractionEdgeService:
         self.persona = load_persona(persona_config)
         self.wake = WakeConversationGate(WakePolicy())
         profile = load_interaction_hardware_profile(hardware_config)
-        self.transport = transport or LiveKitGo2Transport(
-            profile=profile,
-            unitree_aes_128_key=unitree_aes_128_key,
-            volume_controller=Go2VolumeController(volume_executable, profile.go2_interface),
-        )
+        if transport is None:
+            volume_controller = Go2VolumeController(
+                volume_executable, profile.go2_interface
+            )
+            volume_controller.set_and_verify(profile.speaker_default_volume)
+            real_transport = LiveKitGo2Transport(
+                profile=profile,
+                unitree_aes_128_key=unitree_aes_128_key,
+            )
+            real_transport.preload_dependencies()
+            self.transport = real_transport
+        else:
+            self.transport = transport
         self.manager = InteractionManager(
             robot_id=robot_id,
             capabilities=InteractionCapabilities(
@@ -72,10 +80,11 @@ class InteractionEdgeService:
         self._command_lock = threading.Lock()
         self._write_status()
 
-    def _wake_transcript_received(self, payload: dict[str, Any]) -> None:
+    def _wake_transcript_received(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._command_lock:
-            self.wake.handle_transcript(str(payload.get("text", "")))
+            result = self.wake.handle_transcript(str(payload.get("text", "")))
             self._write_status()
+            return result
 
     def _playback_state_changed(self, active: bool) -> None:
         try:

@@ -4,10 +4,8 @@ import asyncio
 import audioop
 import json
 import queue
-import sys
 import threading
 import time
-import types
 from fractions import Fraction
 from typing import Any, Callable
 
@@ -20,6 +18,14 @@ from .interaction_media import (
     decode_s24_3le_stereo_to_s16_mono,
     microphone_capture_command,
 )
+
+
+class MediaStageError(RuntimeError):
+    """Public-safe media startup failure without endpoint or token details."""
+
+    def __init__(self, safe_code: str) -> None:
+        self.safe_code = safe_code
+        super().__init__("realtime media startup failed")
 
 
 class LiveKitGo2Transport:
@@ -42,7 +48,9 @@ class LiveKitGo2Transport:
         self._session_stop: asyncio.Event | None = None
         self._shutdown = threading.Event()
         self._request_lock = threading.Lock()
+        self._dependency_lock = threading.Lock()
         self._request: RealtimeMediaSessionRequest | None = None
+        self._native_dependencies: tuple[Any, ...] | None = None
         self._microphone_track = None
         self._microphone_muted = threading.Event()
         self._ready: queue.Queue[MediaConnectionReceipt | BaseException] = queue.Queue(maxsize=1)
@@ -52,12 +60,42 @@ class LiveKitGo2Transport:
         self._health_handler: Callable[[bool, str | None], Any] | None = None
         self._ever_connected = False
         self._reconnect_count = 0
+        self._startup_stage = "MEDIA_THREAD_START"
+        self._timing_lock = threading.Lock()
+        self._pending_transcript_at: float | None = None
+        self._agent_frame_at: float | None = None
+        self._agent_frame_count = 0
+        self._agent_frame_gap_over_40ms = 0
+        self._agent_frame_gap_max_ms = 0.0
+        self._transcript_audio_samples = 0
+        self._last_transcript_to_audio_ms: float | None = None
+        self._max_transcript_to_audio_ms = 0.0
         self.speaker = SpeakerJitterBuffer(
             sample_rate_hz=profile.speaker_rate_hz,
             frame_ms=profile.speaker_frame_ms,
             prebuffer_ms=profile.speaker_prebuffer_ms,
             max_buffer_ms=profile.speaker_max_buffer_ms,
         )
+
+    def preload_dependencies(self) -> None:
+        """Initialize native RTC dependencies in the commissioned order.
+
+        Unitree must initialize its aiortc boundary before the other native
+        media runtimes. Otherwise ICE completes but DTLS/DataChannel remains
+        stuck in ``connecting``. The service calls this before accepting a
+        platform command so worker timing cannot change that order.
+        """
+
+        with self._dependency_lock:
+            if self._native_dependencies is not None:
+                return
+            try:
+                from .interaction_native import NATIVE_DEPENDENCIES
+            except ImportError as exc:
+                raise RuntimeError(
+                    "realtime media dependencies are unavailable"
+                ) from exc
+            self._native_dependencies = NATIVE_DEPENDENCIES
 
     def set_playback_control_handler(self, handler: Callable[[dict[str, Any]], Any]) -> None:
         self._playback_control_handler = handler
@@ -75,7 +113,13 @@ class LiveKitGo2Transport:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("media transport is already running")
         if self._volume_controller is not None:
-            self._volume_controller.set_and_verify(self.profile.speaker_default_volume)
+            self._startup_stage = "VOLUME_CONTROL"
+            try:
+                self._volume_controller.set_and_verify(
+                    self.profile.speaker_default_volume
+                )
+            except Exception as exc:
+                raise MediaStageError("VOLUME_CONTROL_FAILED") from exc
         self._ready = queue.Queue(maxsize=1)
         self._shutdown.clear()
         self._ever_connected = False
@@ -92,8 +136,9 @@ class LiveKitGo2Transport:
         try:
             result = self._ready.get(timeout=15)
         except queue.Empty as exc:
+            stage = self._startup_stage
             self.disconnect()
-            raise TimeoutError("real media did not become ready within 15 seconds") from exc
+            raise MediaStageError(f"{stage}_TIMEOUT") from exc
         if isinstance(result, BaseException):
             self.disconnect()
             raise result
@@ -114,6 +159,9 @@ class LiveKitGo2Transport:
             self._request = None
         self._microphone_track = None
         self._microphone_muted.clear()
+        with self._timing_lock:
+            self._pending_transcript_at = None
+            self._agent_frame_at = None
         self.speaker.flush()
 
     def refresh(self, request: RealtimeMediaSessionRequest) -> None:
@@ -144,12 +192,57 @@ class LiveKitGo2Transport:
         self.speaker.set_enabled(True)
 
     def status(self) -> dict[str, Any]:
+        with self._timing_lock:
+            audio_timing = {
+                "agentFrames": self._agent_frame_count,
+                "agentFrameGapOver40ms": self._agent_frame_gap_over_40ms,
+                "agentFrameGapMaxMs": round(self._agent_frame_gap_max_ms, 3),
+                "transcriptToAudioSamples": self._transcript_audio_samples,
+                "lastTranscriptToAudioMs": (
+                    round(self._last_transcript_to_audio_ms, 3)
+                    if self._last_transcript_to_audio_ms is not None
+                    else None
+                ),
+                "maxTranscriptToAudioMs": round(
+                    self._max_transcript_to_audio_ms, 3
+                ),
+            }
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "microphoneMuted": self._microphone_muted.is_set(),
             "reconnectCount": self._reconnect_count,
+            "audioTiming": audio_timing,
             "speaker": self.speaker.status(),
         }
+
+    def _accepted_transcript(self, *, now: float | None = None) -> None:
+        with self._timing_lock:
+            self._pending_transcript_at = time.monotonic() if now is None else now
+
+    def _observe_agent_audio_frame(
+        self, *, active: bool, now: float | None = None
+    ) -> None:
+        instant = time.monotonic() if now is None else now
+        with self._timing_lock:
+            if self._agent_frame_at is not None:
+                gap_ms = max(0.0, (instant - self._agent_frame_at) * 1000.0)
+                self._agent_frame_gap_max_ms = max(
+                    self._agent_frame_gap_max_ms, gap_ms
+                )
+                if gap_ms > 40.0:
+                    self._agent_frame_gap_over_40ms += 1
+            self._agent_frame_at = instant
+            self._agent_frame_count += 1
+            if active and self._pending_transcript_at is not None:
+                latency_ms = max(
+                    0.0, (instant - self._pending_transcript_at) * 1000.0
+                )
+                self._last_transcript_to_audio_ms = latency_ms
+                self._max_transcript_to_audio_ms = max(
+                    self._max_transcript_to_audio_ms, latency_ms
+                )
+                self._transcript_audio_samples += 1
+                self._pending_transcript_at = None
 
     def handle_data_message(
         self, payload: Any, *, participant_identity: str
@@ -175,7 +268,13 @@ class LiveKitGo2Transport:
             handler = self._wake_transcript_handler
             if handler is None:
                 return False
-            handler({"action": "wake_transcript", "text": text})
+            result = handler({"action": "wake_transcript", "text": text})
+            if (
+                isinstance(result, dict)
+                and result.get("accepted") is True
+                and result.get("action") in {"wake", "continue"}
+            ):
+                self._accepted_transcript()
             return True
         return False
 
@@ -192,7 +291,13 @@ class LiveKitGo2Transport:
             except BaseException as exc:
                 if not self._ever_connected:
                     if self._ready.empty():
-                        self._ready.put(exc)
+                        error = exc
+                        if not isinstance(error, MediaStageError):
+                            error = MediaStageError(
+                                f"{self._startup_stage}_FAILED"
+                            )
+                            error.__cause__ = exc
+                        self._ready.put(error)
                     return
                 self._reconnect_count += 1
                 self._notify_health(False, f"{type(exc).__name__}: media reconnect pending")
@@ -210,17 +315,16 @@ class LiveKitGo2Transport:
             pass
 
     async def _run(self, request: RealtimeMediaSessionRequest) -> None:
-        sys.modules.setdefault("sounddevice", types.ModuleType("sounddevice"))
-        try:
-            import av
-            from aiortc import MediaStreamTrack
-            from livekit import rtc
-            from unitree_webrtc_connect import (
-                UnitreeWebRTCConnection,
-                WebRTCConnectionMethod,
-            )
-        except ImportError as exc:
-            raise RuntimeError("realtime media dependencies are unavailable") from exc
+        self._startup_stage = "DEPENDENCY_IMPORT"
+        self.preload_dependencies()
+        assert self._native_dependencies is not None
+        (
+            av,
+            MediaStreamTrack,
+            rtc,
+            UnitreeWebRTCConnection,
+            WebRTCConnectionMethod,
+        ) = self._native_dependencies
 
         profile = self.profile
         speaker_buffer = self.speaker
@@ -291,7 +395,9 @@ class LiveKitGo2Transport:
                 async for event in stream:
                     pcm = bytes(event.frame.data)
                     speaker_buffer.append(pcm)
-                    if audioop.rms(pcm, 2) >= 90:
+                    active = audioop.rms(pcm, 2) >= 90
+                    self._observe_agent_audio_frame(active=active)
+                    if active:
                         playback_active_until = time.monotonic() + 0.35
                         set_playback_active(True)
                     if self._session_stop.is_set():
@@ -382,28 +488,35 @@ class LiveKitGo2Transport:
                 container.close()
 
         try:
+            self._startup_stage = "GO2_SESSION_CREATE"
             go2 = UnitreeWebRTCConnection(
                 WebRTCConnectionMethod.LocalSTA,
                 ip=profile.go2_ip,
                 aes_128_key=self._unitree_key,
             )
+            self._startup_stage = "GO2_CONNECT"
             await go2.connect()
+            self._startup_stage = "GO2_SPEAKER_ATTACH"
             go2.pc.addTrack(SpeakerTrack())
+            self._startup_stage = "LIVEKIT_CONNECT"
             await room.connect(request.url, request.token, rtc.RoomOptions(auto_subscribe=True))
 
             audio_publication = None
             if request.publish_audio:
+                self._startup_stage = "MICROPHONE_PUBLISH"
                 audio_source = rtc.AudioSource(profile.microphone_rate_hz, 1, queue_size_ms=120)
                 self._microphone_track = rtc.LocalAudioTrack.create_audio_track("robot-microphone", audio_source)
                 audio_publication = await room.local_participant.publish_track(
                     self._microphone_track,
                     rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
                 )
+                self._startup_stage = "MICROPHONE_CAPTURE_START"
                 tasks.append(asyncio.create_task(publish_microphone()))
                 go2.audio.switchAudioChannel(True)
 
             video_publication = None
             if request.publish_video:
+                self._startup_stage = "CAMERA_PUBLISH"
                 video_source = rtc.VideoSource(profile.video_width, profile.video_height)
                 camera = rtc.LocalVideoTrack.create_video_track("z1pro-camera", video_source)
                 video_publication = await room.local_participant.publish_track(
@@ -417,15 +530,20 @@ class LiveKitGo2Transport:
                         ),
                     ),
                 )
+                self._startup_stage = "CAMERA_CAPTURE_START"
                 tasks.append(asyncio.create_task(publish_camera()))
 
             tasks.append(asyncio.create_task(playback_monitor()))
             if request.publish_audio:
+                self._startup_stage = "MICROPHONE_READY"
                 await asyncio.wait_for(mic_ready.wait(), timeout=5)
             if request.publish_video:
+                self._startup_stage = "CAMERA_READY"
                 await asyncio.wait_for(video_ready.wait(), timeout=8)
             if request.subscribe_audio:
+                self._startup_stage = "AGENT_AUDIO_READY"
                 await asyncio.wait_for(agent_audio_ready.wait(), timeout=5)
+            self._startup_stage = "MEDIA_READY"
             receipt = MediaConnectionReceipt(
                 participant_id=request.robot_id if request.robot_id.startswith("robot:") else f"robot:{request.robot_id}",
                 video_published=video_publication is not None,

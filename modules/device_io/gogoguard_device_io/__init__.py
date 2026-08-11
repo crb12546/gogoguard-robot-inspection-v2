@@ -9,7 +9,7 @@ from .interaction_media import (
     load_interaction_hardware_profile,
     microphone_capture_command,
 )
-from .livekit_go2 import LiveKitGo2Transport
+from .livekit_go2 import LiveKitGo2Transport, MediaStageError
 from .z1pro_gimbal import (
     Z1ProGimbal,
     Z1ProGimbalReply,
@@ -24,7 +24,7 @@ __all__ = [
     "Go2VolumeController", "InteractionHardwareProfile", "NavigationReadOnlyGuard",
     "SpeakerJitterBuffer", "decode_s24_3le_stereo_to_s16_mono",
     "load_interaction_hardware_profile", "microphone_capture_command",
-    "LiveKitGo2Transport",
+    "LiveKitGo2Transport", "MediaStageError",
     "Z1ProGimbal",
     "Z1ProGimbalReply",
     "build_gcu_packet",

@@ -51,9 +51,9 @@ boot. Explicit Docker stop handling keeps later upgrades under systemd control.
 
 During the temporary Alibaba Cloud ICP interception only, run
 `configure-combined-joint-test --temporary-icp-fallback`. It keeps heartbeat
-payloads on HTTPS at the pinned platform IP, temporarily disables certificate
-hostname verification, and permits the platform-issued `ws://39.96.37.187:7880`
-LiveKit URL. It does not permit HTTP heartbeat. Run the helper again without
+payloads on the platform-frozen `http://39.96.37.187` endpoint and permits the
+platform-issued `ws://39.96.37.187` LiveKit URL through the `/rtc` reverse
+proxy. Run the helper again without
 the option as soon as the public domain is restored to return to strict
 HTTPS/WSS defaults.
 

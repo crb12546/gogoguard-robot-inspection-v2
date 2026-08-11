@@ -189,9 +189,15 @@ class InteractionManager:
             if not receipt.participant_id:
                 raise RuntimeError("media transport returned no participant id")
         except Exception as exc:
+            safe_code = getattr(exc, "safe_code", "MEDIA_CONNECT_FAILED")
+            if (
+                not isinstance(safe_code, str)
+                or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", safe_code) is None
+            ):
+                safe_code = "MEDIA_CONNECT_FAILED"
             with self._lock:
                 self._status.state = InteractionSessionState.FAILED
-                self._status.last_error_code = "MEDIA_CONNECT_FAILED"
+                self._status.last_error_code = safe_code
                 self._status.last_error = f"{type(exc).__name__}: media transport failed"
                 self._status.observed_at = utc_now()
                 return replace(self._status)

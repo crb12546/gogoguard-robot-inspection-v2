@@ -67,19 +67,20 @@ upsert GOGOGUARD_INTERACTION_ENABLED 1
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED 1
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S 5
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER ""
-upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0
-
 if [[ $profile == temporary-icp-fallback ]]; then
-  # Temporary 2026-08 field profile. Alibaba Cloud's ICP interception resets
-  # TLS when the public domain is used. Keep the heartbeat encrypted over the
-  # fixed IP and allow only the platform-issued ws URL until filing recovers.
+  # Temporary 2026-08 field profile frozen with the platform team. Alibaba
+  # Cloud's ICP interception blocks the public domain on the robot network, so
+  # robot traffic uses the fixed IP. LiveKit remains command-supplied and is
+  # never hard-coded here.
   upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 1
-  upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL https://39.96.37.187/api/v1/robot/heartbeat
-  upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 1
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL http://39.96.37.187/api/v1/robot/heartbeat
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 1
 else
   upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 0
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL https://gogoguard.cn/api/v1/robot/heartbeat
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0
 fi
 
 chown root:root "$TEMPORARY_ENV"

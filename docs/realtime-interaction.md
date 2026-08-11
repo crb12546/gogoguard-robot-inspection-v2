@@ -22,7 +22,9 @@ the local Unix socket. It cannot forward a movement command.
   and 2.5 Mbit/s LiveKit encoding.
 - Go2: local WebRTC at `192.168.123.161`; `agent-voice` is played as 48 kHz
   mono 20 ms PCM through a 120 ms prebuffer and a bounded 3 second queue.
-- Speaker volume: VUI 10/10 is applied and read back at every session start.
+- Speaker volume: VUI 10/10 is applied and read back during service startup.
+  A real operator comparison found 7/10 clearer but too quiet for the field;
+  the operator explicitly retained 10/10 as the commissioned default.
 
 Exact track names are `robot-microphone`, `z1pro-camera` and `agent-voice`.
 
@@ -130,8 +132,10 @@ GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S=5
 The August 2026 joint test uses the explicit
 `configure-combined-joint-test --temporary-icp-fallback` deployment profile
 while Alibaba Cloud's ICP interception blocks the public domain. This profile
-uses the pinned HTTPS IP for heartbeat with temporary hostname-verification
-bypass and accepts the platform-issued `ws://39.96.37.187:7880` media URL. It is
+uses the platform-frozen `http://39.96.37.187/api/v1/robot/heartbeat` endpoint
+and accepts the platform-issued `ws://39.96.37.187` media URL through its `/rtc`
+reverse proxy. The media URL is always consumed from `start_live` and is not
+hard-coded on the robot. It is
 not a production default and must be removed by rerunning the helper without
 the option after `gogoguard.cn` becomes publicly reachable.
 

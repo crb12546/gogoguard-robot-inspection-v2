@@ -127,7 +127,7 @@ class InteractionManagerTest(unittest.TestCase):
     def test_production_requires_tls_and_development_ws_is_explicit(self) -> None:
         manager, _ = self.create_manager()
         payload = start_payload()
-        payload["params"]["url"] = "ws://39.96.37.187:7880"
+        payload["params"]["url"] = "ws://39.96.37.187"
         with self.assertRaisesRegex(ValueError, "wss"):
             manager.start(payload)
         developer_manager, _ = self.create_manager()
@@ -165,6 +165,21 @@ class InteractionManagerTest(unittest.TestCase):
         self.assertEqual(status.state, InteractionSessionState.FAILED)
         self.assertTrue(status.desired_live)
         self.assertNotIn(token, status.last_error or "")
+
+    def test_transport_reports_only_valid_public_safe_stage_code(self) -> None:
+        manager, transport = self.create_manager()
+        staged = RuntimeError("private transport detail")
+        staged.safe_code = "LIVEKIT_CONNECT_TIMEOUT"
+        transport.connect_error = staged
+        status = manager.start(start_payload())
+        self.assertEqual(status.last_error_code, "LIVEKIT_CONNECT_TIMEOUT")
+
+        manager, transport = self.create_manager()
+        invalid = RuntimeError("private transport detail")
+        invalid.safe_code = "bad detail with spaces"
+        transport.connect_error = invalid
+        status = manager.start(start_payload())
+        self.assertEqual(status.last_error_code, "MEDIA_CONNECT_FAILED")
 
     def test_half_duplex_and_ordered_interrupt(self) -> None:
         manager, transport = self.create_manager()
