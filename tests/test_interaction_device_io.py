@@ -44,10 +44,18 @@ class InteractionDeviceIoTest(unittest.TestCase):
             ROOT / "modules/device_io/ros/go2_cmd_vel_bridge/CMakeLists.txt"
         ).read_text(encoding="utf-8")
         dockerfile = (ROOT / "deployment/container/Dockerfile").read_text(encoding="utf-8")
+        combined = (ROOT / "deployment/container/Dockerfile.combined").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("unitree/robot/go2/vui/vui_client.hpp", source)
         self.assertIn("requested > 10", source)
         self.assertIn("add_executable(go2_vui_control", cmake)
         self.assertIn("test -x install/lib/go2_cmd_vel_bridge/go2_vui_control", dockerfile)
+        self.assertIn("src/go2_vui_control.cpp", combined)
+        self.assertIn(
+            "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control",
+            combined,
+        )
 
     def test_boya_s24_stereo_conversion_gain_and_clip(self) -> None:
         converted = decode_s24_3le_stereo_to_s16_mono(

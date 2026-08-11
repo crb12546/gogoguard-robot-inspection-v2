@@ -78,6 +78,8 @@ for required in (
     "--target /opt/gogoguard/interaction-python",
     'numpy.__version__ == "1.21.5"',
     'numpy.__version__ == "2.0.2"',
+    "src/go2_vui_control.cpp",
+    "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control",
 ):
     if required not in combined_content:
         raise SystemExit(f"combined release is missing frozen-baseline contract: {required}")

@@ -179,6 +179,13 @@ They are installed under `/opt/gogoguard/interaction-python`; only the two
 realtime daemons receive that `PYTHONPATH`, so their NumPy 2.0.2 cannot replace
 the accepted ROS process NumPy 1.21.5.
 
+The frozen V6-r4 filesystem predates the interaction-only VUI helper. The
+combined application layer compiles exactly `go2_vui_control.cpp` against the
+already pinned Unitree SDK and installs only that single-purpose volume
+set/readback binary. It does not rebuild or replace the accepted motion
+receiver. BOYA capture reuses the frozen image's existing FFmpeg ALSA input, so
+no additional Ubuntu package is installed.
+
 The build uses the retained probe wheel directories as named BuildKit
 contexts:
 

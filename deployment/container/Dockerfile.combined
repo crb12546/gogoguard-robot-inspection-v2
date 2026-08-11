@@ -35,9 +35,21 @@ RUN cd /tmp/interaction-wheels \
     && python3 -c 'import numpy; assert numpy.__version__ == "1.21.5"' \
     && PYTHONPATH=/opt/gogoguard/interaction-python python3 -c \
       'import sys, types; sys.modules.setdefault("sounddevice", types.ModuleType("sounddevice")); import av, livekit, numpy, unitree_webrtc_connect; assert numpy.__version__ == "2.0.2"' \
+    && g++ -std=c++17 -O2 \
+      -I/opt/gogoguard/deps/include \
+      -I/opt/gogoguard/deps/include/ddscxx \
+      /opt/gogoguard/app/modules/device_io/ros/go2_cmd_vel_bridge/src/go2_vui_control.cpp \
+      /opt/gogoguard/deps/lib/libunitree_sdk2.a \
+      -L/opt/gogoguard/deps/lib \
+      -Wl,-rpath,/opt/gogoguard/deps/lib \
+      -lddsc -lddscxx -pthread \
+      -o /tmp/go2_vui_control \
+    && install -m 0755 /tmp/go2_vui_control \
+      /opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control \
+    && test -x /opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control \
     && install -m 0755 /tmp/gogoguard-edge-entrypoint \
       /usr/local/bin/gogoguard-edge-entrypoint \
     && rm -rf /tmp/gogoguard-edge-entrypoint /tmp/interaction-requirements.txt \
-      /tmp/interaction-wheelhouse.sha256 /tmp/interaction-wheels
+      /tmp/interaction-wheelhouse.sha256 /tmp/interaction-wheels /tmp/go2_vui_control
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/gogoguard-edge-entrypoint"]
