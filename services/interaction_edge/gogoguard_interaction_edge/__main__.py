@@ -16,6 +16,11 @@ def main() -> None:
     parser.add_argument("--persona-config", type=Path, required=True)
     parser.add_argument("--socket", type=Path, default=Path("/var/lib/gogoguard/interaction/control.sock"))
     parser.add_argument("--status", type=Path, default=Path("/var/lib/gogoguard/interaction/status.json"))
+    parser.add_argument(
+        "--mission-inbox",
+        type=Path,
+        default=Path("/var/lib/gogoguard/platform/checkpoint-inbox.jsonl"),
+    )
     parser.add_argument("--allow-insecure-ws", action="store_true")
     parser.add_argument(
         "--volume-executable",
@@ -33,6 +38,7 @@ def main() -> None:
         unitree_aes_128_key=key,
         volume_executable=args.volume_executable,
         status_path=args.status,
+        mission_inbox_path=args.mission_inbox,
         allow_insecure_ws=args.allow_insecure_ws,
     )
     server = InteractionUnixServer(args.socket, service)

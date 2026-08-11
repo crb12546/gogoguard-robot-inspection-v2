@@ -58,6 +58,7 @@ class LiveKitGo2Transport:
         self._ready: queue.Queue[MediaConnectionReceipt | BaseException] = queue.Queue(maxsize=1)
         self._playback_control_handler: Callable[[dict[str, Any]], Any] | None = None
         self._wake_transcript_handler: Callable[[dict[str, Any]], Any] | None = None
+        self._mission_message_handler: Callable[[dict[str, Any]], Any] | None = None
         self._playback_state_handler: Callable[[bool], Any] | None = None
         self._health_handler: Callable[[bool, str | None], Any] | None = None
         self._ever_connected = False
@@ -113,6 +114,9 @@ class LiveKitGo2Transport:
 
     def set_wake_transcript_handler(self, handler: Callable[[dict[str, Any]], Any]) -> None:
         self._wake_transcript_handler = handler
+
+    def set_mission_message_handler(self, handler: Callable[[dict[str, Any]], Any]) -> None:
+        self._mission_message_handler = handler
 
     def set_playback_state_handler(self, handler: Callable[[bool], Any]) -> None:
         self._playback_state_handler = handler
@@ -347,7 +351,7 @@ class LiveKitGo2Transport:
     def handle_data_message(
         self, payload: Any, *, participant_identity: str
     ) -> bool:
-        """Dispatch the two frozen agent-to-robot DataChannel schemas only."""
+        """Dispatch only frozen agent-to-robot DataChannel schemas."""
 
         if not participant_identity.startswith("agent:") or not isinstance(payload, dict):
             return False
@@ -375,6 +379,15 @@ class LiveKitGo2Transport:
                 and result.get("action") in {"wake", "continue"}
             ):
                 self._accepted_transcript()
+            return True
+        if schema in {
+            "gogoguard.checkpoint_verdict.v1",
+            "gogoguard.announcement_completed.v1",
+        }:
+            handler = self._mission_message_handler
+            if handler is None:
+                return False
+            handler(payload)
             return True
         return False
 

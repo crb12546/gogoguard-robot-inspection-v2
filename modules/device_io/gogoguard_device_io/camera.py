@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from urllib.request import urlopen
 
 from gogoguard_contracts import CameraStreamStatus
@@ -54,6 +55,44 @@ class CameraGateway:
         base.level = _optional_text(props.get("level"))
         base.message = "Z1Pro 实时画面已连接" if base.ready else "等待浏览器连接 Z1Pro"
         return base
+
+    def capture_jpeg(self) -> bytes:
+        """Capture one configuration sample without involving the platform."""
+        if self.mode == "demo":
+            # Small deterministic JPEG used only by the offline UI/contract harness.
+            return bytes.fromhex(
+                "ffd8ffe000104a46494600010100000100010000ffdb004300"
+                + "08" * 64
+                + "ffc0000b080001000101011100ffc40014000100000000000000000000000000000000"
+                + "ffda0008010100003f00ffd9"
+            )
+        if not bool(self.config.get("enabled", False)):
+            raise RuntimeError("Z1Pro camera is not enabled")
+        source = str(
+            self.config.get("capture_url")
+            or self.config.get("rtsp_url")
+            or "rtsp://192.168.144.108/"
+        )
+        timeout_s = float(self.config.get("capture_timeout_s") or 8.0)
+        command = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-rtsp_transport", "tcp", "-i", source,
+            "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout_s,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("Z1Pro sample capture failed") from exc
+        payload = bytes(result.stdout)
+        if len(payload) < 4 or not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+            raise RuntimeError("Z1Pro returned an invalid JPEG sample")
+        return payload
 
 
 def _optional_int(value) -> int | None:

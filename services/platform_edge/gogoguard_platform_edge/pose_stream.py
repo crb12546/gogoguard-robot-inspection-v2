@@ -41,6 +41,7 @@ def build_pose_stream_payload(
     yaw_rad: float,
     source_at: str,
     localization: dict[str, Any],
+    mission: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not robot_id or not map_version or not route_id:
         raise ValueError("pose identity and map binding are required")
@@ -51,7 +52,7 @@ def build_pose_stream_payload(
     confidence = _optional_finite(localization.get("confidence"))
     age_s = localization.get("ageS", localization.get("age_s"))
     age_s = _optional_finite(age_s)
-    return {
+    payload = {
         "schema": "gogoguard.robot_pose.v1",
         "robotId": robot_id,
         "sequence": sequence,
@@ -75,6 +76,50 @@ def build_pose_stream_payload(
         "sourceAt": source_at,
         "observedAt": utc_now(),
     }
+    if mission is not None:
+        payload["mission"] = mission
+    return payload
+
+
+def build_mission_pose_context(
+    runtime: dict[str, Any],
+    platform_checkpoint: dict[str, Any],
+    *,
+    spin_progress_rad: float | None = None,
+) -> dict[str, Any] | None:
+    checkpoint = runtime.get("checkpoint")
+    checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+    mission_id = str(checkpoint.get("missionId") or "")
+    if not mission_id:
+        return None
+    nav_phase = str(checkpoint.get("phase") or "TRAVELING")
+    phase = {
+        "TRAVELING": "traveling",
+        "PAUSING": "stopping",
+        "SETTLING": "stopping",
+        "POSE_REQUESTED": "posing",
+        "POSING": "posing",
+        "SPIN_REQUESTED": "spinning",
+        "SPINNING": "spinning",
+        "WAITING_VERDICT": "waiting_verdict",
+    }.get(nav_phase, "idle")
+    if nav_phase == "WAITING_PLATFORM":
+        stage = str(platform_checkpoint.get("stage") or "")
+        phase = "announcing" if stage in {"new", "announcing"} else "capturing"
+    camera = platform_checkpoint.get("camera")
+    if not isinstance(camera, dict):
+        camera = checkpoint.get("camera")
+    if not isinstance(camera, dict):
+        camera = {"pan": 0.0, "tilt": 0.0}
+    value: dict[str, Any] = {
+        "missionId": mission_id,
+        "checkpointId": checkpoint.get("activeCheckpointId"),
+        "phase": phase,
+        "camera": camera,
+    }
+    if phase == "spinning" and spin_progress_rad is not None:
+        value["spinProgressRad"] = max(0.0, float(spin_progress_rad))
+    return value
 
 
 class InteractionPoseClient:
@@ -145,6 +190,11 @@ def main() -> None:
         default=Path("/var/lib/gogoguard/interaction/control.sock"),
     )
     parser.add_argument("--max-hz", type=float, default=10.0)
+    parser.add_argument(
+        "--checkpoint-state",
+        type=Path,
+        default=Path("/var/lib/gogoguard/platform/checkpoint-state.json"),
+    )
     args = parser.parse_args()
     if not 1.0 <= args.max_hz <= 20.0:
         raise SystemExit("max-hz must be between 1 and 20")
@@ -158,9 +208,11 @@ def main() -> None:
     sequence = 0
     last_attempt = 0.0
     last_log = 0.0
+    spin_progress = 0.0
+    last_spin_yaw: float | None = None
 
     def pose_callback(message: PoseWithCovarianceStamped) -> None:
-        nonlocal sequence, last_attempt, last_log
+        nonlocal sequence, last_attempt, last_log, spin_progress, last_spin_yaw
         now = time.monotonic()
         if now - last_attempt < 1.0 / args.max_hz:
             return
@@ -180,6 +232,17 @@ def main() -> None:
             2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
             1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z),
         )
+        checkpoint = runtime.get("checkpoint")
+        checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        if checkpoint.get("phase") == "SPINNING":
+            if last_spin_yaw is not None:
+                spin_progress += abs(
+                    math.atan2(math.sin(yaw - last_spin_yaw), math.cos(yaw - last_spin_yaw))
+                )
+            last_spin_yaw = yaw
+        else:
+            spin_progress = 0.0
+            last_spin_yaw = None
         try:
             payload = build_pose_stream_payload(
                 robot_id=args.robot_id,
@@ -193,6 +256,11 @@ def main() -> None:
                 yaw_rad=yaw,
                 source_at=_source_time(message.header.stamp),
                 localization=localization,
+                mission=build_mission_pose_context(
+                    runtime,
+                    _read_navigation_status(args.checkpoint_state),
+                    spin_progress_rad=spin_progress,
+                ),
             )
             accepted = client.publish(payload)
             if accepted:

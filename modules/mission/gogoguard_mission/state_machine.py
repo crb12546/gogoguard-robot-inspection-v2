@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, replace
 
 from gogoguard_contracts import (
@@ -10,11 +9,9 @@ from gogoguard_contracts import (
     MissionState,
     MissionStatus,
     NavigationStopReceipt,
+    is_safe_external_id,
     utc_now,
 )
-
-
-SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 @dataclass(frozen=True)
@@ -30,14 +27,14 @@ def validate_mission_plan(plan: MissionPlan) -> MissionPlan:
         ("map_version", plan.map_version),
         ("route_id", plan.route_id),
     ):
-        if not SAFE_ID.fullmatch(value):
+        if not is_safe_external_id(value):
             raise ValueError(f"{name} is invalid")
     if not isinstance(plan.offline_continue_after_evidence, bool):
         raise ValueError("offline continue policy must be boolean")
     last_index = -1
     checkpoint_ids: set[str] = set()
     for checkpoint in plan.checkpoints:
-        if not SAFE_ID.fullmatch(checkpoint.checkpoint_id):
+        if not is_safe_external_id(checkpoint.checkpoint_id):
             raise ValueError("checkpoint_id is invalid")
         if checkpoint.checkpoint_id in checkpoint_ids:
             raise ValueError("checkpoint_id must be unique")
@@ -48,12 +45,20 @@ def validate_mission_plan(plan: MissionPlan) -> MissionPlan:
             or checkpoint.route_progress_index < 0
         ):
             raise ValueError("checkpoint route index must be a non-negative integer")
-        if checkpoint.route_progress_index <= last_index:
-            raise ValueError("checkpoints must have strictly increasing route indexes")
+        if checkpoint.route_progress_index < last_index:
+            raise ValueError("checkpoints must follow non-decreasing route indexes")
         last_index = checkpoint.route_progress_index
+        if (
+            isinstance(checkpoint.dwell_s, bool)
+            or not isinstance(checkpoint.dwell_s, (int, float))
+            or not 0.0 <= float(checkpoint.dwell_s) <= 30.0
+        ):
+            raise ValueError("checkpoint dwell must be between 0 and 30 seconds")
+        if not isinstance(checkpoint.spin, bool):
+            raise ValueError("checkpoint spin policy must be boolean")
         view_ids: set[str] = set()
         for view in checkpoint.views:
-            if not SAFE_ID.fullmatch(view.view_id) or view.view_id in view_ids:
+            if not is_safe_external_id(view.view_id) or view.view_id in view_ids:
                 raise ValueError("view_id must be valid and unique within a checkpoint")
             view_ids.add(view.view_id)
             for angle in (
@@ -70,6 +75,18 @@ def validate_mission_plan(plan: MissionPlan) -> MissionPlan:
                     raise ValueError("inspection view values must be finite")
             if view.settle_s < 0.0:
                 raise ValueError("inspection view settle time must not be negative")
+    if (
+        isinstance(plan.verdict_timeout_s, bool)
+        or not isinstance(plan.verdict_timeout_s, int)
+        or not 5 <= plan.verdict_timeout_s <= 120
+    ):
+        raise ValueError("verdict timeout must be between 5 and 120 seconds")
+    if (
+        isinstance(plan.max_retake_attempts, bool)
+        or not isinstance(plan.max_retake_attempts, int)
+        or not 0 <= plan.max_retake_attempts <= 5
+    ):
+        raise ValueError("max retake attempts must be between 0 and 5")
     return plan
 
 

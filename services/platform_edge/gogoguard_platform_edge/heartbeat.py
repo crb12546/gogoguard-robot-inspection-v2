@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from gogoguard_contracts import utc_now
+from gogoguard_contracts import utc_now, validate_platform_mission_message
 
 
 MAX_HTTP_BYTES = 1024 * 1024
@@ -306,6 +306,10 @@ class PlatformHeartbeatService:
         post_result: Callable[[str, dict[str, Any], float], dict[str, Any]] | None = None,
         interval_s: float = 5.0,
         timeout_s: float = 10.0,
+        mission_inbox_path: Path = Path(
+            "/var/lib/gogoguard/platform/checkpoint-inbox.jsonl"
+        ),
+        checkpoint_coordinator: Any | None = None,
     ) -> None:
         if not robot_id or len(robot_id) > 128:
             raise ValueError("robot id is invalid")
@@ -328,6 +332,8 @@ class PlatformHeartbeatService:
         self.post_result = post_result
         self.interval_s = float(interval_s)
         self.timeout_s = float(timeout_s)
+        self.mission_inbox_path = Path(mission_inbox_path)
+        self.checkpoint_coordinator = checkpoint_coordinator
         self._sequence = 0
         self._last_success_at: str | None = None
         self._last_error_code: str | None = None
@@ -480,7 +486,8 @@ class PlatformHeartbeatService:
         action = command.get("action", command.get("type"))
         interaction_actions = {"start_live", "stop_live", "wake_transcript"}
         patrol_actions = {"start_patrol", "stop_patrol"}
-        if action not in interaction_actions | patrol_actions:
+        mission_actions = {"checkpoint_verdict", "announcement_completed"}
+        if action not in interaction_actions | patrol_actions | mission_actions:
             raise ValueError("platform command is outside the robot allow-list")
         if self.ledger.contains(command_id):
             self._duplicate_commands += 1
@@ -492,7 +499,21 @@ class PlatformHeartbeatService:
                 "status": "duplicate",
                 "message": "command already processed",
             }
-        if action in interaction_actions:
+        if action in mission_actions:
+            value = command.get("payload", command.get("params"))
+            if not isinstance(value, dict):
+                value = {
+                    key: item
+                    for key, item in command.items()
+                    if key not in {"id", "action", "type"}
+                }
+            expected_schema = f"gogoguard.{action}.v1"
+            if value.get("schema") != expected_schema:
+                raise ValueError("platform mission fallback schema is invalid")
+            value = validate_platform_mission_message(value)
+            self._append_mission_message(value)
+            response = {"result": {"state": "accepted"}}
+        elif action in interaction_actions:
             response = self.interaction_client.request(command)
         else:
             response = self.navigation_client.request(command)
@@ -509,6 +530,25 @@ class PlatformHeartbeatService:
             "message": "command accepted by robot service",
             "operationId": result.get("operationId"),
         }
+
+    def _append_mission_message(self, value: dict[str, Any]) -> None:
+        encoded = (
+            json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            + "\n"
+        ).encode("utf-8")
+        if len(encoded) > 65536:
+            raise ValueError("platform mission fallback exceeds 64 KiB")
+        self.mission_inbox_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.mission_inbox_path,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+            0o640,
+        )
+        try:
+            os.write(descriptor, encoded)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def _report_command_result(
         self, command: Any, outcome: dict[str, Any]
@@ -540,11 +580,22 @@ class PlatformHeartbeatService:
             self._command_results_sent += 1
 
     def run(self, stop_event: threading.Event) -> None:
+        coordinator_thread = None
+        if self.checkpoint_coordinator is not None:
+            coordinator_thread = threading.Thread(
+                target=self.checkpoint_coordinator.run,
+                args=(stop_event,),
+                name="platform-checkpoint-coordinator",
+                daemon=True,
+            )
+            coordinator_thread.start()
         while not stop_event.is_set():
             started = time.monotonic()
             self.poll_once()
             remaining = max(0.0, self.interval_s - (time.monotonic() - started))
             stop_event.wait(remaining)
+        if coordinator_thread is not None:
+            coordinator_thread.join(timeout=2.0)
 
     def _write_status(self, *, online: bool) -> None:
         _atomic_json(

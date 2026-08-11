@@ -35,7 +35,8 @@ def main() -> None:
                                 robot_id=args.robot_id, site_id=args.site_id,
                                 sensor_id=args.sensor_id,
                                 topics=config["topics"], cloud=config.get("cloud"),
-                                camera=config.get("camera"), capabilities=capabilities)
+                                camera=config.get("camera"), capabilities=capabilities,
+                                gimbal=config.get("gimbal"))
     app.start()
     server = SiteConsoleServer((args.host, args.port), app, args.static_root)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())

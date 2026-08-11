@@ -2,11 +2,11 @@
   "id": "data_capture",
   "responsibility": "Start, stop, seal and replay raw mapping evidence without owning algorithms",
   "runtime": ["robot"],
-  "status": "real_mapping_recording_and_sealed_bundle_field_verified",
+  "status": "real_mapping_recording_field_verified_plus_checkpoint_pose_camera_and_sample_sealing_implemented_local_acceptance_pending",
   "codeRoots": ["modules/data_capture", "third_party/locked_stack/src/go2_mapping_capture"],
   "entrypoints": ["gogoguard_data_capture.manager:CaptureManager", "go2_mapping_capture/launch/mid360_mapping_capture.launch.py"],
   "dependsOn": ["contracts", "device_io", "calibration", "localization", "evidence"],
-  "consumes": ["PointCloud2", "Imu", "Odometry"],
-  "produces": ["RecordingBundle", "rosbag2 MCAP"],
-  "sourceProvenance": ["V2 lifecycle plus locked real mapping launch/config from old commit 3a7597c"]
+  "consumes": ["PointCloud2", "Imu", "Odometry", "recording-time Z1Pro angles", "local JPEG configuration sample"],
+  "produces": ["RecordingBundle", "rosbag2 MCAP", "gogoguard.recording_checkpoints.v1", "hashed checkpoint sample images"],
+  "sourceProvenance": ["V2 lifecycle plus locked real mapping launch/config from old commit 3a7597c", "2026-08-11 frozen recording-as-configuration workflow persists stable checkpoint IDs, raw pose, camera target, spin intent and local sample inside the sealed bundle"]
 }

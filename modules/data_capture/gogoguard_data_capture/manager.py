@@ -121,6 +121,119 @@ class CaptureManager:
             self.journal.append("recording.sealed", session_id=session_id, samples=session.sample_count, manifest=str(manifest_path))
             return self.get(session_id)
 
+    def checkpoints(self, session_id: str) -> dict:
+        session = self.get(session_id)
+        path = Path(session.root) / "samples" / "inspection" / "checkpoints.json"
+        if not path.is_file():
+            return {
+                "schema": "gogoguard.recording_checkpoints.v1",
+                "sessionId": session_id,
+                "checkpoints": [],
+            }
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("schema") != "gogoguard.recording_checkpoints.v1":
+            raise CaptureError("recording checkpoint metadata is invalid")
+        return value
+
+    def mark_checkpoint(
+        self,
+        session_id: str,
+        *,
+        camera_pan_deg: float,
+        camera_tilt_deg: float,
+        camera_roll_deg: float = 0.0,
+        note: str = "",
+        spin: bool = True,
+        sample_jpeg: bytes,
+    ) -> dict:
+        with self._lock:
+            if self._active_id != session_id:
+                raise CaptureError("checkpoints can only be marked during the active recording")
+            if (
+                not isinstance(sample_jpeg, (bytes, bytearray))
+                or not bytes(sample_jpeg).startswith(b"\xff\xd8")
+                or not bytes(sample_jpeg).endswith(b"\xff\xd9")
+            ):
+                raise CaptureError("checkpoint sample must be a JPEG")
+            value = self.checkpoints(session_id)
+            items = list(value.get("checkpoints") or [])
+            ordinal = max(
+                [
+                    int(str(item.get("checkpointId") or "cp_00").rsplit("_", 1)[-1])
+                    for item in items
+                    if str(item.get("checkpointId") or "").startswith("cp_")
+                    and str(item.get("checkpointId") or "").rsplit("_", 1)[-1].isdigit()
+                ]
+                or [0]
+            ) + 1
+            checkpoint_id = f"cp_{ordinal:02d}"
+            root = Path(self._sessions[session_id].root) / "samples" / "inspection"
+            root.mkdir(parents=True, exist_ok=True)
+            relative_sample = f"{checkpoint_id}-main.jpg"
+            sample_path = root / relative_sample
+            temporary_sample = sample_path.with_name(f".{sample_path.name}.part")
+            with temporary_sample.open("wb") as handle:
+                handle.write(bytes(sample_jpeg))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_sample, sample_path)
+            snapshot = json_ready(self.store.get())
+            pose = dict(snapshot.get("pose") or {})
+            item = {
+                "checkpointId": checkpoint_id,
+                "recordingSampleIndex": int(self._sessions[session_id].sample_count),
+                "recordingSequence": int(snapshot.get("sequence") or 0),
+                "markedAt": utc_now(),
+                "rawPose": {
+                    "x": float(pose.get("x") or 0.0),
+                    "y": float(pose.get("y") or 0.0),
+                    "z": float(pose.get("z") or 0.0),
+                    "yaw": float(pose.get("yaw") or 0.0),
+                },
+                "camera": {
+                    "pan": float(camera_pan_deg),
+                    "tilt": float(camera_tilt_deg),
+                    "roll": float(camera_roll_deg),
+                    "frame": "carrier_relative",
+                },
+                "spin": bool(spin),
+                "note": str(note or "")[:200],
+                "sampleFrames": [f"samples/inspection/{relative_sample}"],
+            }
+            items.append(item)
+            payload = {
+                "schema": "gogoguard.recording_checkpoints.v1",
+                "sessionId": session_id,
+                "checkpoints": items,
+            }
+            self._atomic_json(root / "checkpoints.json", payload)
+            self.journal.append(
+                "recording.checkpoint_marked",
+                session_id=session_id,
+                checkpoint_id=checkpoint_id,
+                sample_index=item["recordingSampleIndex"],
+            )
+            return item
+
+    def delete_checkpoint(self, session_id: str, checkpoint_id: str) -> dict:
+        with self._lock:
+            if self._active_id != session_id:
+                raise CaptureError("checkpoints can only be changed during the active recording")
+            value = self.checkpoints(session_id)
+            items = list(value.get("checkpoints") or [])
+            target = next((item for item in items if item.get("checkpointId") == checkpoint_id), None)
+            if target is None:
+                raise KeyError(checkpoint_id)
+            root = Path(self._sessions[session_id].root)
+            for relative in target.get("sampleFrames") or []:
+                path = (root / str(relative)).resolve()
+                if root.resolve() in path.parents:
+                    path.unlink(missing_ok=True)
+            items.remove(target)
+            payload = {**value, "checkpoints": items}
+            self._atomic_json(root / "samples" / "inspection" / "checkpoints.json", payload)
+            return payload
+
     def _seal(self, root: Path, session: RecordingSession) -> Path:
         files = []
         for path in sorted(root.rglob("*")):
@@ -163,3 +276,14 @@ class CaptureManager:
     def _save(session: RecordingSession) -> None:
         path = Path(session.root) / "session.json"
         path.write_text(json.dumps(json_ready(session), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _atomic_json(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)

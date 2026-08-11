@@ -9,7 +9,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from gogoguard_contracts import InteractionCapabilities, json_ready
+from gogoguard_contracts import (
+    InteractionCapabilities,
+    is_safe_external_id,
+    json_ready,
+    validate_platform_mission_message,
+)
 from gogoguard_device_io import (
     Go2VolumeController,
     LiveKitGo2Transport,
@@ -59,6 +64,39 @@ def validate_pose_stream_payload(payload: Any, *, robot_id: str) -> dict[str, An
     for name in ("sourceAt", "observedAt"):
         if not isinstance(payload.get(name), str) or not payload[name]:
             raise ValueError(f"pose stream {name} is invalid")
+    mission = payload.get("mission")
+    if mission is not None:
+        if not isinstance(mission, dict) or not is_safe_external_id(
+            mission.get("missionId")
+        ):
+            raise ValueError("pose stream mission identity is invalid")
+        if mission.get("phase") not in {
+            "traveling", "stopping", "posing", "announcing", "capturing",
+            "spinning", "waiting_verdict", "resuming", "idle",
+        }:
+            raise ValueError("pose stream mission phase is invalid")
+        checkpoint_id = mission.get("checkpointId")
+        if checkpoint_id is not None and not is_safe_external_id(checkpoint_id):
+            raise ValueError("pose stream checkpoint identity is invalid")
+        camera = mission.get("camera")
+        if not isinstance(camera, dict):
+            raise ValueError("pose stream mission camera is invalid")
+        for name in ("pan", "tilt"):
+            angle = camera.get(name)
+            if (
+                isinstance(angle, bool)
+                or not isinstance(angle, (int, float))
+                or not math.isfinite(float(angle))
+            ):
+                raise ValueError("pose stream mission camera is invalid")
+        spin_progress = mission.get("spinProgressRad")
+        if spin_progress is not None and (
+            isinstance(spin_progress, bool)
+            or not isinstance(spin_progress, (int, float))
+            or not math.isfinite(float(spin_progress))
+            or float(spin_progress) < 0.0
+        ):
+            raise ValueError("pose stream spin progress is invalid")
     # Serialization is also a final NaN/size guard before crossing the native
     # LiveKit boundary.
     json.dumps(payload, ensure_ascii=False, allow_nan=False)
@@ -77,6 +115,7 @@ class InteractionEdgeService:
         unitree_aes_128_key: str,
         volume_executable: Path,
         status_path: Path,
+        mission_inbox_path: Path | None = None,
         transport=None,
         allow_insecure_ws: bool = False,
     ) -> None:
@@ -115,6 +154,15 @@ class InteractionEdgeService:
         )
         if set_wake_transcript_handler is not None:
             set_wake_transcript_handler(self._wake_transcript_received)
+        set_mission_message_handler = getattr(
+            self.transport, "set_mission_message_handler", None
+        )
+        self.mission_inbox_path = Path(
+            mission_inbox_path
+            or "/var/lib/gogoguard/platform/checkpoint-inbox.jsonl"
+        )
+        if set_mission_message_handler is not None:
+            set_mission_message_handler(self._mission_message_received)
         self.transport.set_playback_state_handler(self._playback_state_changed)
         set_health_handler = getattr(self.transport, "set_health_handler", None)
         if set_health_handler is not None:
@@ -123,6 +171,28 @@ class InteractionEdgeService:
         self._write_lock = threading.Lock()
         self._command_lock = threading.Lock()
         self._write_status()
+
+    def _mission_message_received(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = validate_platform_mission_message(payload)
+        schema = payload["schema"]
+        encoded = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            + "\n"
+        ).encode("utf-8")
+        if len(encoded) > 65536:
+            raise ValueError("mission message exceeds 64 KiB")
+        self.mission_inbox_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.mission_inbox_path,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+            0o640,
+        )
+        try:
+            os.write(descriptor, encoded)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        return {"accepted": True, "schema": schema}
 
     def _wake_transcript_received(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._command_lock:

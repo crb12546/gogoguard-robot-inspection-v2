@@ -31,6 +31,8 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.server.application.live())
             if path == "/api/v1/camera":
                 return self._json(200, self.server.application.camera_status())
+            if path == "/api/v1/gimbal":
+                return self._json(200, self.server.application.gimbal_status())
             if path == "/api/v1/capabilities":
                 return self._json(200, self.server.application.capabilities())
             if path == "/api/v1/interaction":
@@ -54,6 +56,11 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)", path)
             if match:
                 return self._json(200, self.server.application.session(match.group(1)))
+            match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)/checkpoints", path)
+            if match:
+                return self._json(
+                    200, self.server.application.recording_checkpoints(match.group(1))
+                )
             match = re.fullmatch(r"/api/v1/map-jobs/([A-Za-z0-9-]+)", path)
             if match:
                 return self._json(200, self.server.application.map_job(match.group(1)))
@@ -81,6 +88,18 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             if match and hasattr(self.server.application, "platform_map_bundle_file"):
                 return self._stream_file(
                     self.server.application.platform_map_bundle_file(match.group(1))
+                )
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/checkpoints", path
+            )
+            if match and hasattr(self.server.application, "checkpoint_audit"):
+                return self._json(200, self.server.application.checkpoint_audit(match.group(1)))
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-upload", path
+            )
+            if match and hasattr(self.server.application, "platform_upload_status"):
+                return self._json(
+                    200, self.server.application.platform_upload_status(match.group(1))
                 )
             match = re.fullmatch(
                 r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/glim-editor",
@@ -136,6 +155,8 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._stream_file(target)
             if path.startswith("/artifacts/"):
                 return self._artifact(path)
+            if path.startswith("/api/"):
+                return self._json(404, {"error": "not found"})
             return self._static(path)
         except KeyError:
             self._json(404, {"error": "not found"})
@@ -147,9 +168,20 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/v1/sessions/start":
                 return self._json(201, self.server.application.start_recording())
+            if path == "/api/v1/gimbal/move":
+                return self._json(200, self.server.application.move_gimbal(self._body()))
+            if path == "/api/v1/gimbal/center":
+                return self._json(200, self.server.application.center_gimbal())
             if path == "/api/v1/navigation/prepare":
                 body = self._body()
                 return self._json(201, self.server.application.prepare_navigation(str(body.get("job_id", ""))))
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-upload", path
+            )
+            if match and hasattr(self.server.application, "upload_platform_bundle"):
+                return self._json(
+                    202, self.server.application.upload_platform_bundle(match.group(1))
+                )
             match = re.fullmatch(r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/label", path)
             if match:
                 body = self._body()
@@ -224,9 +256,37 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)/stop", path)
             if match:
                 return self._json(200, self.server.application.stop_recording(match.group(1)))
+            match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)/checkpoints", path)
+            if match:
+                return self._json(
+                    201,
+                    self.server.application.mark_recording_checkpoint(
+                        match.group(1), self._body()
+                    ),
+                )
             match = re.fullmatch(r"/api/v1/sessions/([A-Za-z0-9-]+)/map", path)
             if match:
                 return self._json(202, self.server.application.submit_recording(match.group(1)))
+            self._json(404, {"error": "not found"})
+        except Exception as exc:
+            self._json(409, {"error": str(exc)})
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            match = re.fullmatch(
+                r"/api/v1/sessions/([A-Za-z0-9-]+)/checkpoints/([A-Za-z0-9_.:-]+)",
+                path,
+            )
+            if match:
+                return self._json(
+                    200,
+                    self.server.application.delete_recording_checkpoint(
+                        match.group(1), match.group(2)
+                    ),
+                )
+            return self._json(404, {"error": "not found"})
+        except KeyError:
             self._json(404, {"error": "not found"})
         except Exception as exc:
             self._json(409, {"error": str(exc)})

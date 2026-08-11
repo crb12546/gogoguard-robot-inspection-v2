@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import tempfile
 import time
 import unittest
@@ -58,10 +59,39 @@ class VerticalSliceTest(unittest.TestCase):
         self.assertTrue((artifact_root / "overview.svg").is_file())
         self.assertEqual(job["metrics"]["worker"], "demo")
 
+        workspace = self.app.navigation_workspace(job_id)
+        self.assertEqual(workspace["mapJobId"], job_id)
+        self.assertGreaterEqual(len(workspace["route"]), 2)
+
     def test_rejects_two_active_recordings(self) -> None:
         self.app.start_recording()
         with self.assertRaises(Exception):
             self.app.start_recording()
+
+    def test_recording_checkpoint_captures_pose_gimbal_and_local_sample(self) -> None:
+        session = self.app.start_recording()
+        self.app.move_gimbal({"pan": -15, "tilt": 22.5, "roll": 0})
+        checkpoint = self.app.mark_recording_checkpoint(
+            session["session_id"], {"note": "配电间门口", "spin": True}
+        )
+        self.assertEqual(checkpoint["checkpointId"], "cp_01")
+        self.assertEqual(checkpoint["camera"]["pan"], -15.0)
+        self.assertEqual(checkpoint["camera"]["tilt"], 22.5)
+        sample = self.root / "recordings" / session["session_id"] / checkpoint["sampleFrames"][0]
+        self.assertTrue(sample.read_bytes().startswith(b"\xff\xd8"))
+        self.assertTrue(sample.read_bytes().endswith(b"\xff\xd9"))
+        self.assertEqual(
+            len(self.app.recording_checkpoints(session["session_id"])["checkpoints"]),
+            1,
+        )
+        self.app.maps = None
+        self.app.stop_recording(session["session_id"])
+
+    def test_demo_gimbal_rejects_non_finite_and_out_of_range_angles(self) -> None:
+        with self.assertRaisesRegex(ValueError, "supported range"):
+            self.app.move_gimbal({"pan": math.nan, "tilt": 0, "roll": 0})
+        with self.assertRaisesRegex(ValueError, "supported range"):
+            self.app.move_gimbal({"pan": 141, "tilt": 0, "roll": 0})
 
     def test_interaction_status_is_read_only_and_disabled_until_commissioned(self) -> None:
         status = self.app.interaction_status()

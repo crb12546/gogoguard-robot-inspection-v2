@@ -12,12 +12,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from gogoguard_contracts import is_safe_external_id
 from gogoguard_route import RouteManager
 from .profiles import DEFAULT_PROFILE, NavigationProfileStore, validate_profile
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-SAFE_EXTERNAL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SDK_RECEIVER = Path(
     "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/"
     "go2_sdk2_udp_receiver"
@@ -537,13 +537,28 @@ class NavigationManager:
             mission_plan.get("missionId")
             or f"selected:{candidate['map_version']}:{candidate['workspace_revision']}"
         )
-        if not SAFE_EXTERNAL_ID.fullmatch(mission_id):
+        if not is_safe_external_id(mission_id):
             raise ValueError("missionId is invalid")
         checkpoints = mission_plan.get("checkpoints", [])
         if not isinstance(checkpoints, list) or len(checkpoints) > 256:
             raise ValueError("mission checkpoints must be a list of at most 256 items")
         route_point_count = int(candidate.get("execution_route_point_count") or 0)
         normalized: list[dict[str, Any]] = []
+        asset_by_id: dict[str, dict[str, Any]] = {}
+        checkpoint_asset = candidate.get("checkpoint_asset")
+        if checkpoint_asset and Path(str(checkpoint_asset)).is_file():
+            asset = json.loads(Path(str(checkpoint_asset)).read_text(encoding="utf-8"))
+            if (
+                asset.get("schema") != "gogoguard.checkpoints.v1"
+                or asset.get("mapVersion") != map_version
+                or asset.get("routeId") != route_id
+            ):
+                raise ValueError("checkpoint asset map or route binding is invalid")
+            asset_by_id = {
+                str(item.get("checkpointId")): item
+                for item in asset.get("checkpoints") or []
+                if isinstance(item, dict)
+            }
         seen: set[str] = set()
         previous_index = -1
         for raw in checkpoints:
@@ -551,32 +566,81 @@ class NavigationManager:
                 raise ValueError("mission checkpoint must be an object")
             checkpoint_id = str(raw.get("checkpointId") or "")
             route_index = raw.get("routeProgressIndex")
-            if not SAFE_EXTERNAL_ID.fullmatch(checkpoint_id) or checkpoint_id in seen:
+            if not is_safe_external_id(checkpoint_id) or checkpoint_id in seen:
                 raise ValueError("checkpointId is invalid or duplicated")
             if (
                 isinstance(route_index, bool)
                 or not isinstance(route_index, int)
-                or route_index <= previous_index
+                or route_index < previous_index
                 or route_index < 0
                 or route_index >= route_point_count
             ):
                 raise ValueError("checkpoint routeProgressIndex is outside execution route")
             seen.add(checkpoint_id)
             previous_index = route_index
-            normalized.append(
-                {
-                    "checkpointId": checkpoint_id,
-                    "routeProgressIndex": route_index,
-                    "action": "body_spin_360",
-                    "settleBeforeS": 0.5,
-                    "targetYawRad": round(2.0 * math.pi, 9),
+            recorded = asset_by_id.get(checkpoint_id)
+            if checkpoint_asset and recorded is None:
+                raise ValueError("mission checkpoint is absent from the activated asset")
+            if recorded is not None and recorded.get("routeProgressIndex") != route_index:
+                raise ValueError("mission checkpoint route index differs from the activated asset")
+            if recorded is None:
+                normalized.append(
+                    {
+                        "checkpointId": checkpoint_id,
+                        "routeProgressIndex": route_index,
+                        "action": "body_spin_360",
+                        "settleBeforeS": 0.5,
+                        "targetYawRad": round(2.0 * math.pi, 9),
+                    }
+                )
+            else:
+                camera = recorded.get("camera") if isinstance(recorded.get("camera"), dict) else {}
+                body_yaw = float(recorded.get("bodyYaw") or 0.0)
+                camera_angles = {
+                    "pan": float(camera.get("pan") or 0.0),
+                    "tilt": float(camera.get("tilt") or 0.0),
+                    "roll": float(camera.get("roll") or 0.0),
                 }
-            )
+                if not math.isfinite(body_yaw) or any(
+                    not math.isfinite(value) for value in camera_angles.values()
+                ):
+                    raise ValueError("activated checkpoint pose contains a non-finite angle")
+                spin = raw.get("spin", recorded.get("spin", True))
+                dwell = raw.get("dwellSec", recorded.get("dwellSec", 3))
+                if not isinstance(spin, bool):
+                    raise ValueError("mission checkpoint spin must be boolean")
+                if (
+                    isinstance(dwell, bool)
+                    or not isinstance(dwell, (int, float))
+                    or not math.isfinite(float(dwell))
+                    or not 0.0 <= float(dwell) <= 30.0
+                ):
+                    raise ValueError("mission checkpoint dwellSec is invalid")
+                normalized.append(
+                    {
+                        "checkpointId": checkpoint_id,
+                        "routeProgressIndex": route_index,
+                        "action": "platform_checkpoint",
+                        "settleBeforeS": 0.5,
+                        "bodyYawRad": body_yaw,
+                        "camera": camera_angles,
+                        "spin": spin,
+                        "dwellSec": float(dwell),
+                    }
+                )
+        verdict_timeout = mission_plan.get("verdictTimeoutSec", 15)
+        max_retakes = mission_plan.get("maxRetakeAttempts", 2)
+        if isinstance(verdict_timeout, bool) or not isinstance(verdict_timeout, int) or not 5 <= verdict_timeout <= 120:
+            raise ValueError("verdictTimeoutSec must be an integer between 5 and 120")
+        if isinstance(max_retakes, bool) or not isinstance(max_retakes, int) or not 0 <= max_retakes <= 5:
+            raise ValueError("maxRetakeAttempts must be an integer between 0 and 5")
         canonical = {
             "schema": "gogoguard.navigation_mission.v1",
             "missionId": mission_id,
             "mapVersion": map_version,
             "routeId": route_id,
+            "verdictTimeoutSec": verdict_timeout,
+            "maxRetakeAttempts": max_retakes,
             "checkpoints": normalized,
         }
         canonical["missionHash"] = hashlib.sha256(

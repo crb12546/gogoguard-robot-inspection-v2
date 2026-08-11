@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from gogoguard_contracts import (
     CheckpointPlan,
@@ -35,6 +36,12 @@ def mission_plan() -> MissionPlan:
 
 
 class MissionCoordinatorTest(unittest.TestCase):
+    def test_frozen_platform_unicode_mission_id_is_accepted(self) -> None:
+        plan = replace(
+            mission_plan(), mission_id="mission-20260811-143022-RG-狗02"
+        )
+        self.assertEqual(validate_mission_plan(plan).mission_id, plan.mission_id)
+
     def test_checkpoint_requires_correlated_true_stop_then_resumes_suffix(self) -> None:
         coordinator = MissionCoordinator(mission_plan())
         self.assertEqual(coordinator.start().action, "navigate")

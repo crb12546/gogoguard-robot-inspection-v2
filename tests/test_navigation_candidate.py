@@ -89,7 +89,7 @@ class NavigationCandidateTest(unittest.TestCase):
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 6)
+        self.assertEqual(candidate["candidate_generation"], 7)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -134,6 +134,41 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(after, before)
         self.assertEqual(len(second["source_map_json_sha256"]), 64)
+        self.assertIsNone(second["source_checkpoint_sha256"])
+
+    def test_prepare_rebuilds_when_source_checkpoint_asset_changes(self):
+        manager = RouteManager(self.root, site_id="test-site")
+        first = manager.prepare_map_job(self.job_id)
+        self.assertIsNone(first["checkpoint_asset"])
+
+        self.artifacts.chmod(0o750)
+        source = self.artifacts / "checkpoints.json"
+        source.write_text('{"schema":"legacy.checkpoints.v1","revision":1}\n')
+        self.artifacts.chmod(0o550)
+        second = manager.prepare_map_job(self.job_id)
+
+        self.assertIsNotNone(second["checkpoint_asset"])
+        self.assertEqual(
+            Path(second["checkpoint_asset"]).read_bytes(), source.read_bytes()
+        )
+        self.assertEqual(len(second["source_checkpoint_sha256"]), 64)
+
+        Path(second["checkpoint_asset"]).write_text("tampered\n", encoding="utf-8")
+        repaired = manager.prepare_map_job(self.job_id)
+        self.assertEqual(
+            Path(repaired["checkpoint_asset"]).read_bytes(), source.read_bytes()
+        )
+
+        self.artifacts.chmod(0o750)
+        source.unlink()
+        self.artifacts.chmod(0o550)
+        third = manager.prepare_map_job(self.job_id)
+
+        self.assertIsNone(third["checkpoint_asset"])
+        self.assertIsNone(third["source_checkpoint_sha256"])
+        self.assertFalse(
+            (self.root / "navigation" / "candidates" / self.job_id / "checkpoints.json").exists()
+        )
 
     def test_prepare_requires_a_saved_allowed_area(self):
         (self.artifacts.parent / "navigation-workspace.json").unlink()
@@ -157,10 +192,13 @@ class NavigationCandidateTest(unittest.TestCase):
                 "execution-route.json",
                 "navigation-workspace.json",
                 "allowed-area-mask.json",
+                "checkpoints.json",
             },
         )
         self.assertTrue(all(not Path(item["path"]).is_absolute() for item in manifest["files"]))
         self.assertEqual(len(descriptor["archiveSha256"]), 64)
+        repeated = manager.export_platform_bundle(self.job_id)
+        self.assertEqual(repeated["archiveSha256"], descriptor["archiveSha256"])
         execution_route = json.loads(
             (Path(descriptor["manifest"]).parent / "execution-route.json").read_text(
                 encoding="utf-8"
@@ -176,6 +214,51 @@ class NavigationCandidateTest(unittest.TestCase):
                 set(archive.namelist()),
                 {"manifest.json"} | {item["path"] for item in manifest["files"]},
             )
+
+    def test_recorded_checkpoint_is_bound_to_execution_route_and_sample_is_bundled(self):
+        session_id = "20260811T010203Z-1234abcd"
+        (self.artifacts.parent / "job.json").write_text(
+            json.dumps({"session_id": session_id}), encoding="utf-8"
+        )
+        recording = self.root / "recordings" / session_id / "samples"
+        inspection = recording / "inspection"
+        inspection.mkdir(parents=True)
+        with (recording / "snapshots.jsonl").open("w", encoding="utf-8") as handle:
+            for index in range(21):
+                handle.write(json.dumps({"pose": {"x": index * 0.1, "y": 0, "yaw": 0}}) + "\n")
+        (inspection / "cp_01-main.jpg").write_bytes(b"\xff\xd8sample\xff\xd9")
+        (inspection / "checkpoints.json").write_text(
+            json.dumps(
+                {
+                    "schema": "gogoguard.recording_checkpoints.v1",
+                    "sessionId": session_id,
+                    "checkpoints": [
+                        {
+                            "checkpointId": "cp_01",
+                            "recordingSampleIndex": 10,
+                            "rawPose": {"x": 1.0, "y": 0.0, "yaw": 0.0},
+                            "camera": {"pan": -15, "tilt": 22.5, "roll": 0, "frame": "carrier_relative"},
+                            "spin": True,
+                            "note": "door",
+                            "sampleFrames": ["samples/inspection/cp_01-main.jpg"],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = RouteManager(self.root, site_id="test-site")
+        manager.prepare_map_job(self.job_id)
+        descriptor = manager.export_platform_bundle(self.job_id)
+        checkpoints = json.loads(
+            (Path(descriptor["manifest"]).parent / "checkpoints.json").read_text()
+        )
+        self.assertTrue(checkpoints["audit"]["ready"])
+        self.assertEqual(checkpoints["checkpoints"][0]["checkpointId"], "cp_01")
+        self.assertEqual(checkpoints["checkpoints"][0]["camera"]["tilt"], 22.5)
+        with zipfile.ZipFile(descriptor["archive"]) as archive:
+            self.assertIn("checkpoints.json", archive.namelist())
+            self.assertIn("samples/cp_01-cp_01-main.jpg", archive.namelist())
 
 
 if __name__ == "__main__":

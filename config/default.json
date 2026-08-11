@@ -10,6 +10,15 @@
     "source": "z1pro",
     "stream_path": "z1pro",
     "webrtc_port": 8889,
-    "status_url": "http://127.0.0.1:9997/v3/paths/get/z1pro"
+    "status_url": "http://127.0.0.1:9997/v3/paths/get/z1pro",
+    "capture_url": "rtsp://192.168.144.108/",
+    "capture_timeout_s": 8
+  },
+  "gimbal": {
+    "host": "192.168.144.108",
+    "port": 2332,
+    "timeout_s": 1.5,
+    "command_hz": 40,
+    "commissioned": true
   }
 }

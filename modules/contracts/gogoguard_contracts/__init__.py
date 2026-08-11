@@ -27,6 +27,7 @@ from .models import (
     json_ready,
     utc_now,
 )
+from .validation import is_safe_external_id, validate_platform_mission_message
 
 __all__ = [
     "CameraStreamStatus",
@@ -56,4 +57,6 @@ __all__ = [
     "SensorSnapshot",
     "json_ready",
     "utc_now",
+    "is_safe_external_id",
+    "validate_platform_mission_message",
 ]

@@ -193,6 +193,8 @@ class CheckpointPlan:
     checkpoint_id: str
     route_progress_index: int
     views: tuple[InspectionViewPlan, ...] = ()
+    spin: bool = True
+    dwell_s: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,8 @@ class MissionPlan:
     route_id: str = ""
     offline_continue_after_evidence: bool = False
     checkpoints: tuple[CheckpointPlan, ...] = ()
+    verdict_timeout_s: int = 15
+    max_retake_attempts: int = 2
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from gogoguard_platform_edge.pose_stream import (
     InteractionPoseClient,
+    build_mission_pose_context,
     build_pose_stream_payload,
 )
 
@@ -77,6 +78,24 @@ class PlatformPoseStreamTest(unittest.TestCase):
                 received,
                 [{"action": "publish_pose", "payload": payload}],
             )
+
+    def test_mission_context_exposes_checkpoint_phase_and_camera(self) -> None:
+        mission = build_mission_pose_context(
+            {
+                "checkpoint": {
+                    "missionId": "mission-1",
+                    "activeCheckpointId": "cp_01",
+                    "phase": "SPINNING",
+                    "camera": {"pan": -15.0, "tilt": 22.5},
+                }
+            },
+            {"camera": {"pan": -14.8, "tilt": 22.4, "roll": 0.0}},
+            spin_progress_rad=3.14,
+        )
+        self.assertEqual(mission["phase"], "spinning")
+        self.assertEqual(mission["checkpointId"], "cp_01")
+        self.assertEqual(mission["camera"]["tilt"], 22.4)
+        self.assertEqual(mission["spinProgressRad"], 3.14)
 
 
 if __name__ == "__main__":

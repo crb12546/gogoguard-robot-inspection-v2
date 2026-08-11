@@ -13,11 +13,13 @@ import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
+from gogoguard_contracts import is_safe_external_id
+
 from .workspace import NavigationWorkspaceStore, validate_workspace, write_keepout_mask
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 6
+CANDIDATE_GENERATION = 7
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
@@ -40,7 +42,14 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            json.dump(
+                payload,
+                handle,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+                allow_nan=False,
+            )
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -48,6 +57,18 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def _write_deterministic_zip_member(
+    archive: zipfile.ZipFile,
+    source: Path,
+    relative_name: str,
+) -> None:
+    info = zipfile.ZipInfo(relative_name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_STORED
+    info.external_attr = 0o100644 << 16
+    with source.open("rb") as reader, archive.open(info, "w") as writer:
+        shutil.copyfileobj(reader, writer, length=1024 * 1024)
 
 
 def _read_binary_ply(path: Path) -> tuple[list[tuple[float, float, float, float]], str]:
@@ -167,6 +188,18 @@ def _execution_route_payload(route: dict[str, Any], spacing_m: float) -> dict[st
     }
 
 
+def _wrap_angle(value: float) -> float:
+    return math.atan2(math.sin(value), math.cos(value))
+
+
+def _path_yaw(points: list[tuple[float, float]], index: int) -> float:
+    if len(points) < 2:
+        return 0.0
+    before = points[max(0, index - 1)]
+    after = points[min(len(points) - 1, index + 1)]
+    return math.atan2(after[1] - before[1], after[0] - before[0])
+
+
 class RouteManager:
     def __init__(self, data_root: Path, *, site_id: str) -> None:
         self.data_root = Path(data_root)
@@ -189,6 +222,11 @@ class RouteManager:
             destination.mkdir(parents=True, exist_ok=True)
             source_map_json_hash = _file_hash(map_json)
             source_ply_hash = _file_hash(map_ply)
+            source_checkpoints = artifact_root / "checkpoints.json"
+            source_checkpoint_hash = (
+                _file_hash(source_checkpoints) if source_checkpoints.is_file() else None
+            )
+            checkpoint_asset_path = destination / "checkpoints.json"
             workspace = validate_workspace(
                 self.workspaces.get(job_id), require_ready=True
             )
@@ -216,12 +254,27 @@ class RouteManager:
                     ) and (
                         route_path.is_file()
                         and _canonical_hash(route_payload) == existing["route_hash"]
+                    ) and (
+                        (
+                            source_checkpoint_hash is None
+                            and not checkpoint_asset_path.exists()
+                        )
+                        or (
+                            source_checkpoint_hash is not None
+                            and checkpoint_asset_path.is_file()
+                            and _file_hash(checkpoint_asset_path)
+                            == source_checkpoint_hash
+                            and existing.get("checkpoint_asset_hash")
+                            == source_checkpoint_hash
+                        )
                     )
                     if (
                         existing.get("candidate_generation") == CANDIDATE_GENERATION
                         and
                         existing.get("source_ply_sha256") == source_ply_hash
                         and existing.get("source_map_json_sha256") == source_map_json_hash
+                        and existing.get("source_checkpoint_sha256")
+                        == source_checkpoint_hash
                         and existing.get("workspace_hash") == workspace_hash
                         and artifacts_unchanged
                     ):
@@ -284,6 +337,10 @@ class RouteManager:
             execution_route = _execution_route_payload(
                 route, float(profile["patrol"]["pathSampleSpacingM"])
             )
+            if source_checkpoints.is_file():
+                shutil.copy2(source_checkpoints, checkpoint_asset_path)
+            elif checkpoint_asset_path.exists():
+                checkpoint_asset_path.unlink()
             length_m = sum(
                 math.hypot(second[0] - first_point[0], second[1] - first_point[1])
                 for first_point, second in zip(planar, planar[1:])
@@ -299,9 +356,16 @@ class RouteManager:
                 "route_length_m": round(length_m, 3),
                 "route_waypoint_count": len(planar),
                 "execution_route_point_count": len(execution_route["waypoints"]),
+                "checkpoint_asset": (
+                    str(checkpoint_asset_path) if checkpoint_asset_path.is_file() else None
+                ),
+                "checkpoint_asset_hash": (
+                    _file_hash(checkpoint_asset_path) if checkpoint_asset_path.is_file() else None
+                ),
                 "point_count": point_count,
                 "source_ply_sha256": source_ply_hash,
                 "source_map_json_sha256": source_map_json_hash,
+                "source_checkpoint_sha256": source_checkpoint_hash,
                 "workspace_hash": workspace_hash,
                 "workspace_revision": workspace["revision"],
                 "localization_map": str(pcd_path),
@@ -333,6 +397,150 @@ class RouteManager:
             raise KeyError(candidate_id)
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def checkpoint_descriptor(self, candidate_id: str) -> dict[str, Any]:
+        candidate = self.get(candidate_id)
+        route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
+        runtime_profile = json.loads(
+            Path(candidate["runtime_profile"]).read_text(encoding="utf-8")
+        )
+        execution_route = _execution_route_payload(
+            route, float(runtime_profile["patrol"]["pathSampleSpacingM"])
+        )
+        return self._bind_recorded_checkpoints(candidate_id, candidate, execution_route)
+
+    def _bind_recorded_checkpoints(
+        self,
+        candidate_id: str,
+        candidate: dict[str, Any],
+        execution_route: dict[str, Any],
+    ) -> dict[str, Any]:
+        job_path = self.data_root / "map-jobs" / candidate_id / "job.json"
+        try:
+            job = json.loads(job_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            job = {}
+        session_id = str(job.get("session_id") or job.get("sessionId") or "")
+        recording_root = self.data_root / "recordings" / session_id
+        source_path = recording_root / "samples" / "inspection" / "checkpoints.json"
+        base = {
+            "schema": "gogoguard.checkpoints.v1",
+            "mapVersion": candidate["map_version"],
+            "routeId": candidate["route_id"],
+            "recordingSessionId": session_id or None,
+            "executionRoutePointCount": len(execution_route.get("waypoints") or []),
+            "checkpoints": [],
+            "audit": {
+                "ready": True,
+                "needsReview": 0,
+                "message": "本次录制没有标记巡检点",
+            },
+        }
+        if not session_id or not source_path.is_file():
+            return base
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        raw_items = source.get("checkpoints")
+        if not isinstance(raw_items, list):
+            raise ValueError("recording checkpoints are invalid")
+        map_json = json.loads(
+            (self.data_root / "map-jobs" / candidate_id / "artifacts" / "map.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        optimized = [
+            (float(item[0]), float(item[1]))
+            for item in map_json.get("trajectory") or []
+            if isinstance(item, list) and len(item) >= 2
+        ]
+        if len(optimized) < 2 and raw_items:
+            raise ValueError("GLIM trajectory is unavailable for checkpoint binding")
+        raw_path: list[tuple[float, float]] = []
+        snapshots_path = recording_root / "samples" / "snapshots.jsonl"
+        if snapshots_path.is_file():
+            with snapshots_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        pose = json.loads(line).get("pose") or {}
+                        raw_path.append((float(pose["x"]), float(pose["y"])))
+                    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                        continue
+        execution = list(execution_route.get("waypoints") or [])
+        bound: list[dict[str, Any]] = []
+        needs_review = 0
+        checkpoint_ids: set[str] = set()
+        denominator = max(1, len(raw_path) - 1)
+        for ordinal, raw in enumerate(raw_items, start=1):
+            checkpoint_id = str(raw.get("checkpointId") or f"cp_{ordinal:02d}")
+            if (
+                not is_safe_external_id(checkpoint_id)
+                or checkpoint_id in checkpoint_ids
+            ):
+                raise ValueError("recording checkpoint identity is invalid or duplicated")
+            checkpoint_ids.add(checkpoint_id)
+            sample_index = max(0, int(raw.get("recordingSampleIndex") or 0))
+            ratio = min(1.0, sample_index / denominator)
+            optimized_index = min(len(optimized) - 1, int(round(ratio * (len(optimized) - 1))))
+            target = optimized[optimized_index]
+            route_index, route_point = min(
+                enumerate(execution),
+                key=lambda pair: math.hypot(
+                    float(pair[1]["x"]) - target[0],
+                    float(pair[1]["y"]) - target[1],
+                ),
+            )
+            distance = math.hypot(
+                float(route_point["x"]) - target[0],
+                float(route_point["y"]) - target[1],
+            )
+            raw_pose = raw.get("rawPose") if isinstance(raw.get("rawPose"), dict) else {}
+            raw_yaw = float(raw_pose.get("yaw") or 0.0)
+            if not math.isfinite(raw_yaw):
+                raise ValueError("recording checkpoint yaw is invalid")
+            raw_tangent = _path_yaw(raw_path, min(sample_index, len(raw_path) - 1)) if raw_path else raw_yaw
+            optimized_tangent = _path_yaw(optimized, optimized_index)
+            body_yaw = _wrap_angle(optimized_tangent + _wrap_angle(raw_yaw - raw_tangent))
+            review = distance > 1.0
+            needs_review += int(review)
+            sample_frames = []
+            for source_relative in raw.get("sampleFrames") or []:
+                source_name = Path(str(source_relative)).name
+                sample_frames.append(f"samples/{checkpoint_id}-{source_name}")
+            bound.append(
+                {
+                    "checkpointId": checkpoint_id,
+                    "routeProgressIndex": int(route_point.get("routeProgressIndex", route_index)),
+                    "position": {
+                        "x": float(route_point["x"]),
+                        "y": float(route_point["y"]),
+                    },
+                    "bodyYaw": body_yaw,
+                    "camera": dict(raw.get("camera") or {}),
+                    "spin": raw.get("spin") is not False,
+                    "dwellSec": 3,
+                    "note": str(raw.get("note") or ""),
+                    "sampleFrames": sample_frames,
+                    "binding": {
+                        "recordingSampleIndex": sample_index,
+                        "optimizedTrajectoryIndex": optimized_index,
+                        "distanceToExecutionRouteM": round(distance, 3),
+                        "needsReview": review,
+                    },
+                }
+            )
+        # Platform and runtime consume the route in progress order. Stable
+        # sorting preserves multiple camera views at the same route index.
+        bound.sort(key=lambda item: int(item["routeProgressIndex"]))
+        base["checkpoints"] = bound
+        base["audit"] = {
+            "ready": needs_review == 0,
+            "needsReview": needs_review,
+            "message": (
+                "所有巡检点已绑定到最终执行路线"
+                if needs_review == 0
+                else f"有 {needs_review} 个巡检点离最终路线超过 1 米，请先复核蓝色路线"
+            ),
+        }
+        return base
+
     def export_platform_bundle(self, candidate_id: str) -> dict[str, Any]:
         """Build one portable map release without any robot-local paths."""
         candidate = self.get(candidate_id)
@@ -347,13 +555,19 @@ class RouteManager:
             Path(candidate["runtime_profile"]).read_text(encoding="utf-8")
         )
         execution_route_path = output_root / "execution-route.json"
+        execution_route = _execution_route_payload(
+            route_payload,
+            float(runtime_profile["patrol"]["pathSampleSpacingM"]),
+        )
         _atomic_json(
             execution_route_path,
-            _execution_route_payload(
-                route_payload,
-                float(runtime_profile["patrol"]["pathSampleSpacingM"]),
-            ),
+            execution_route,
         )
+        checkpoints = self._bind_recorded_checkpoints(
+            candidate_id, candidate, execution_route
+        )
+        checkpoints_path = output_root / "checkpoints.json"
+        _atomic_json(checkpoints_path, checkpoints)
         # Always materialize the validated workspace inside the portable
         # release. Legacy jobs may still be read from the old read-only
         # artifact location, which must never leak into a new bundle path.
@@ -380,16 +594,44 @@ class RouteManager:
                 Path(candidate["allowed_area_mask_metadata"]),
                 "application/json",
             ),
+            (
+                "checkpoints",
+                "checkpoints.json",
+                checkpoints_path,
+                "application/json",
+            ),
         ]
         preview = self.data_root / "map-jobs" / candidate_id / "artifacts" / "map.svg"
         if preview.is_file():
             sources.append(("preview", "map.svg", preview, "image/svg+xml"))
+
+        session_id = str(checkpoints.get("recordingSessionId") or "")
+        recording_root = self.data_root / "recordings" / session_id
+        raw_by_id: dict[str, dict[str, Any]] = {}
+        raw_checkpoint_path = recording_root / "samples" / "inspection" / "checkpoints.json"
+        if raw_checkpoint_path.is_file():
+            raw_payload = json.loads(raw_checkpoint_path.read_text(encoding="utf-8"))
+            raw_by_id = {
+                str(item.get("checkpointId")): item
+                for item in raw_payload.get("checkpoints") or []
+                if isinstance(item, dict)
+            }
+        for checkpoint in checkpoints["checkpoints"]:
+            raw = raw_by_id.get(str(checkpoint["checkpointId"]), {})
+            for source_relative, target_relative in zip(
+                raw.get("sampleFrames") or [], checkpoint.get("sampleFrames") or []
+            ):
+                source = (recording_root / str(source_relative)).resolve()
+                if recording_root.resolve() not in source.parents:
+                    raise ValueError("checkpoint sample path is unsafe")
+                sources.append(("checkpoint_sample", str(target_relative), source, "image/jpeg"))
 
         files: list[dict[str, Any]] = []
         for role, relative_name, source, content_type in sources:
             if not source.is_file():
                 raise RuntimeError(f"platform map asset is missing: {role}")
             target = output_root / relative_name
+            target.parent.mkdir(parents=True, exist_ok=True)
             if source.resolve() != target.resolve():
                 temporary = target.with_name(f".{target.name}.part")
                 with source.open("rb") as reader, temporary.open("wb") as writer:
@@ -430,7 +672,9 @@ class RouteManager:
                 "routeIdField": "routeId",
                 "routeIndexField": "routeProgressIndex",
                 "executionRoutePath": "execution-route.json",
+                "checkpointsPath": "checkpoints.json",
             },
+            "checkpointCount": len(checkpoints["checkpoints"]),
             "files": files,
         }
         manifest_path = output_root / "manifest.json"
@@ -440,9 +684,11 @@ class RouteManager:
         with zipfile.ZipFile(
             temporary_archive, "w", compression=zipfile.ZIP_STORED, allowZip64=True
         ) as archive:
-            archive.write(manifest_path, "manifest.json")
+            _write_deterministic_zip_member(archive, manifest_path, "manifest.json")
             for item in files:
-                archive.write(output_root / item["path"], item["path"])
+                _write_deterministic_zip_member(
+                    archive, output_root / item["path"], item["path"]
+                )
         os.replace(temporary_archive, archive_path)
         return {
             "schema": "gogoguard.map_asset_export.v1",

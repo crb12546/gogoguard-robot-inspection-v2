@@ -2,7 +2,7 @@
   "id": "mission",
   "responsibility": "Inspection task state machine and orchestration without algorithm ownership",
   "runtime": ["robot", "cloud"],
-  "status": "checkpoint_state_machine_and_true_stop_contract_implemented_offline_navigation_adapter_pending",
+  "status": "checkpoint_state_machine_true_stop_and_frozen_verdict_policy_contract_implemented_offline",
   "codeRoots": ["modules/mission"],
   "entrypoints": ["gogoguard_mission.state_machine:MissionCoordinator"],
   "dependsOn": ["contracts", "route", "navigation", "inspection", "evidence"],

@@ -115,7 +115,11 @@ class Z1ProGimbal:
         return {
             "supported": self.commissioned,
             "hardwareSupported": True,
-            "commissioningStatus": "field_verified" if self.commissioned else "protocol_candidate",
+            "commissioningStatus": (
+                "enabled_field_acceptance_pending"
+                if self.commissioned
+                else "disabled_field_acceptance_pending"
+            ),
             "controlMode": "gcu_angle_control_0x10",
             "panFrame": "carrier_relative",
             "tiltFrame": "euler_attitude",

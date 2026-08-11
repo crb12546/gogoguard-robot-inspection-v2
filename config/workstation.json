@@ -10,5 +10,11 @@
     "user": "root",
     "remote_root": "/opt/go2/jobs",
     "remote_command": "/opt/go2/bin/gogoguard-map-job"
+  },
+  "platform": {
+    "base_url": "http://39.96.37.187/api/v1",
+    "allow_insecure_http": true,
+    "device_token_env": "GOGOGUARD_DEVICE_TOKEN",
+    "timeout_s": 30
   }
 }

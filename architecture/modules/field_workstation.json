@@ -2,11 +2,11 @@
   "id": "field_workstation",
   "responsibility": "Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment",
   "runtime": ["workstation", "browser"],
-  "status": "cloud_glim_editor_and_navigation_workspace_running_save_publish_field_verified",
+  "status": "recording_checkpoint_sample_audit_and_resumable_platform_upload_implemented_local_acceptance_pending",
   "codeRoots": ["apps/field_workstation", "deployment/workstation"],
   "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
-  "dependsOn": ["contracts", "transfer", "map_factory", "site_console", "evidence"],
-  "consumes": ["robot Edge Agent API", "sealed RecordingBundle", "cloud GLIM progress and artifacts", "immutable robot IncidentBundle exports"],
-  "produces": ["field workflow UI", "secure GLIM editor tunnel", "time-ordered immutable map version catalog with local operator labels", "selected robot map deployment", "robot release staging", "verified incident archive and synchronized replay"],
-  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06", "2026-08-08 Mac-owned automatic incident synchronization and replay", "2026-08-08 field correction separates immutable map IDs from mutable Mac-local operator labels and orders maps newest first", "2026-08-10 workstation owns the loopback-only SSH tunnel to the cloud official GLIM editor and imports a cleaned result as a child map version"]
+  "dependsOn": ["contracts", "transfer", "map_factory", "route", "site_console", "evidence"],
+  "consumes": ["robot Edge Agent API", "sealed RecordingBundle with checkpoint samples", "cloud GLIM progress and artifacts", "immutable robot IncidentBundle exports", "frozen GoGoGuard asset init/chunk/status/complete API"],
+  "produces": ["field workflow UI", "recording-time Z1Pro controls and checkpoint marking", "post-map checkpoint route-binding audit", "resumable verified platform asset upload without activation", "secure GLIM editor tunnel", "time-ordered immutable map version catalog with local operator labels", "selected robot map deployment", "robot release staging", "verified incident archive and synchronized replay"],
+  "sourceProvenance": ["V2 three-end ownership correction agreed 2026-08-06", "2026-08-08 Mac-owned automatic incident synchronization and replay", "2026-08-08 field correction separates immutable map IDs from mutable Mac-local operator labels and orders maps newest first", "2026-08-10 workstation owns the loopback-only SSH tunnel to the cloud official GLIM editor and imports a cleaned result as a child map version", "2026-08-11 frozen record-as-configuration workflow adds local checkpoint/sample capture, post-GLIM audit and resumable platform upload; robot and field acceptance remain pending"]
 }

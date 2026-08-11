@@ -2,6 +2,7 @@ import tempfile
 import threading
 import time
 import unittest
+import json
 from pathlib import Path
 
 from gogoguard_navigation.supervisor import NavigationSupervisorServer, SupervisorService
@@ -76,6 +77,59 @@ class NavigationSupervisorTest(unittest.TestCase):
                         ],
                     },
                 )
+
+    def test_activated_checkpoint_asset_is_authoritative_for_route_and_pose(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = NavigationManager(
+                root, site_id="site", robot_id="robot", sensor_id="sensor"
+            )
+            asset_path = root / "checkpoints.json"
+            asset_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "gogoguard.checkpoints.v1",
+                        "mapVersion": "map-123456789abc",
+                        "routeId": "route-r1",
+                        "checkpoints": [
+                            {
+                                "checkpointId": "cp_01",
+                                "routeProgressIndex": 42,
+                                "bodyYaw": 1.2,
+                                "camera": {"pan": -15, "tilt": 22.5, "roll": 0},
+                                "spin": True,
+                                "dwellSec": 3,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            candidate = {
+                "map_version": "map-123456789abc",
+                "route_id": "route-r1",
+                "workspace_revision": 6,
+                "execution_route_point_count": 100,
+                "checkpoint_asset": str(asset_path),
+            }
+            plan = {
+                "missionId": "mission-1",
+                "mapVersion": "map-123456789abc",
+                "routeId": "route-r1",
+                "checkpoints": [
+                    {"checkpointId": "cp_01", "routeProgressIndex": 42}
+                ],
+            }
+            mission = manager._configure_mission(candidate, plan)
+            self.assertEqual(mission["checkpoints"][0]["bodyYawRad"], 1.2)
+            self.assertEqual(mission["checkpoints"][0]["camera"]["pan"], -15.0)
+            plan["checkpoints"][0]["routeProgressIndex"] = 43
+            with self.assertRaisesRegex(ValueError, "differs from the activated asset"):
+                manager._configure_mission(candidate, plan)
+            plan["checkpoints"][0]["routeProgressIndex"] = 42
+            plan["checkpoints"][0]["dwellSec"] = "3"
+            with self.assertRaisesRegex(ValueError, "dwellSec"):
+                manager._configure_mission(candidate, plan)
 
     def test_long_operation_returns_receipt_and_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as temporary:

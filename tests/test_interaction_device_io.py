@@ -198,6 +198,25 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertEqual(
             received, [{"action": "wake_transcript", "text": "小九小九"}]
         )
+        mission_messages = []
+        transport.set_mission_message_handler(mission_messages.append)
+        verdict = {
+            "schema": "gogoguard.checkpoint_verdict.v1",
+            "verdictId": "vd_1",
+            "missionId": "mission-1",
+            "mapVersion": "map-v1",
+            "routeId": "route-v1",
+            "checkpointId": "cp_01",
+            "attempt": 1,
+            "action": "continue",
+            "expiresAt": "2099-01-01T00:00:00+00:00",
+        }
+        self.assertTrue(
+            transport.handle_data_message(
+                verdict, participant_identity="agent:patrol-test-001"
+            )
+        )
+        self.assertEqual(mission_messages, [verdict])
         self.assertFalse(
             transport.handle_data_message(
                 {"schema": "gogoguard.motion.v1", "action": "goto"},

@@ -44,11 +44,23 @@ class Z1ProGimbalProtocolTest(unittest.TestCase):
     def test_motion_and_photo_fail_closed_until_static_commissioning(self) -> None:
         gimbal = Z1ProGimbal(commissioned=False)
         self.assertFalse(gimbal.capability()["supported"])
+        self.assertEqual(
+            gimbal.capability()["commissioningStatus"],
+            "disabled_field_acceptance_pending",
+        )
         self.assertEqual(gimbal.capability()["commandHz"], 40.0)
         with self.assertRaisesRegex(RuntimeError, "not field commissioned"):
             gimbal.move_for_inspection(pan_body_deg=20.0, tilt_euler_deg=-5.0)
         with self.assertRaisesRegex(RuntimeError, "not field commissioned"):
             gimbal.trigger_native_photo()
+
+    def test_enabled_capability_remains_explicitly_pending_field_acceptance(self) -> None:
+        capability = Z1ProGimbal(commissioned=True).capability()
+        self.assertTrue(capability["supported"])
+        self.assertEqual(
+            capability["commissioningStatus"],
+            "enabled_field_acceptance_pending",
+        )
 
     def test_rejects_frequency_outside_official_range(self) -> None:
         with self.assertRaisesRegex(ValueError, "30-50 Hz"):

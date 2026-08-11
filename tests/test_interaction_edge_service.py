@@ -40,6 +40,7 @@ class FakeTransport:
     def __init__(self) -> None:
         self.control = None
         self.wake_transcript = None
+        self.mission_message = None
         self.playback = None
         self.disconnects = 0
         self.muted = []
@@ -51,6 +52,9 @@ class FakeTransport:
 
     def set_wake_transcript_handler(self, handler):
         self.wake_transcript = handler
+
+    def set_mission_message_handler(self, handler):
+        self.mission_message = handler
 
     def set_playback_state_handler(self, handler):
         self.playback = handler
@@ -96,6 +100,7 @@ class InteractionEdgeServiceTest(unittest.TestCase):
             unitree_aes_128_key="unused-by-fake",
             volume_executable=Path("/missing"),
             status_path=root / "status.json",
+            mission_inbox_path=root / "checkpoint-inbox.jsonl",
             transport=FakeTransport(),
         )
 
@@ -141,6 +146,13 @@ class InteractionEdgeServiceTest(unittest.TestCase):
                     "yawRad": 0.3,
                 },
                 "localization": {"usable": True, "confidence": 0.8},
+                "mission": {
+                    "missionId": "mission-20260811-RG-狗02",
+                    "checkpointId": "cp_01",
+                    "phase": "spinning",
+                    "spinProgressRad": 3.14,
+                    "camera": {"pan": -14.8, "tilt": 22.4},
+                },
                 "sourceAt": "2026-08-11T08:00:00.000+00:00",
                 "observedAt": "2026-08-11T08:00:00+00:00",
             }
@@ -153,6 +165,35 @@ class InteractionEdgeServiceTest(unittest.TestCase):
             invalid = dict(pose, robotId="OTHER")
             with self.assertRaisesRegex(ValueError, "identity"):
                 service.handle({"action": "publish_pose", "payload": invalid})
+            invalid_mission = dict(
+                pose,
+                mission={**pose["mission"], "camera": {"pan": float("nan"), "tilt": 0}},
+            )
+            with self.assertRaisesRegex(ValueError, "mission camera"):
+                service.handle({"action": "publish_pose", "payload": invalid_mission})
+
+    def test_reliable_checkpoint_verdict_is_validated_and_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = self.create_service(root)
+            verdict = {
+                "schema": "gogoguard.checkpoint_verdict.v1",
+                "verdictId": "vd_1",
+                "missionId": "mission-20260811-RG-狗02",
+                "mapVersion": "map-6855ba54ae11",
+                "routeId": "route-6855ba54ae11-workspace-r4",
+                "checkpointId": "cp_01",
+                "attempt": 1,
+                "action": "continue",
+                "expiresAt": "2099-01-01T00:00:00+00:00",
+            }
+            self.assertTrue(service.transport.mission_message(verdict)["accepted"])
+            saved = json.loads(
+                (root / "checkpoint-inbox.jsonl").read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved["verdictId"], "vd_1")
+            with self.assertRaisesRegex(ValueError, "action"):
+                service.transport.mission_message({**verdict, "action": "move"})
 
     def test_unix_socket_is_a_narrow_json_control_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -2,11 +2,11 @@
   "id": "contracts",
   "responsibility": "Stable product messages and persisted schemas shared across modules",
   "runtime": ["robot", "cloud", "workstation"],
-  "status": "implemented_offline",
+  "status": "frozen_checkpoint_mission_and_unicode_safe_external_id_validation_implemented_offline",
   "codeRoots": ["modules/contracts", "contracts"],
   "entrypoints": [],
   "dependsOn": [],
   "consumes": [],
-  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle", "InteractionCapabilities", "InteractionSessionStatus", "ConversationWakeStatus", "MissionPlan", "MissionStatus", "NavigationStopReceipt", "InspectionFrame"],
-  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract", "2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled", "2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract", "2026-08-10 GoGoGuard checkpoint-inspection alignment section 4"]
+  "produces": ["SensorSnapshot", "RecordingBundle", "MapJob", "DiagnosticProfile", "IncidentBundle", "InteractionCapabilities", "InteractionSessionStatus", "ConversationWakeStatus", "MissionPlan", "MissionStatus", "NavigationStopReceipt", "InspectionFrame", "Unicode-safe external ID validation", "frozen platform mission-message validation"],
+  "sourceProvenance": ["V2 product contract", "2026-08-08 temporary development diagnostics and immutable incident evidence contract", "2026-08-09 DiagnosticProfile v1 retains stable fields while production preset semantics become a bounded lightweight 15 s pre/5 s post incident ring; heavy point cloud, costmap and camera flags remain disabled", "2026-08-09 GoGoGuard realtime media and 小玖 wake-state written contract", "2026-08-10 GoGoGuard checkpoint-inspection alignment section 4", "2026-08-11 platform interface-freeze reply for MissionPlan, checkpoint events, announcement completion and verdicts; platform examples require Unicode-safe mission IDs"]
 }

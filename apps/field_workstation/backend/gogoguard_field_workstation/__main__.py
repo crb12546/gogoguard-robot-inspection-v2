@@ -28,6 +28,7 @@ def main() -> None:
         cloud=config["cloud"],
         map_worker=args.map_worker,
         site_id=str(config.get("site_id") or "local-first-site"),
+        platform=config.get("platform"),
     )
     app.start()
     server = SiteConsoleServer((args.host, args.port), app, args.static_root)

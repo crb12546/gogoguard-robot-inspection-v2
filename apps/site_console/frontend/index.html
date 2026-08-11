@@ -17,7 +17,7 @@
     </section>
     <section class="workspace">
       <div class="visual-stack">
-        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe></article>
+        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe><div class="gimbal-bar"><span>镜头 <b id="gimbalAngles">pan 0° · tilt 0°</b></span><div><button id="gimbalLeft" class="mini-button">左 1°</button><button id="gimbalRight" class="mini-button">右 1°</button><button id="gimbalUp" class="mini-button">上 1°</button><button id="gimbalDown" class="mini-button">下 1°</button><button id="gimbalCenter" class="mini-button">回中</button></div></div></article>
         <article class="panel compact-map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
       </div>
       <article class="panel map-panel"><div class="panel-title"><div><span>实时点云</span><small>拖动旋转 · 滚轮缩放</small></div><b id="pointCount">0 点</b></div><canvas id="cloud"></canvas></article>
@@ -28,6 +28,12 @@
         <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">狗 → Mac → 阿里云 GLIM</small></div></div>
         <div class="progress"><div id="jobProgress"></div></div>
         <small id="transferDetail" class="transfer-detail">尚未传输</small>
+        <div id="checkpointRecorder" class="checkpoint-recorder" hidden>
+          <strong>巡检点记录</strong>
+          <input id="checkpointNote" maxlength="200" placeholder="可选：例如配电间门口">
+          <button id="markCheckpoint">停在这里：记录点位并拍样张</button>
+          <div id="recordingCheckpoints" class="checkpoint-list">尚未标记</div>
+        </div>
         <button id="recordButton">开始录制地图</button>
         <div id="error" class="error"></div>
       </aside>
@@ -61,6 +67,11 @@
           <button id="saveWorkspace">保存路线与允许范围</button>
         </div>
         <div id="workspaceHelp" class="workspace-help">选择已完成的地图后，录制轨迹会自动成为蓝色路线。</div>
+        <div class="checkpoint-audit">
+          <strong>3. 复核巡检点</strong>
+          <small id="checkpointAudit">保存路线和绿色区域后，这里会显示录制时标记的点位。</small>
+          <div id="checkpointAuditList" class="checkpoint-list"></div>
+        </div>
         <div id="workspaceError" class="error"></div>
       </article>
     </section>
@@ -91,6 +102,8 @@
           <small id="prepareNavigationHelp" class="action-help">只有更换地图时才需要；当前地图已发布时不会显示。</small>
           <a id="downloadPlatformBundle" class="button-link secondary" download hidden>导出给平台的地图与路线包</a>
           <small id="downloadPlatformBundleHelp" class="action-help" hidden>包含 PCD、可编辑路线、真实执行路线、绿色允许区和校验清单，供平台展示和标点。</small>
+          <button id="uploadPlatformBundle" class="secondary" hidden>导出并上传到 GoGoGuard 平台</button>
+          <div id="platformUpload" class="upload-status" hidden><div><i id="platformUploadProgress"></i></div><small id="platformUploadMessage">尚未上传</small></div>
           <button id="startRuntime" class="secondary">启动定位与 Nav2</button>
           <small id="startRuntimeHelp" class="action-help">会启动 FAST-LIO 地图定位、Nav2/MPPI 和运动桥；启动后等待定位可用。</small>
           <button id="resetLocalization" class="secondary">机器狗位置不对：重新定位</button>

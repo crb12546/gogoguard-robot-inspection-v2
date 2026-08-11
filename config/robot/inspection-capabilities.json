@@ -1,6 +1,6 @@
 {
   "schema": "gogoguard.robot_capabilities.v1",
-  "revision": 2,
+  "revision": 3,
   "routeExecution": {
     "supported": true,
     "model": "map_bound_route",
@@ -17,14 +17,16 @@
   },
   "checkpointInspection": {
     "supported": true,
-    "action": "nav2_collision_checked_body_spin_360",
+    "action": "true_stop_pose_announce_capture_verdict_suffix_resume",
     "usesExistingLiveVideo": true,
-    "requiresPlatformMissionPlan": true
+    "requiresPlatformMissionPlan": true,
+    "retake": true,
+    "platformTimeoutContinue": true
   },
   "gimbal": {
-    "supported": false,
+    "supported": true,
     "hardwareSupported": true,
-    "commissioningStatus": "official_protocol_integrated_robot_static_acceptance_pending",
+    "commissioningStatus": "software_complete_robot_field_acceptance_pending",
     "manufacturer": "Nanjing Xianfei Robot Technology",
     "model": "Z-1Pro",
     "transport": "tcp://192.168.144.108:2332",
@@ -48,6 +50,8 @@
     "nativePhotoHardwareSupported": true,
     "nativePhotoCommand": "gcu_shutter_0x20",
     "nativePhotoMaxResolution": [2688, 1520],
+    "configurationSampleCapture": "robot_local_jpeg_in_asset_bundle",
+    "dailyEvidenceCapture": "platform_frame_from_live_video_after_capture_ready",
     "nativePhotoRetrievalIntegrated": false,
     "interruptsLiveVideo": null
   },
@@ -67,7 +71,8 @@
     "schema": "gogoguard.robot_pose.v1",
     "topic": "gogoguard.robot_pose.v1",
     "delivery": "unreliable_latest_only",
-    "binding": ["mapVersion", "routeId", "frameId"],
+    "binding": ["mapVersion", "routeId", "frameId", "mission"],
+    "missionContext": true,
     "requiresActiveLiveSession": true
   },
   "powerStatus": {

@@ -107,6 +107,105 @@ class CheckpointRuntimeTest(unittest.TestCase):
             )
         self.assertIsNone(executor.last_stop_receipt)
 
+    def test_platform_checkpoint_waits_for_verdict_and_deduplicates_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = {
+                "schema": "gogoguard.navigation_mission.v1",
+                "missionId": "mission-2",
+                "mapVersion": "map-v1",
+                "routeId": "route-v1",
+                "verdictTimeoutSec": 15,
+                "maxRetakeAttempts": 2,
+                "checkpoints": [
+                    {
+                        "checkpointId": "cp_01",
+                        "routeProgressIndex": 10,
+                        "action": "platform_checkpoint",
+                        "settleBeforeS": 0.5,
+                        "bodyYawRad": 1.2,
+                        "camera": {"pan": -15, "tilt": 22.5, "roll": 0},
+                        "spin": True,
+                        "dwellSec": 3,
+                    }
+                ],
+            }
+            payload["missionHash"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            path = Path(temporary) / "mission.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            mission = load_navigation_mission(
+                path,
+                expected_map_version="map-v1",
+                expected_route_id="route-v1",
+                route_point_count=20,
+            )
+        executor = CheckpointExecutor(mission)
+        executor.observe_progress(10)
+        executor.route_goal_cancelled()
+        executor.observe_stop(
+            1.0, motion_authorized=False, command_linear_mps=0,
+            command_angular_rps=0, robot_linear_mps=0, robot_angular_rps=0,
+            route_progress_index=10,
+        )
+        executor.observe_stop(
+            1.5, motion_authorized=False, command_linear_mps=0,
+            command_angular_rps=0, robot_linear_mps=0, robot_angular_rps=0,
+            route_progress_index=10,
+        )
+        self.assertEqual(executor.phase, "POSE_REQUESTED")
+        executor.pose_completed()
+        control = {
+            "controlId": "cc-capture",
+            "missionId": "mission-2",
+            "checkpointId": "cp_01",
+            "attempt": 1,
+            "action": "capture",
+        }
+        self.assertEqual(executor.apply_platform_control(control), "capture")
+        self.assertEqual(executor.apply_platform_control(control), "duplicate")
+        executor.spin_started()
+        executor.spin_completed()
+        self.assertEqual(executor.phase, "WAITING_VERDICT")
+        self.assertEqual(
+            executor.apply_platform_control(
+                {**control, "controlId": "cc-continue", "action": "continue"}
+            ),
+            "continue",
+        )
+        self.assertEqual(executor.phase, "TRAVELING")
+
+    def test_platform_checkpoint_rejects_non_finite_camera_angle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = {
+                "schema": "gogoguard.navigation_mission.v1",
+                "missionId": "mission-2",
+                "mapVersion": "map-v1",
+                "routeId": "route-v1",
+                "checkpoints": [
+                    {
+                        "checkpointId": "cp_01",
+                        "routeProgressIndex": 10,
+                        "action": "platform_checkpoint",
+                        "settleBeforeS": 0.5,
+                        "bodyYawRad": 1.2,
+                        "camera": {"pan": math.nan, "tilt": 0, "roll": 0},
+                    }
+                ],
+            }
+            payload["missionHash"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            path = Path(temporary) / "mission.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "camera angle"):
+                load_navigation_mission(
+                    path,
+                    expected_map_version="map-v1",
+                    expected_route_id="route-v1",
+                    route_point_count=20,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,9 @@ class RobotClient:
     ) -> dict:
         return self._json(path, "POST", body, timeout_s=timeout_s)
 
+    def delete(self, path: str) -> dict:
+        return self._json(path, "DELETE")
+
     def live(self) -> dict:
         return self.get("api/v1/live")
 
@@ -58,6 +61,15 @@ class RobotClient:
             scheme = "https" if self.parsed.scheme == "https" else "http"
             value["url"] = f"{scheme}://{self.parsed.hostname}:{port}/{stream}/?controls=false&muted=true&autoplay=true&playsInline=true"
         return value
+
+    def gimbal(self) -> dict:
+        return self.get("api/v1/gimbal")
+
+    def move_gimbal(self, payload: dict) -> dict:
+        return self.post("api/v1/gimbal/move", payload)
+
+    def center_gimbal(self) -> dict:
+        return self.post("api/v1/gimbal/center")
 
     def sessions(self) -> list[dict]:
         return list(self.get("api/v1/sessions").get("items") or [])
@@ -73,6 +85,24 @@ class RobotClient:
             f"api/v1/sessions/{quote(session_id, safe='')}/stop",
             "POST",
             timeout_s=max(self.timeout_s, 30.0),
+        )
+
+    def recording_checkpoints(self, session_id: str) -> dict:
+        return self.get(
+            f"api/v1/sessions/{quote(session_id, safe='')}/checkpoints"
+        )
+
+    def mark_recording_checkpoint(self, session_id: str, payload: dict) -> dict:
+        return self.post(
+            f"api/v1/sessions/{quote(session_id, safe='')}/checkpoints",
+            payload,
+            timeout_s=max(self.timeout_s, 15.0),
+        )
+
+    def delete_recording_checkpoint(self, session_id: str, checkpoint_id: str) -> dict:
+        return self.delete(
+            f"api/v1/sessions/{quote(session_id, safe='')}/checkpoints/"
+            f"{quote(checkpoint_id, safe='')}"
         )
 
     def download_recording(
@@ -212,13 +242,23 @@ class RobotClient:
         )
         return destination
 
-    def deploy_map(self, job: dict, artifact_root: Path) -> dict:
+    def deploy_map(
+        self,
+        job: dict,
+        artifact_root: Path,
+        *,
+        additional_files: dict[str, Path] | None = None,
+    ) -> dict:
         artifact_root = Path(artifact_root)
         sources = {
             path.name: path
             for path in artifact_root.iterdir()
             if path.is_file() and not path.name.startswith(".")
         }
+        for name, path in (additional_files or {}).items():
+            source = Path(path)
+            if source.is_file():
+                sources[str(name)] = source
         workspace_path = artifact_root.parent / "navigation-workspace.json"
         if workspace_path.is_file():
             # The Mac keeps operator-edited blue/green workspace state outside
@@ -254,7 +294,8 @@ class RobotClient:
                 continue
             path = sources[item["name"]]
             self._put_file(
-                f"api/v1/edge/map-imports/{job['job_id']}/artifacts/{quote(path.name, safe='')}",
+                f"api/v1/edge/map-imports/{job['job_id']}/artifacts/"
+                f"{quote(item['name'], safe='')}",
                 path,
                 item["sha256"],
             )

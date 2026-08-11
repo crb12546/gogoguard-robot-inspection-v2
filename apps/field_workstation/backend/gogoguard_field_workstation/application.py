@@ -10,6 +10,7 @@ from gogoguard_map_factory import GlimEditorManager, MapJobManager
 from gogoguard_route import NavigationWorkspaceStore, RouteManager, validate_workspace
 
 from .robot_client import RobotClient, RobotConnectionError
+from .platform_assets import PlatformAssetUploader
 
 
 class FieldWorkstationApplication:
@@ -23,6 +24,7 @@ class FieldWorkstationApplication:
         cloud: dict,
         map_worker: str = "ssh",
         site_id: str = "local-first-site",
+        platform: dict | None = None,
     ) -> None:
         self.data_root = Path(data_root)
         self.data_root.mkdir(parents=True, exist_ok=True)
@@ -38,6 +40,7 @@ class FieldWorkstationApplication:
         )
         self.navigation_workspaces = NavigationWorkspaceStore(self.data_root)
         self.routes = RouteManager(self.data_root, site_id=self.site_id)
+        self.platform_assets = PlatformAssetUploader(self.data_root, platform)
         self.catalog_path = self.data_root / "catalog.json"
         self._catalog_lock = threading.Lock()
         self._catalog = self._load_catalog()
@@ -81,6 +84,15 @@ class FieldWorkstationApplication:
     def camera_status(self) -> dict:
         return self.robot.camera()
 
+    def gimbal_status(self) -> dict:
+        return self.robot.gimbal()
+
+    def move_gimbal(self, payload: dict) -> dict:
+        return self.robot.move_gimbal(payload)
+
+    def center_gimbal(self) -> dict:
+        return self.robot.center_gimbal()
+
     def start_recording(self) -> dict:
         return self.robot.start_recording()
 
@@ -89,6 +101,15 @@ class FieldWorkstationApplication:
         remote = dict(outcome["session"])
         job = self._submit_recording(remote)
         return {"session": remote | {"map_job_id": job.job_id}, "map_job": json_ready(job)}
+
+    def recording_checkpoints(self, session_id: str) -> dict:
+        return self.robot.recording_checkpoints(session_id)
+
+    def mark_recording_checkpoint(self, session_id: str, payload: dict) -> dict:
+        return self.robot.mark_recording_checkpoint(session_id, payload)
+
+    def delete_recording_checkpoint(self, session_id: str, checkpoint_id: str) -> dict:
+        return self.robot.delete_recording_checkpoint(session_id, checkpoint_id)
 
     def submit_recording(self, session_id: str) -> dict:
         remote = dict(self.session(session_id))
@@ -226,7 +247,12 @@ class FieldWorkstationApplication:
         validate_workspace(self.navigation_workspaces.get(job_id), require_ready=True)
         local_candidate = self.routes.prepare_map_job(job_id)
         platform_bundle = self.routes.export_platform_bundle(job_id)
-        self.robot.deploy_map(job, Path(str(job["artifact_root"])))
+        checkpoint_path = Path(platform_bundle["manifest"]).parent / "checkpoints.json"
+        self.robot.deploy_map(
+            job,
+            Path(str(job["artifact_root"])),
+            additional_files={"checkpoints.json": checkpoint_path},
+        )
         robot_candidate = self.robot.post(
             "api/v1/navigation/prepare",
             {"job_id": job_id},
@@ -245,10 +271,7 @@ class FieldWorkstationApplication:
 
     def platform_map_bundle(self, job_id: str) -> dict:
         self.maps.get(job_id)
-        try:
-            self.routes.get(job_id)
-        except KeyError:
-            self.routes.prepare_map_job(job_id)
+        self.routes.prepare_map_job(job_id)
         return self.routes.export_platform_bundle(job_id)
 
     def platform_map_bundle_file(self, job_id: str) -> Path:
@@ -258,6 +281,37 @@ class FieldWorkstationApplication:
         if root not in path.parents or not path.is_file():
             raise KeyError(job_id)
         return path
+
+    def checkpoint_audit(self, job_id: str) -> dict:
+        self.maps.get(job_id)
+        self.routes.prepare_map_job(job_id)
+        return self.routes.checkpoint_descriptor(job_id)
+
+    def platform_upload_status(self, job_id: str) -> dict:
+        self.maps.get(job_id)
+        value = self.platform_assets.status(job_id)
+        workspace = self.navigation_workspaces.get(job_id)
+        previous_hash = value.get("workspaceHash")
+        stale = bool(
+            value.get("state") != "not_started"
+            and previous_hash != workspace.get("workspaceHash")
+        )
+        if stale:
+            value = {
+                **value,
+                "stale": True,
+                "message": "蓝色路线或绿色允许区已修改，请上传新版本",
+            }
+        else:
+            value = {**value, "stale": False}
+        return value
+
+    def upload_platform_bundle(self, job_id: str) -> dict:
+        descriptor = self.platform_map_bundle(job_id)
+        checkpoints = self.routes.checkpoint_descriptor(job_id)
+        if checkpoints.get("audit", {}).get("ready") is not True:
+            raise RuntimeError("巡检点审核未通过，不能上传到平台")
+        return self.platform_assets.start(job_id, descriptor)
 
     def start_navigation_runtime(self, candidate_id: str) -> dict:
         return self.robot.post(

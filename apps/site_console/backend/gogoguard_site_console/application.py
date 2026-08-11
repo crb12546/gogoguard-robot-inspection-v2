@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import json
+import math
+import threading
 from pathlib import Path
 
 from gogoguard_contracts import json_ready
 from gogoguard_data_capture import CaptureManager
-from gogoguard_device_io import SnapshotStore, create_camera_gateway, create_gateway
+from gogoguard_device_io import SnapshotStore, Z1ProGimbal, create_camera_gateway, create_gateway
 from gogoguard_evidence import DiagnosticProfileStore, EventJournal, IncidentStore
 from gogoguard_map_factory import MapJobManager
 from gogoguard_navigation import NavigationManager, NavigationSupervisorClient
+from gogoguard_route import NavigationWorkspaceStore
 from gogoguard_transfer import EdgeArtifactExchange
 
 
 class InspectionApplication:
     def __init__(self, *, data_root: Path, mode: str, map_worker: str, robot_id: str, site_id: str,
                  topics: dict[str, str], sensor_id: str = "ARMCP6B0035634", cloud: dict | None = None,
-                 camera: dict | None = None, capabilities: dict | None = None) -> None:
+                 camera: dict | None = None, capabilities: dict | None = None,
+                 gimbal: dict | None = None) -> None:
         data_root.mkdir(parents=True, exist_ok=True)
         self.data_root = data_root
         self.mode = mode
@@ -29,11 +33,22 @@ class InspectionApplication:
         self.incident_store = IncidentStore(data_root)
         self.gateway = create_gateway(mode, self.store, robot_id, topics)
         self.camera = create_camera_gateway(mode, camera)
+        gimbal_config = dict(gimbal or {})
+        self.gimbal = Z1ProGimbal(
+            host=str(gimbal_config.get("host") or "192.168.144.108"),
+            port=int(gimbal_config.get("port") or 2332),
+            timeout_s=float(gimbal_config.get("timeout_s") or 1.5),
+            command_hz=float(gimbal_config.get("command_hz") or 40.0),
+            commissioned=mode == "demo" or bool(gimbal_config.get("commissioned", False)),
+        )
+        self._gimbal_angles = {"pan": 0.0, "tilt": 0.0, "roll": 0.0}
+        self._gimbal_lock = threading.RLock()
         self.capture = CaptureManager(data_root, self.store, self.journal, mode, topics)
         self.maps = None if map_worker == "none" else MapJobManager(
             data_root, map_worker, self.journal, cloud
         )
         self.exchange = EdgeArtifactExchange(data_root)
+        self.navigation_workspaces = NavigationWorkspaceStore(data_root)
         self.navigation = (
             NavigationSupervisorClient(data_root / "navigation" / "supervisor.sock")
             if mode == "robot"
@@ -66,6 +81,58 @@ class InspectionApplication:
 
     def camera_status(self) -> dict:
         return json_ready(self.camera.status())
+
+    def gimbal_status(self) -> dict:
+        with self._gimbal_lock:
+            value = {**self.gimbal.capability(), "angles": dict(self._gimbal_angles)}
+            if self.mode == "demo":
+                return value | {"online": True}
+            try:
+                reply = self.gimbal.probe()
+                angles = {
+                    "pan": reply.relative_pan_deg,
+                    "tilt": reply.relative_tilt_deg,
+                    "roll": reply.relative_roll_deg,
+                }
+                if all(item is not None for item in angles.values()):
+                    self._gimbal_angles = {key: float(item) for key, item in angles.items()}
+                return value | {"online": True, "angles": dict(self._gimbal_angles)}
+            except Exception as exc:
+                return value | {"online": False, "reason": type(exc).__name__}
+
+    def move_gimbal(self, payload: dict) -> dict:
+        with self._gimbal_lock:
+            angles = self._validated_gimbal_angles(payload)
+            pan, tilt, roll = angles["pan"], angles["tilt"], angles["roll"]
+            if self.mode != "demo":
+                self.gimbal.move_for_inspection(
+                    pan_body_deg=pan,
+                    tilt_euler_deg=tilt,
+                    roll_euler_deg=roll,
+                )
+            self._gimbal_angles = {"pan": pan, "tilt": tilt, "roll": roll}
+            return self.gimbal_status()
+
+    def _validated_gimbal_angles(self, payload: dict) -> dict[str, float]:
+        if not isinstance(payload, dict):
+            raise ValueError("gimbal angles must be an object")
+        result: dict[str, float] = {}
+        for name, bounds in (
+            ("pan", self.gimbal.PAN_RANGE_DEG),
+            ("tilt", self.gimbal.TILT_RANGE_DEG),
+            ("roll", self.gimbal.ROLL_RANGE_DEG),
+        ):
+            raw = payload.get(name, self._gimbal_angles[name])
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError(f"gimbal {name} angle must be numeric")
+            value = float(raw)
+            if not math.isfinite(value) or not bounds[0] <= value <= bounds[1]:
+                raise ValueError(f"gimbal {name} angle is outside the supported range")
+            result[name] = value
+        return result
+
+    def center_gimbal(self) -> dict:
+        return self.move_gimbal({"pan": 0.0, "tilt": 0.0, "roll": 0.0})
 
     def capabilities(self) -> dict:
         value = json_ready(self.capability_profile)
@@ -122,6 +189,26 @@ class InspectionApplication:
         self.capture.link_map_job(session_id, job.job_id)
         return {"session": json_ready(self.capture.get(session_id)), "map_job": json_ready(job)}
 
+    def recording_checkpoints(self, session_id: str) -> dict:
+        return self.capture.checkpoints(session_id)
+
+    def mark_recording_checkpoint(self, session_id: str, payload: dict) -> dict:
+        requested = payload.get("camera")
+        requested = requested if isinstance(requested, dict) else self._gimbal_angles
+        angles = self._validated_gimbal_angles(requested)
+        return self.capture.mark_checkpoint(
+            session_id,
+            camera_pan_deg=angles["pan"],
+            camera_tilt_deg=angles["tilt"],
+            camera_roll_deg=angles["roll"],
+            note=str(payload.get("note") or ""),
+            spin=payload.get("spin") is not False,
+            sample_jpeg=self.camera.capture_jpeg(),
+        )
+
+    def delete_recording_checkpoint(self, session_id: str, checkpoint_id: str) -> dict:
+        return self.capture.delete_checkpoint(session_id, checkpoint_id)
+
     def sessions(self) -> list[dict]:
         return [json_ready(item) for item in self.capture.list()]
 
@@ -144,6 +231,24 @@ class InspectionApplication:
                     continue
             return jobs
         return [json_ready(item) for item in self.maps.list()]
+
+    def navigation_workspace(self, job_id: str) -> dict:
+        if self.maps is not None:
+            self.maps.get(job_id)
+        return self.navigation_workspaces.get(job_id)
+
+    def update_navigation_workspace(self, job_id: str, payload: dict) -> dict:
+        if self.maps is not None:
+            self.maps.get(job_id)
+        value = self.navigation_workspaces.update(job_id, payload)
+        self.journal.append(
+            "map.navigation_workspace_updated",
+            job_id=job_id,
+            revision=value["revision"],
+            workspace_hash=value["workspaceHash"],
+            ready=value["ready"],
+        )
+        return value
 
     def recording_export(self, session_id: str) -> dict:
         return self.exchange.recording_descriptor(session_id)

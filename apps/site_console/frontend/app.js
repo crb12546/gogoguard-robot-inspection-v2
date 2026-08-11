@@ -14,6 +14,11 @@ const state = {
   navigation: null,
   live: null,
   camera: null,
+  gimbal: null,
+  recordingCheckpoints: [],
+  checkpointAudit: null,
+  platformUpload: null,
+  platformUploadSupported: null,
   cameraStarted: false,
   robotReachable: false,
   navigationProfile: null,
@@ -258,6 +263,92 @@ async function refreshCamera() {
   }
 }
 
+async function refreshGimbal() {
+  try {
+    state.gimbal = await api('/api/v1/gimbal');
+    const angles = state.gimbal.angles || {};
+    $('gimbalAngles').textContent = `pan ${Number(angles.pan || 0).toFixed(1)}° · tilt ${Number(angles.tilt || 0).toFixed(1)}°`;
+    for (const id of ['gimbalLeft', 'gimbalRight', 'gimbalUp', 'gimbalDown', 'gimbalCenter']) {
+      $(id).disabled = !state.gimbal.supported;
+    }
+  } catch (_) {
+    $('gimbalAngles').textContent = '云台不可用';
+  }
+}
+
+let gimbalCommandBusy = false;
+async function moveGimbal(panDelta, tiltDelta, center = false) {
+  if (gimbalCommandBusy) return;
+  gimbalCommandBusy = true;
+  const current = state.gimbal?.angles || {};
+  try {
+    state.gimbal = await post(center ? '/api/v1/gimbal/center' : '/api/v1/gimbal/move', center ? undefined : {
+      pan: Number(current.pan || 0) + panDelta,
+      tilt: Number(current.tilt || 0) + tiltDelta,
+      roll: Number(current.roll || 0),
+    });
+    await refreshGimbal();
+  } catch (error) {
+    $('error').textContent = friendlyError(error);
+  } finally {
+    gimbalCommandBusy = false;
+  }
+}
+
+function bindGimbalHold(id, panDelta, tiltDelta) {
+  const button = $(id);
+  let timer = null;
+  const stop = () => {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+  };
+  button.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    moveGimbal(panDelta, tiltDelta);
+    timer = setInterval(() => moveGimbal(panDelta, tiltDelta), 250);
+    button.setPointerCapture?.(event.pointerId);
+  });
+  button.addEventListener('pointerup', stop);
+  button.addEventListener('pointercancel', stop);
+  button.addEventListener('pointerleave', stop);
+}
+
+function renderRecordingCheckpoints() {
+  $('checkpointRecorder').hidden = state.active?.state !== 'recording';
+  $('recordingCheckpoints').innerHTML = state.recordingCheckpoints.length
+    ? state.recordingCheckpoints.map(item => `<div class="checkpoint-item"><span><b>${escapeHtml(item.checkpointId)}</b> · pan ${Number(item.camera?.pan || 0).toFixed(1)}° / tilt ${Number(item.camera?.tilt || 0).toFixed(1)}°<br>${escapeHtml(item.note || '未填备注')}</span><button class="delete-checkpoint" data-checkpoint-id="${escapeHtml(item.checkpointId)}">删除重标</button></div>`).join('')
+    : '尚未标记巡检点';
+}
+
+async function refreshRecordingCheckpoints() {
+  if (!state.active?.session_id) {
+    state.recordingCheckpoints = [];
+    renderRecordingCheckpoints();
+    return;
+  }
+  const value = await api(`/api/v1/sessions/${encodeURIComponent(state.active.session_id)}/checkpoints`);
+  state.recordingCheckpoints = value.checkpoints || [];
+  renderRecordingCheckpoints();
+}
+
+async function markCheckpoint() {
+  if (!state.active) return;
+  $('markCheckpoint').disabled = true;
+  try {
+    await post(`/api/v1/sessions/${encodeURIComponent(state.active.session_id)}/checkpoints`, {
+      note: $('checkpointNote').value,
+      spin: true,
+      camera: state.gimbal?.angles || {pan: 0, tilt: 0, roll: 0},
+    });
+    $('checkpointNote').value = '';
+    await refreshRecordingCheckpoints();
+  } catch (error) {
+    $('error').textContent = friendlyError(error);
+  } finally {
+    $('markCheckpoint').disabled = false;
+  }
+}
+
 function renderRecording() {
   const button = $('recordButton');
   if (state.active?.state === 'recording') {
@@ -276,6 +367,7 @@ function renderRecording() {
   button.disabled = !state.robotReachable || (
     !state.active && !state.live?.device?.online
   );
+  renderRecordingCheckpoints();
 }
 
 async function toggleRecord() {
@@ -288,6 +380,7 @@ async function toggleRecord() {
       state.job = outcome.map_job || null;
     } else {
       state.active = await api('/api/v1/sessions/start', {method: 'POST'});
+      await refreshRecordingCheckpoints();
     }
     await refreshMapJobs();
     await refreshSessions();
@@ -344,12 +437,16 @@ async function showResult(job, {explicit = false} = {}) {
     state.glimEditor = {state: 'unavailable'};
   }
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.checkpointAudit = null;
+  state.platformUpload = null;
   state.workspaceEditMode = null;
   const mapName = job.label ? `${job.label} · ${job.job_id}` : job.job_id;
   $('resultMeta').textContent = `${mapName} · ${job.metrics?.point_count || state.mapArtifact.points.length} 点 · ${job.metrics?.worker || 'cloud-glim'}`;
   redrawResult();
   drawWorkspace();
   renderWorkspaceControls();
+  if (state.navigationWorkspace.ready) await refreshCheckpointAudit();
+  await refreshPlatformUpload();
   renderMapHistory();
   drawNavigation();
 }
@@ -424,6 +521,15 @@ function drawWorkspace() {
       context.beginPath(); context.arc(value[0], value[1], 3.5, 0, Math.PI * 2); context.fill();
     });
   }
+  for (const checkpoint of state.checkpointAudit?.checkpoints || []) {
+    const point = checkpoint.position ? [checkpoint.position.x, checkpoint.position.y] : null;
+    if (!point) continue;
+    const value = worldToCanvas(point);
+    context.fillStyle = checkpoint.binding?.needsReview ? '#fb923c' : '#f43f5e';
+    context.beginPath(); context.arc(value[0], value[1], 7, 0, Math.PI * 2); context.fill();
+    context.fillStyle = '#ffffff'; context.font = '10px sans-serif';
+    context.fillText(checkpoint.checkpointId, value[0] + 9, value[1] - 7);
+  }
 }
 
 function recordedWorkspaceRoute() {
@@ -472,6 +578,75 @@ function renderWorkspaceControls() {
       : editor.state === 'tunnel_closed'
         ? '云端编辑会话还在，但 Mac 浏览器通道已断开；可直接导出已保存的结果。'
         : '需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。';
+}
+
+function renderCheckpointAudit() {
+  const audit = state.checkpointAudit;
+  if (!audit) {
+    $('checkpointAudit').textContent = '保存路线和绿色区域后，这里会显示录制时标记的点位。';
+    $('checkpointAuditList').innerHTML = '';
+    return;
+  }
+  $('checkpointAudit').textContent = `${audit.audit?.message || ''} · 共 ${audit.checkpoints?.length || 0} 个点`;
+  $('checkpointAudit').className = audit.audit?.ready ? 'ok' : 'warn';
+  $('checkpointAuditList').innerHTML = (audit.checkpoints || []).map(item => `<div class="checkpoint-item"><span><b>${escapeHtml(item.checkpointId)}</b> · 路线索引 ${item.routeProgressIndex}<br>距路线 ${Number(item.binding?.distanceToExecutionRouteM || 0).toFixed(2)} m · pan ${Number(item.camera?.pan || 0).toFixed(1)}° / tilt ${Number(item.camera?.tilt || 0).toFixed(1)}°</span><b>${item.binding?.needsReview ? '待复核' : '已对齐'}</b></div>`).join('') || '<small>本次录制没有标记巡检点，仍可发布纯路线。</small>';
+  drawWorkspace();
+}
+
+async function refreshCheckpointAudit() {
+  if (!state.latestMapJob || !state.navigationWorkspace?.ready) return;
+  try {
+    state.checkpointAudit = await api(`/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/checkpoints`);
+  } catch (error) {
+    state.checkpointAudit = {checkpoints: [], audit: {ready: false, message: friendlyError(error)}};
+  }
+  renderCheckpointAudit();
+  renderPlatformUpload();
+}
+
+function renderPlatformUpload() {
+  const upload = state.platformUpload;
+  const visible = Boolean(
+    state.latestMapJob
+    && state.navigationWorkspace?.ready
+    && state.platformUploadSupported !== false
+  );
+  $('uploadPlatformBundle').hidden = !visible;
+  $('platformUpload').hidden = !visible;
+  $('platformUploadProgress').style.width = `${Number(upload?.progress || 0)}%`;
+  $('platformUploadMessage').textContent = upload?.siteName
+    ? `${upload.message || upload.state} · 项目「${upload.siteName}」`
+    : upload?.message || '尚未上传';
+  const transferBusy = ['queued', 'uploading', 'verifying'].includes(upload?.state);
+  const acceptedCurrent = ['verified', 'activated'].includes(upload?.state) && !upload?.stale;
+  $('uploadPlatformBundle').disabled = !state.checkpointAudit?.audit?.ready || transferBusy || acceptedCurrent;
+  $('uploadPlatformBundle').textContent = upload?.state === 'activated' && !upload?.stale
+    ? '平台已激活这一版'
+    : upload?.state === 'verified' && !upload?.stale
+    ? '已上传并校验通过（等待运营激活）'
+    : '导出并上传到 GoGoGuard 平台';
+}
+
+async function refreshPlatformUpload() {
+  if (!state.latestMapJob) return;
+  try {
+    state.platformUpload = await api(`/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/platform-upload`);
+    state.platformUploadSupported = true;
+    renderPlatformUpload();
+  } catch (_) {
+    state.platformUploadSupported = false;
+    renderPlatformUpload();
+  }
+}
+
+async function uploadPlatformBundle() {
+  if (!state.latestMapJob) return;
+  try {
+    state.platformUpload = await post(`/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/platform-upload`);
+    renderPlatformUpload();
+  } catch (error) {
+    $('navigationError').textContent = friendlyError(error);
+  }
 }
 
 async function startGlimEditor() {
@@ -557,6 +732,8 @@ async function saveNavigationWorkspace() {
     $('workspaceHelp').textContent = '已保存；这一版路线和允许范围会与地图绑定。';
     drawWorkspace();
     renderWorkspaceControls();
+    await refreshCheckpointAudit();
+    await refreshPlatformUpload();
   } catch (error) {
     $('workspaceError').textContent = friendlyError(error);
     renderWorkspaceControls();
@@ -785,6 +962,7 @@ function renderNavigation() {
   // Stop uses its own supervisor lane and must remain available even when a
   // start/recovery operation is stuck in the control lane.
   $('stopPatrol').disabled = stopOperationBusy;
+  renderPlatformUpload();
   drawNavigation();
 }
 
@@ -1269,6 +1447,21 @@ $('sessions').addEventListener('click', async event => {
   if (job?.state === 'complete') await showResult(job, {explicit: true});
 });
 $('recordButton').addEventListener('click', toggleRecord);
+$('markCheckpoint').addEventListener('click', markCheckpoint);
+$('recordingCheckpoints').addEventListener('click', async event => {
+  const button = event.target.closest('.delete-checkpoint');
+  if (!button || !state.active) return;
+  try {
+    await api(`/api/v1/sessions/${encodeURIComponent(state.active.session_id)}/checkpoints/${encodeURIComponent(button.dataset.checkpointId)}`, {method: 'DELETE'});
+    await refreshRecordingCheckpoints();
+  } catch (error) { $('error').textContent = friendlyError(error); }
+});
+bindGimbalHold('gimbalLeft', -1, 0);
+bindGimbalHold('gimbalRight', 1, 0);
+bindGimbalHold('gimbalUp', 0, 1);
+bindGimbalHold('gimbalDown', 0, -1);
+$('gimbalCenter').addEventListener('click', () => moveGimbal(0, 0, true));
+$('uploadPlatformBundle').addEventListener('click', uploadPlatformBundle);
 $('prepareNavigation').addEventListener('click', () => navigationAction('prepare'));
 $('startRuntime').addEventListener('click', () => navigationAction('runtime'));
 $('resetLocalization').addEventListener('click', () => navigationAction('reset'));
@@ -1320,12 +1513,15 @@ async function initialize() {
   }
   renderRecording();
   refreshCamera();
+  refreshGimbal();
   refreshNavigation();
   refreshProfile();
   refreshDiagnosticProfile();
   refreshIncidents();
   scheduledTick();
   setInterval(refreshCamera, 2000);
+  setInterval(refreshGimbal, 3000);
+  setInterval(refreshPlatformUpload, 2000);
   setInterval(refreshMapJobs, 3000);
   setInterval(refreshIncidents, 5000);
 }
