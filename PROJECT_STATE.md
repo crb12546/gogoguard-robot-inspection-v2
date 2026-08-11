@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## New-task handoff — start here
 
@@ -175,21 +175,22 @@ boundaries and receipts to distinguish them.
   checkpoint-validation workflow is source commit `cadba9b`; camera-first
   alignment and revision-safe publication are source commit `074f379`; route-
   bound mission isolation is source commit `6613c6f`, with the empty optional
-  ROS launch-argument correction in `b103370`. These
+  ROS launch-argument correction in `b103370` and the split process/patrol
+  readiness boundary in `7f79aa4`. These
   commits remain local until explicitly pushed. Always check `git status` for
   a later handoff commit. Checkpoint inspection code is deployed but remains
   dormant until the operator explicitly starts a physical test.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260811-mission-isolation-r2`, built
-  from `b103370` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-
+  `gogoguard-robot-inspection:v2-edge-20260811-mission-isolation-r3`, built
+  from `7f79aa4` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-
   list ID is
-  `sha256:204294c38ad3d289b866ee24b350ec5d1bf452b5421948ba8c84b7652c7dbd8e`;
+  `sha256:6c9c9453a3a7ba191ac580d2566a406ef85997fc727eeeacd7501d8055734c6f`;
   the robot-loaded config ID is
-  `sha256:e0d62bb4279453ff3a6fe0b060bd1a3e24c9ee12db1c2e14e1bc699b8ede0b9c`.
+  `sha256:54c79cafdefab076ec92c09c0443635e551656b403dcfd55a49127f031455fc0`.
   The enabled service is active with zero restarts, platform heartbeat is
   online through the frozen HTTP IP endpoint, Z1Pro status is ready and the
-  live static device receipt reported LiDAR 11.9 Hz, IMU 13.8 Hz and odometry
-  10.9 Hz. The r5
+  live static device receipt reported LiDAR 10.0 Hz, IMU 44.9 Hz and odometry
+  9.0 Hz. The r5
   realtime audio/video behavior and peak-limited `outputGain=3.0` are retained.
   Nav2, patrol runtime and the Unitree motion bridge are stopped and UDP 5005
   is unbound. Always re-read live robot state before deployment or motion
@@ -2135,7 +2136,45 @@ requires an explicit success receipt.
   sensors are online, and Nav2, the patrol runtime, motion bridge and UDP 5005
   remain stopped. Runtime startup remains an explicit physical operator test.
 
-## Current next-task handoff (2026-08-11; supersedes older next experiments)
+## 2026-08-12 navigation process/readiness boundary correction (deployed; static verified)
+
+- The two r2 startup failures were not localization, Nav2 lifecycle, map,
+  route, green-area or camera-alignment failures. In both attempts the patrol
+  runtime manager started, loaded revision 5 and published a new runtime
+  generation while localization was still acquiring. The supervisor's newly
+  added 12-second startup gate looked for `runtimeInstanceId` at the top level
+  of the observer file even though the observer contract stores it under
+  `runtime.runtimeInstanceId`; it therefore timed out unconditionally and sent
+  SIGINT to a healthy generation. The later lifecycle-manager errors were
+  shutdown aftermath rather than the initiating fault.
+- Source commit `7f79aa4` restores the module boundary used by the accepted
+  runtime: `start_runtime` starts the process and catches only an immediate
+  launch/configuration exit. The selected-patrol lifecycle remains the sole
+  owner of the new-generation, usable-localization and fresh post-clear
+  costmap gates before any patrol request or motion authorization. Route-bound
+  mission isolation and omission of the empty mission launch argument remain
+  unchanged. No localization algorithm, Nav2/MPPI parameter, obstacle rule,
+  speed, checkpoint camera/body behavior or route asset changed.
+- Offline evidence is 202 repository tests, Python compilation, container
+  contract validation, generated knowledge and clean diff validation. The
+  ARM64 image probe confirms the hard observer timeout is absent, the immediate
+  process-exit check remains and plain launch still omits an unbound mission.
+  Release `gogoguard-robot-inspection:v2-edge-20260811-mission-isolation-r3`
+  has Mac manifest-list ID
+  `sha256:6c9c9453a3a7ba191ac580d2566a406ef85997fc727eeeacd7501d8055734c6f`,
+  robot config ID
+  `sha256:54c79cafdefab076ec92c09c0443635e551656b403dcfd55a49127f031455fc0`
+  and a 1,389,734,912-byte archive with SHA-256
+  `df03db2bec592e7dbd75a2e040bf5e81918b3d6f8b2ba24072b33b4b0f4838aa`.
+  Mac and robot archive checks passed.
+- LLYJ0001 runs r3 with the service active, enabled and at zero restarts.
+  Platform and the existing realtime audio/video session are online; the
+  static device receipt reported LiDAR 10.0 Hz, IMU 44.9 Hz and odometry
+  9.0 Hz. Revision 5 remains selected. Nav2, patrol runtime and the Unitree
+  motion bridge are stopped, UDP 5005 is unbound and no physical motion was
+  requested. A real runtime start remains an explicit operator test.
+
+## Current next-task handoff (2026-08-12; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
 `agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
@@ -2143,12 +2182,13 @@ source, `6e842d1` as the historical interaction merge, `f4dd9ac` as the
 recording-to-checkpoint closure, `cadba9b` as the local checkpoint-validation
 workflow, `074f379` as the camera-first/revision-publication correction and
 `6613c6f` as the route-bound mission-isolation correction and `b103370` as its
-empty launch-argument follow-up. Treat mission-isolation-r2 with the digests
-above as the latest verified robot
-deployment. The old
-realtime worktrees are evidence/provenance only and must not be deployed.
+empty launch-argument follow-up. Treat `7f79aa4` as the correction that removes
+the erroneous process-start observer timeout while preserving selected-patrol
+readiness. Treat mission-isolation-r3 with the digests above as the latest
+verified robot deployment. The old realtime worktrees are evidence/provenance
+only and must not be deployed.
 
-Mission-isolation-r2 remains the installed and statically accepted robot release,
+Mission-isolation-r3 remains the installed and statically accepted robot release,
 and the LLYJ0001 device token is injected only into the currently running Mac
 workstation. Physical acceptance must begin only when the operator has stood
 the dog up, started localization/Nav2 and explicitly clicks the local validation
@@ -2161,7 +2201,7 @@ bundle and repeat one platform-owned checkpoint mission against the frozen
 event/verdict contract.
 
 First have the operator listen to a normal multi-sentence platform response on
-mission-isolation-r2. Compare the source/output RMS and speaker-buffer counters with the
+mission-isolation-r3. Compare the source/output RMS and speaker-buffer counters with the
 physical result; do not increase hardware volume beyond 10. If loudness is
 still inconsistent, freeze platform TTS loudness and correlate one round's
 pre-LiveKit PCM, LiveKit loss/jitter/NACK/concealment and dog decoded timing.
@@ -2175,9 +2215,9 @@ realtime path; the server already proved the selected pair is UDP 7882 direct,
 while TURN remains fallback. Do not change the frozen V6 mobility parameters or
 give interaction arbitrary motion authority while closing these receipts.
 
-The last recorded robot state had mission-isolation-r2 active with zero restarts,
+The last recorded robot state had mission-isolation-r3 active with zero restarts,
 platform online and the r5 peak-limited 3x playback code retained. Static device
-status reported LiDAR 11.9 Hz, IMU 13.8 Hz and odometry 10.9 Hz. Nav2, patrol
+status reported LiDAR 10.0 Hz, IMU 44.9 Hz and odometry 9.0 Hz. Nav2, patrol
 runtime and the Unitree motion bridge were stopped and UDP 5005 was unbound.
 This is a receipt, not a promise of current live state: a new task must re-read
 the robot before any deployment, and must obtain explicit authorization before
