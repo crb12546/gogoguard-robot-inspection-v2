@@ -204,7 +204,7 @@ class NavigationManager:
         recovery = profile["recovery"]
         localization = profile["localization"]
         controller = profile["controller"]
-        return [
+        arguments = [
             "ros2", "launch", "go2_nav2_runtime", "active_map_patrol.launch.py",
             "runtime_source:=candidate",
             f"map_store_root:={candidate['localization_map']}",
@@ -215,7 +215,6 @@ class NavigationManager:
             f"candidate_runtime_profile:={candidate['runtime_profile']}",
             f"candidate_allowed_area_mask:={candidate['allowed_area_mask']}",
             f"candidate_allowed_area_mask_image:={candidate['allowed_area_mask_image']}",
-            f"mission_plan_path:={mission_plan_path or ''}",
             f"localization_map_hash:={candidate['localization_map_hash']}",
             f"route_hash:={candidate['route_hash']}",
             f"runtime_profile_hash:={candidate['runtime_profile_hash']}",
@@ -247,6 +246,9 @@ class NavigationManager:
             f"mppi_batch_size:={controller['batchSize']}",
             f"mppi_iteration_count:={controller['iterationCount']}",
         ]
+        if mission_plan_path is not None:
+            arguments.append(f"mission_plan_path:={mission_plan_path}")
+        return arguments
 
     def _receiver_environment(self) -> dict[str, str]:
         receiver_env = dict(os.environ)
@@ -300,6 +302,7 @@ class NavigationManager:
         markers = (
             "caught exception in launch",
             "invalid_",
+            "malformed launch argument",
             "process has died",
             "traceback",
             "fatal",

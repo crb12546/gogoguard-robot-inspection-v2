@@ -160,6 +160,39 @@ class NavigationSupervisorTest(unittest.TestCase):
 
             self.assertIsNone(manager._mission_path_for_launch(candidate, None))
 
+    def test_plain_launch_omits_empty_mission_argument(self):
+        candidate = {
+            "map_version": "map-123456789abc",
+            "localization_map": "/tmp/map.pcd",
+            "route": "/tmp/route.json",
+            "runtime_profile": "/tmp/runtime.json",
+            "allowed_area_mask": "/tmp/mask.yaml",
+            "allowed_area_mask_image": "/tmp/mask.pgm",
+            "localization_map_hash": "map-hash",
+            "route_hash": "route-hash",
+            "runtime_profile_hash": "profile-hash",
+            "allowed_area_mask_hash": "mask-hash",
+            "allowed_area_mask_image_hash": "image-hash",
+        }
+        plain = NavigationManager._launch_arguments(
+            candidate,
+            site_id="site",
+            robot_id="robot",
+            sensor_id="sensor",
+            log_root=Path("/tmp/logs"),
+        )
+        mission_bound = NavigationManager._launch_arguments(
+            candidate,
+            site_id="site",
+            robot_id="robot",
+            sensor_id="sensor",
+            log_root=Path("/tmp/logs"),
+            mission_plan_path=Path("/tmp/mission.json"),
+        )
+
+        self.assertFalse(any(item.startswith("mission_plan_path:=") for item in plain))
+        self.assertIn("mission_plan_path:=/tmp/mission.json", mission_bound)
+
     def test_patrol_clear_requires_fresh_costmap_sequence(self):
         manager = NavigationManager.__new__(NavigationManager)
         manager._loaded_candidate = lambda: {
