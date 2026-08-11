@@ -49,6 +49,9 @@ from gogoguard_navigation.checkpoint_runtime import (
     CheckpointExecutor,
     load_navigation_mission,
 )
+from gogoguard_navigation.checkpoint_alignment import (
+    plan_checkpoint_view_alignment,
+)
 
 from .runtime_core import (
     FastLioHealthTracker,
@@ -146,6 +149,9 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("localization_timeout_s", 0.20)
         self.declare_parameter("localization_dropout_grace_s", 1.0)
         self.declare_parameter("localization_recovery_stable_s", 0.5)
+        self.declare_parameter("checkpoint_camera_preferred_pan_limit_deg", 110.0)
+        self.declare_parameter("checkpoint_camera_hard_pan_limit_deg", 140.0)
+        self.declare_parameter("checkpoint_body_yaw_tolerance_rad", 0.03)
         self.declare_parameter("progress_timeout_s", 5.0)
         self.declare_parameter("replan_interval_s", 0.75)
         self.declare_parameter("obstruction_cost_threshold", 65)
@@ -283,6 +289,15 @@ class PatrolRuntimeManager(Node):
         self.localization_recovery_stable_s = float(
             self.get_parameter("localization_recovery_stable_s").value
         )
+        self.checkpoint_camera_preferred_pan_limit_deg = float(
+            self.get_parameter("checkpoint_camera_preferred_pan_limit_deg").value
+        )
+        self.checkpoint_camera_hard_pan_limit_deg = float(
+            self.get_parameter("checkpoint_camera_hard_pan_limit_deg").value
+        )
+        self.checkpoint_body_yaw_tolerance_rad = float(
+            self.get_parameter("checkpoint_body_yaw_tolerance_rad").value
+        )
         self.progress_timeout_s = float(
             self.get_parameter("progress_timeout_s").value
         )
@@ -342,6 +357,15 @@ class PatrolRuntimeManager(Node):
             raise RuntimeError("localization_dropout_grace_s is invalid")
         if not 0.20 <= self.localization_recovery_stable_s <= 3.0:
             raise RuntimeError("localization_recovery_stable_s is invalid")
+        if not (
+            30.0 <= self.checkpoint_camera_preferred_pan_limit_deg <= 120.0
+            and self.checkpoint_camera_preferred_pan_limit_deg
+            <= self.checkpoint_camera_hard_pan_limit_deg
+            <= 140.0
+        ):
+            raise RuntimeError("checkpoint camera pan limits are invalid")
+        if not 0.01 <= self.checkpoint_body_yaw_tolerance_rad <= 0.10:
+            raise RuntimeError("checkpoint body yaw tolerance is invalid")
         if not 2.0 <= self.progress_timeout_s <= 12.0:
             raise RuntimeError("progress_timeout_s is invalid")
         if not 0.25 <= self.replan_interval_s <= 3.0:
@@ -474,6 +498,8 @@ class PatrolRuntimeManager(Node):
         self.last_final_command_at = 0.0
         self.localization_gate_failed_at = None
         self.localization_recovered_at = None
+        self.checkpoint_gate_failed_at = None
+        self.checkpoint_gate_recovered_at = None
         self.patrol_started_at = None
         self.local_costmap = None
         self.local_costmap_frame = ""
@@ -1258,6 +1284,8 @@ class PatrolRuntimeManager(Node):
         self.spin_request_pending = False
         self.localization_gate_failed_at = None
         self.localization_recovered_at = None
+        self.checkpoint_gate_failed_at = None
+        self.checkpoint_gate_recovered_at = None
         self.detour_attempt_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
@@ -1520,14 +1548,45 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason,
         )
 
+    def _checkpoint_view_alignment(self, pan_limit_deg: float):
+        checkpoint = self.checkpoints.active_checkpoint
+        if checkpoint is None or self.pose is None:
+            return None
+        return plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=float(checkpoint.body_yaw_rad),
+            recorded_camera_pan_deg=float(checkpoint.camera_pan_deg),
+            current_body_yaw_rad=float(self.pose[2]),
+            pan_limit_deg=float(pan_limit_deg),
+            body_tolerance_rad=self.checkpoint_body_yaw_tolerance_rad,
+        )
+
+    def _complete_checkpoint_pose_with_camera(
+        self,
+        *,
+        pan_limit_deg: float,
+        mode: str,
+        reason: str,
+    ) -> bool:
+        if self.checkpoints.phase not in {"POSE_REQUESTED", "POSING"}:
+            return False
+        alignment = self._checkpoint_view_alignment(pan_limit_deg)
+        if (
+            alignment is None
+            or abs(alignment.body_turn_rad) > self.checkpoint_body_yaw_tolerance_rad
+        ):
+            return False
+        self.checkpoints.set_view_alignment(alignment.with_mode(mode))
+        self.checkpoints.pose_completed()
+        self.spin_operation = ""
+        self.checkpoint_gate_failed_at = None
+        self.checkpoint_gate_recovered_at = None
+        self.runtime_state = "PAUSED"
+        self.runtime_reason = reason
+        return True
+
     def _request_checkpoint_spin(self) -> None:
         checkpoint = self.checkpoints.active_checkpoint
         if checkpoint is None or self.spin_request_pending or self.spin_goal_handle is not None:
-            return
-        if not self.spin_client.server_is_ready():
-            self.checkpoints.fail("NAV2_SPIN_UNAVAILABLE")
-            self.runtime_state = "BLOCKED"
-            self.runtime_reason = "CHECKPOINT_SPIN_UNAVAILABLE"
             return
         operation = (
             "pose" if self.checkpoints.phase == "POSE_REQUESTED" else "capture"
@@ -1535,15 +1594,31 @@ class PatrolRuntimeManager(Node):
         if operation == "pose":
             if self.pose is None:
                 return
-            target_yaw = math.atan2(
-                math.sin(float(checkpoint.body_yaw_rad) - float(self.pose[2])),
-                math.cos(float(checkpoint.body_yaw_rad) - float(self.pose[2])),
+            alignment = self._checkpoint_view_alignment(
+                self.checkpoint_camera_preferred_pan_limit_deg
             )
-            if abs(target_yaw) <= 0.03:
+            if alignment is None:
+                return
+            self.checkpoints.set_view_alignment(alignment)
+            target_yaw = alignment.body_turn_rad
+            if abs(target_yaw) <= self.checkpoint_body_yaw_tolerance_rad:
                 self.checkpoints.pose_completed()
+                self.runtime_state = "PAUSED"
+                self.runtime_reason = "CHECKPOINT_CAMERA_ALIGNMENT_READY"
                 return
         else:
             target_yaw = 2.0 * math.pi
+        if not self.spin_client.server_is_ready():
+            if operation == "pose" and self._complete_checkpoint_pose_with_camera(
+                pan_limit_deg=self.checkpoint_camera_hard_pan_limit_deg,
+                mode="camera_fallback",
+                reason="CHECKPOINT_CAMERA_FALLBACK_READY",
+            ):
+                return
+            self.checkpoints.fail("NAV2_SPIN_UNAVAILABLE")
+            self.runtime_state = "BLOCKED"
+            self.runtime_reason = "CHECKPOINT_SPIN_UNAVAILABLE"
+            return
         goal = Spin.Goal()
         goal.target_yaw = float(target_yaw)
         goal.time_allowance.sec = 30
@@ -1560,6 +1635,16 @@ class PatrolRuntimeManager(Node):
             future = self.spin_client.send_goal_async(goal)
         except Exception as exc:
             self.spin_request_pending = False
+            if operation == "pose" and self._complete_checkpoint_pose_with_camera(
+                pan_limit_deg=self.checkpoint_camera_hard_pan_limit_deg,
+                mode="camera_fallback",
+                reason="CHECKPOINT_CAMERA_FALLBACK_READY",
+            ):
+                self.get_logger().warning(
+                    "checkpoint body pose transport failed; camera fallback selected: %s"
+                    % exc
+                )
+                return
             self.checkpoints.fail("NAV2_SPIN_TRANSPORT: %s" % exc)
             self.runtime_state = "BLOCKED"
             self.runtime_reason = "CHECKPOINT_SPIN_TRANSPORT"
@@ -1568,14 +1653,28 @@ class PatrolRuntimeManager(Node):
 
     def _checkpoint_spin_response_callback(self, future) -> None:
         self.spin_request_pending = False
+        transport_error = None
         try:
             goal_handle = future.result()
         except Exception as exc:
             goal_handle = None
-            self.checkpoints.fail("NAV2_SPIN_TRANSPORT: %s" % exc)
+            transport_error = exc
         if goal_handle is None or not goal_handle.accepted:
+            if self.spin_operation == "pose" and self._complete_checkpoint_pose_with_camera(
+                pan_limit_deg=self.checkpoint_camera_hard_pan_limit_deg,
+                mode="camera_fallback",
+                reason="CHECKPOINT_CAMERA_FALLBACK_READY",
+            ):
+                self.get_logger().warning(
+                    "checkpoint body pose was unavailable; camera fallback selected"
+                )
+                return
             if self.checkpoints.phase != "FAILED":
-                self.checkpoints.fail("NAV2_SPIN_REJECTED")
+                self.checkpoints.fail(
+                    "NAV2_SPIN_TRANSPORT: %s" % transport_error
+                    if transport_error is not None
+                    else "NAV2_SPIN_REJECTED"
+                )
             self.runtime_state = "BLOCKED"
             self.runtime_reason = self.checkpoints.failure_reason or "NAV2_SPIN_REJECTED"
             return
@@ -1602,27 +1701,53 @@ class PatrolRuntimeManager(Node):
 
     def _checkpoint_spin_result_callback(self, future) -> None:
         self.spin_goal_handle = None
+        result_error = None
         try:
             wrapped = future.result()
             status = wrapped.status
         except Exception as exc:
             status = None
-            self.checkpoints.fail("NAV2_SPIN_RESULT_TRANSPORT: %s" % exc)
+            result_error = exc
         if self.stop_requested:
             self.checkpoints.fail("STOPPED")
             self.runtime_state = "READY"
             self.runtime_reason = "STOPPED"
             return
         if status != GoalStatus.STATUS_SUCCEEDED:
+            if self.spin_operation == "pose" and self._complete_checkpoint_pose_with_camera(
+                pan_limit_deg=self.checkpoint_camera_hard_pan_limit_deg,
+                mode="camera_fallback",
+                reason="CHECKPOINT_CAMERA_FALLBACK_READY",
+            ):
+                self.get_logger().warning(
+                    "checkpoint body pose did not complete; remaining yaw moved to camera"
+                )
+                return
             if self.checkpoints.phase != "FAILED":
-                self.checkpoints.fail("NAV2_SPIN_FAILED")
+                self.checkpoints.fail(
+                    "NAV2_SPIN_RESULT_TRANSPORT: %s" % result_error
+                    if result_error is not None
+                    else "CHECKPOINT_VIEW_UNREACHABLE_AFTER_BODY_TURN"
+                )
             self.runtime_state = "BLOCKED"
             self.runtime_reason = self.checkpoints.failure_reason or "NAV2_SPIN_FAILED"
             return
         operation = self.spin_operation
         self.spin_operation = ""
         if operation == "pose":
+            previous = self.checkpoints.view_alignment
+            if previous is None:
+                self.checkpoints.fail("CHECKPOINT_VIEW_UNREACHABLE_AFTER_BODY_TURN")
+                self.runtime_state = "BLOCKED"
+                self.runtime_reason = self.checkpoints.failure_reason
+                return
+            # Nav2 has accepted the body yaw goal as complete. Keep the
+            # original body/camera allocation instead of recomputing from a
+            # localization sample that may trail the action result callback.
+            self.checkpoints.set_view_alignment(previous.with_mode("body_plus_camera"))
             self.checkpoints.pose_completed()
+            self.checkpoint_gate_failed_at = None
+            self.checkpoint_gate_recovered_at = None
             self.runtime_state = "PAUSED"
             self.runtime_reason = "CHECKPOINT_POSE_READY_WAITING_PLATFORM"
             return
@@ -1657,6 +1782,9 @@ class PatrolRuntimeManager(Node):
         if phase != self.checkpoint_observed_phase:
             self.checkpoint_observed_phase = phase
             self.checkpoint_phase_started_at = now
+            if phase not in {"POSING", "SPINNING"}:
+                self.checkpoint_gate_failed_at = None
+                self.checkpoint_gate_recovered_at = None
         if phase == "PAUSING":
             self.runtime_state = "CHECKPOINT_PAUSING"
             self.runtime_reason = "CHECKPOINT_REACHED_CANCELLING_ROUTE"
@@ -1699,16 +1827,39 @@ class PatrolRuntimeManager(Node):
         if phase == "POSE_REQUESTED":
             self.runtime_state = "INSPECTING"
             self.runtime_reason = "CHECKPOINT_POSE_REQUESTED"
-            self._request_checkpoint_spin()
+            if gate.ready:
+                self._request_checkpoint_spin()
+            else:
+                self.runtime_state = "HOLDING"
+                self.runtime_reason = "CHECKPOINT_POSE_WAITING_%s" % gate.reason
             return False
         if phase == "POSING":
             if not gate.ready:
+                if gate.reason in RECOVERABLE_RUNTIME_GATES:
+                    if self.checkpoint_gate_failed_at is None:
+                        self.checkpoint_gate_failed_at = now
+                    self.checkpoint_gate_recovered_at = None
+                    self.runtime_state = "HOLDING"
+                    self.runtime_reason = "CHECKPOINT_POSE_HOLD_%s" % gate.reason
+                    return False
                 if self.spin_goal_handle is not None:
                     self.spin_goal_handle.cancel_goal_async()
                 self.checkpoints.fail("CHECKPOINT_POSE_RUNTIME_GATE: %s" % gate.reason)
                 self.runtime_state = "BLOCKED"
                 self.runtime_reason = self.checkpoints.failure_reason
                 return False
+            if self.checkpoint_gate_failed_at is not None:
+                if self.checkpoint_gate_recovered_at is None:
+                    self.checkpoint_gate_recovered_at = now
+                if (
+                    now - self.checkpoint_gate_recovered_at
+                    < self.localization_recovery_stable_s
+                ):
+                    self.runtime_state = "HOLDING"
+                    self.runtime_reason = "CHECKPOINT_POSE_WAITING_STABLE_LOCALIZATION"
+                    return False
+                self.checkpoint_gate_failed_at = None
+                self.checkpoint_gate_recovered_at = None
             self.runtime_state = "INSPECTING"
             self.runtime_reason = "CHECKPOINT_POSING_ACTIVE"
             return self.spin_goal_handle is not None
@@ -1739,12 +1890,31 @@ class PatrolRuntimeManager(Node):
             return False
         if phase == "SPINNING":
             if not gate.ready:
+                if gate.reason in RECOVERABLE_RUNTIME_GATES:
+                    if self.checkpoint_gate_failed_at is None:
+                        self.checkpoint_gate_failed_at = now
+                    self.checkpoint_gate_recovered_at = None
+                    self.runtime_state = "HOLDING"
+                    self.runtime_reason = "CHECKPOINT_SPIN_HOLD_%s" % gate.reason
+                    return False
                 if self.spin_goal_handle is not None:
                     self.spin_goal_handle.cancel_goal_async()
                 self.checkpoints.fail("CHECKPOINT_SPIN_RUNTIME_GATE: %s" % gate.reason)
                 self.runtime_state = "BLOCKED"
                 self.runtime_reason = self.checkpoints.failure_reason
                 return False
+            if self.checkpoint_gate_failed_at is not None:
+                if self.checkpoint_gate_recovered_at is None:
+                    self.checkpoint_gate_recovered_at = now
+                if (
+                    now - self.checkpoint_gate_recovered_at
+                    < self.localization_recovery_stable_s
+                ):
+                    self.runtime_state = "HOLDING"
+                    self.runtime_reason = "CHECKPOINT_SPIN_WAITING_STABLE_LOCALIZATION"
+                    return False
+                self.checkpoint_gate_failed_at = None
+                self.checkpoint_gate_recovered_at = None
             self.runtime_state = "INSPECTING"
             self.runtime_reason = "CHECKPOINT_SPIN_ACTIVE"
             return self.spin_goal_handle is not None

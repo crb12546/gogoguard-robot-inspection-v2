@@ -85,7 +85,7 @@
         <div class="panel-title"><div><span>巡检操作向导</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
         <div class="workflow-message" id="workflowMessage">请从右上方历史中选择一张可用地图。页面会只突出当前需要的下一步。</div>
         <div class="guided-flow">
-          <div class="guided-step" id="assetStep"><i>1</i><div><strong>地图与路线</strong><small id="assetStepHelp">选择地图后，首次使用才需发布到机器狗</small></div><b id="assetStepState">未选择</b></div>
+          <div class="guided-step" id="assetStep"><i>1</i><div><strong>地图与路线</strong><small id="assetStepHelp">更换地图，或修改蓝线、绿色区域、巡检点后，都需重新发布到机器狗</small></div><b id="assetStepState">未选择</b></div>
           <div class="guided-step" id="runtimeStep"><i>2</i><div><strong>定位与 Nav2</strong><small id="runtimeStepHelp">启动后等待“定位可用”，不用重复点击</small></div><b id="runtimeStepState">未启动</b></div>
           <div class="guided-step" id="patrolStep"><i>3</i><div><strong>开始巡检</strong><small id="patrolStepHelp">机器狗站稳且定位可用后，按记录路线行走</small></div><b id="patrolStepState">等待</b></div>
         </div>
@@ -99,7 +99,7 @@
         </div>
         <div class="nav-actions">
           <button id="prepareNavigation">发布所选地图与路线到机器狗</button>
-          <small id="prepareNavigationHelp" class="action-help">只有更换地图时才需要；当前地图已发布时不会显示。</small>
+          <small id="prepareNavigationHelp" class="action-help">更换地图，或修改蓝线、绿色区域、巡检点后都需要；每次保存会生成一个可追溯的新版本。</small>
           <a id="downloadPlatformBundle" class="button-link secondary" download hidden>导出给平台的地图与路线包</a>
           <small id="downloadPlatformBundleHelp" class="action-help" hidden>包含 PCD、可编辑路线、真实执行路线、绿色允许区和校验清单，供平台展示和标点。</small>
           <button id="uploadPlatformBundle" class="secondary" hidden>导出并上传到 GoGoGuard 平台</button>
@@ -125,7 +125,7 @@
         <div><strong id="checkpointValidationTitle">等待巡检点</strong><small id="checkpointValidationMeta">到点后会自动调整机身和镜头，并保持停车等您确认。</small></div>
         <div id="checkpointVerdictActions" class="checkpoint-verdict-actions" hidden>
           <button id="checkpointContinue">通过并到下一点</button>
-          <button id="checkpointRetake" class="secondary">重新旋转并再看一次</button>
+          <button id="checkpointRetake" class="secondary">重新对准并再看一次</button>
           <button id="checkpointSkip" class="secondary">跳过本点并继续</button>
         </div>
       </div>

@@ -222,7 +222,16 @@ class RouteManager:
             destination.mkdir(parents=True, exist_ok=True)
             source_map_json_hash = _file_hash(map_json)
             source_ply_hash = _file_hash(map_ply)
-            source_checkpoints = artifact_root / "checkpoints.json"
+            # On the robot, route-bound checkpoints advance with the editable
+            # workspace and live beside immutable GLIM artifacts.  Mac map
+            # jobs retain the recording-time source in artifacts/.
+            current_checkpoints = artifact_root.parent / "checkpoints.json"
+            legacy_checkpoints = artifact_root / "checkpoints.json"
+            source_checkpoints = (
+                current_checkpoints
+                if current_checkpoints.is_file()
+                else legacy_checkpoints
+            )
             source_checkpoint_hash = (
                 _file_hash(source_checkpoints) if source_checkpoints.is_file() else None
             )

@@ -29,6 +29,18 @@ class FakeGimbal:
         }
 
 
+class MisalignedGimbal(FakeGimbal):
+    def move_for_inspection(self, **angles):
+        self.moves.append(angles)
+        return {
+            "angles": {
+                "pan": angles["pan_body_deg"] + 12.0,
+                "tilt": angles["tilt_euler_deg"],
+                "roll": angles["roll_euler_deg"],
+            }
+        }
+
+
 class CheckpointPlatformTest(unittest.TestCase):
     def test_frozen_mission_urls_are_derived_from_heartbeat(self) -> None:
         heartbeat = "http://39.96.37.187/api/v1/robot/heartbeat"
@@ -112,6 +124,43 @@ class CheckpointPlatformTest(unittest.TestCase):
                     "capture_ready", "captured", "waiting_verdict",
                 ],
             )
+
+    def test_platform_does_not_report_pose_ready_when_gimbal_misses_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            navigation = root / "navigation.json"
+            calls = []
+            navigation.write_text(
+                json.dumps(
+                    {
+                        "runtime": {
+                            "mapVersion": "map-v1",
+                            "routeId": "route-v1",
+                            "checkpoint": {
+                                "missionId": "mission-1",
+                                "activeCheckpointId": "cp_01",
+                                "activeRouteProgressIndex": 12,
+                                "attempt": 1,
+                                "phase": "WAITING_PLATFORM",
+                                "camera": {"pan": 35, "tilt": 5, "roll": 0},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            coordinator = CheckpointCoordinator(
+                heartbeat_url="http://39.96.37.187/api/v1/robot/heartbeat",
+                navigation_status_path=navigation,
+                control_path=root / "control.json",
+                inbox_path=root / "inbox.jsonl",
+                state_path=root / "state.json",
+                post_json=lambda url, payload, timeout: calls.append(payload) or {"ok": True},
+                gimbal=MisalignedGimbal(),
+            )
+            with self.assertRaisesRegex(RuntimeError, "did not reach checkpoint view"):
+                coordinator.tick(now=100.0)
+            self.assertNotIn("pose_ready", [item.get("phase") for item in calls])
 
     def test_platform_coordinator_does_not_take_local_operator_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

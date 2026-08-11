@@ -109,6 +109,10 @@ class FieldWorkstationTest(unittest.TestCase):
                 [item["routeProgressIndex"] for item in mission["checkpoints"]],
                 [33, 57],
             )
+            self.assertEqual(
+                [item["spin"] for item in mission["checkpoints"]],
+                [False, False],
+            )
 
     def test_local_inspection_retry_reuses_unstarted_runtime_mission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -13,6 +13,8 @@ SAFE_SESSION = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9]{8}$")
 SAFE_MAP_JOB = re.compile(r"^map-[A-Za-z0-9]{12}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 NAVIGATION_WORKSPACE = "navigation-workspace.json"
+CHECKPOINT_ASSET = "checkpoints.json"
+MUTABLE_NAVIGATION_ARTIFACTS = {NAVIGATION_WORKSPACE, CHECKPOINT_ASSET}
 REQUIRED_MAP_ARTIFACTS = {"map.json", "map.ply", "overview.svg", "glim-build.json"}
 
 
@@ -117,7 +119,7 @@ class EdgeArtifactExchange:
                         raise TransferContractError("artifact upload ended before Content-Length")
                     remaining -= len(chunk)
                 return {"name": artifact_name, "bytes": content_length, "sha256": expected_sha256}
-            if artifact_name != NAVIGATION_WORKSPACE:
+            if artifact_name not in MUTABLE_NAVIGATION_ARTIFACTS:
                 raise TransferContractError("immutable staged artifact already exists with different content")
         temporary = target.with_name(f".{target.name}.part")
         digest = hashlib.sha256()
@@ -159,17 +161,25 @@ class EdgeArtifactExchange:
         files = [] if root is None else [
             {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)}
             for path in sorted(root.iterdir())
-            if path.is_file() and not path.name.startswith(".")
-        ]
-        workspace = self.map_jobs_root / job_id / NAVIGATION_WORKSPACE
-        if state == "committed" and workspace.is_file():
-            files.append(
-                {
-                    "name": workspace.name,
-                    "bytes": workspace.stat().st_size,
-                    "sha256": _sha256(workspace),
-                }
+            if (
+                path.is_file()
+                and not path.name.startswith(".")
+                and path.name not in MUTABLE_NAVIGATION_ARTIFACTS
             )
+        ]
+        if state == "committed":
+            for name in sorted(MUTABLE_NAVIGATION_ARTIFACTS):
+                current = self.map_jobs_root / job_id / name
+                legacy = final_artifacts / name
+                path = current if current.is_file() else legacy
+                if path.is_file():
+                    files.append(
+                        {
+                            "name": name,
+                            "bytes": path.stat().st_size,
+                            "sha256": _sha256(path),
+                        }
+                    )
         return {
             "schema": "gogoguard.edge_map_import.v1",
             "job_id": job_id,
@@ -200,9 +210,16 @@ class EdgeArtifactExchange:
             self._validate_artifact_name(name)
             staged_path = staging_artifacts / name
             final_path = final_artifacts / name
-            if name == NAVIGATION_WORKSPACE:
-                committed_workspace = final_root / NAVIGATION_WORKSPACE
-                path = staged_path if staged_path.is_file() else committed_workspace
+            if name in MUTABLE_NAVIGATION_ARTIFACTS:
+                committed_navigation_asset = final_root / name
+                legacy_navigation_asset = final_artifacts / name
+                path = (
+                    staged_path
+                    if staged_path.is_file()
+                    else committed_navigation_asset
+                    if committed_navigation_asset.is_file()
+                    else legacy_navigation_asset
+                )
             else:
                 path = final_path if final_exists else staged_path
             if not path.is_file():
@@ -216,26 +233,33 @@ class EdgeArtifactExchange:
         if artifact.get("source") != "cloud-glim":
             raise TransferContractError("navigation accepts only cloud GLIM maps")
 
-        staged_workspace = staging_artifacts / NAVIGATION_WORKSPACE
-        workspace_source = staged_workspace if staged_workspace.is_file() else None
+        staged_navigation_assets = {
+            name: staging_artifacts / name
+            for name in MUTABLE_NAVIGATION_ARTIFACTS
+            if (staging_artifacts / name).is_file()
+        }
         if final_exists:
             # A repeated or resumed deployment can leave a verified staging
             # copy behind. Immutable GLIM files stay authoritative, while the
-            # separately stored operator workspace may advance revisions.
-            if workspace_source is not None:
-                workspace_target = final_root / NAVIGATION_WORKSPACE
-                workspace_temporary = final_root / f".{NAVIGATION_WORKSPACE}.tmp"
-                shutil.copyfile(workspace_source, workspace_temporary)
-                os.replace(workspace_temporary, workspace_target)
+            # separately stored operator workspace and route-bound checkpoint
+            # asset may advance together as one workspace revision.
+            for name, source in staged_navigation_assets.items():
+                target = final_root / name
+                temporary = final_root / f".{name}.tmp"
+                shutil.copyfile(source, temporary)
+                os.replace(temporary, target)
             shutil.rmtree(staging_root, ignore_errors=True)
         else:
             final_root.mkdir(parents=True, exist_ok=True)
-            staged_workspace_root = staging_root / NAVIGATION_WORKSPACE
-            if workspace_source is not None:
-                os.replace(workspace_source, staged_workspace_root)
+            staged_root_assets: dict[str, Path] = {}
+            for name, source in staged_navigation_assets.items():
+                root_asset = staging_root / name
+                os.replace(source, root_asset)
+                staged_root_assets[name] = root_asset
             os.replace(staging_artifacts, final_artifacts)
-            if staged_workspace_root.is_file():
-                os.replace(staged_workspace_root, final_root / NAVIGATION_WORKSPACE)
+            for name, source in staged_root_assets.items():
+                if source.is_file():
+                    os.replace(source, final_root / name)
             shutil.rmtree(staging_root, ignore_errors=True)
 
         job = {

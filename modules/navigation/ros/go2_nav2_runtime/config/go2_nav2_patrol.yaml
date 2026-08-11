@@ -160,7 +160,10 @@ behavior_server:
     transform_tolerance: 0.30
     simulate_ahead_time: 2.0
     max_rotational_vel: 0.40
-    min_rotational_vel: 0.15
+    # Field trace 2026-08-11 showed the Go2 stopped rotating while Spin kept
+    # commanding roughly 0.20-0.24 rad/s.  Keep inspection body turns above
+    # the observed reliable actuation floor; route-following MPPI is unchanged.
+    min_rotational_vel: 0.30
     rotational_acc_lim: 0.80
 
 global_costmap:

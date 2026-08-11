@@ -213,13 +213,32 @@ class CheckpointCoordinator:
                     and isinstance(gimbal_result.get("angles"), dict)
                     else None
                 )
-                if actual is not None:
-                    values = {
-                        name: float(actual.get(name) or 0.0)
-                        for name in ("pan", "tilt", "roll")
-                    }
-                    if all(math.isfinite(value) for value in values.values()):
-                        self.context["camera"] = values
+                if actual is None:
+                    raise RuntimeError("Z1Pro checkpoint move returned no angle feedback")
+                targets = {
+                    "pan": float(camera.get("pan") or 0.0),
+                    "tilt": float(camera.get("tilt") or 0.0),
+                    "roll": float(camera.get("roll") or 0.0),
+                }
+                values = {
+                    name: float(actual.get(name, math.nan))
+                    for name in ("pan", "tilt", "roll")
+                }
+                if any(not math.isfinite(value) for value in values.values()):
+                    raise RuntimeError("Z1Pro checkpoint feedback is invalid")
+                errors = {
+                    name: abs(values[name] - targets[name])
+                    for name in values
+                }
+                if any(value > 2.0 for value in errors.values()):
+                    raise RuntimeError(
+                        "Z1Pro did not reach checkpoint view: "
+                        + ", ".join(
+                            f"{name} error={value:.1f}deg"
+                            for name, value in errors.items()
+                        )
+                    )
+                self.context["camera"] = values
             self._event(runtime, self.context, "pose_ready")
             response = self._event(
                 runtime,

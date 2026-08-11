@@ -2006,6 +2006,55 @@ requires an explicit success receipt.
   capabilities and platform proxies returned HTTP 200. No patrol, localization
   reset, body motion or gimbal action was started during deployment.
 
+## 2026-08-11 camera-first checkpoint and map-revision republish correction implemented locally
+
+- The first real two-point local-checkpoint attempt reached `cp_01`, proved a
+  true stop and accepted a Nav2 Spin goal, but the Go2 did not physically turn
+  under the approximately 0.20-0.24 rad/s command. A brief localization dropout
+  recovered about 1.29 seconds later, after the checkpoint had already been
+  marked terminally failed. The recorded checkpoint direction and route binding
+  were correct; exact body-yaw restoration was the wrong single-photo success
+  criterion.
+- Checkpoint observation now preserves the recorded **optical** direction. It
+  first keeps the body still and assigns the view to the Z1Pro within a preferred
+  +/-110 degree pan range. Only the remainder outside that range becomes a
+  minimum body turn; if that turn is unavailable or does not complete, the
+  runtime can use the commissioned +/-140 degree hard pan range as a bounded
+  camera fallback. A successful body action keeps its original allocation
+  instead of re-evaluating against a possibly lagging localization sample.
+- The local recording/validation product is explicitly one fixed-direction
+  photo and no longer requests an automatic 360-degree spin. Both workstation
+  and platform paths verify actual Z1Pro pan/tilt/roll feedback within two
+  degrees before claiming that the view is ready. A recoverable localization
+  dropout during checkpoint alignment now holds the stopped mission and waits
+  for stable localization recovery instead of immediately failing it.
+- The isolated Nav2 behavior-server Spin minimum rotational velocity advances
+  from 0.15 to 0.30 rad/s to clear the measured Go2 yaw actuation floor only
+  when the bounded body-turn fallback is actually needed. The accepted V6 route
+  MPPI, cruise, acceleration, costmaps, allowed-area and receiver settings are
+  otherwise unchanged.
+- The same field round exposed an independent publication defect after the
+  operator edited only the green allowed area on `map-70fb209b5b20`. The route-
+  bound `checkpoints.json` changed with workspace revision 4 but was incorrectly
+  treated as an immutable GLIM artifact, so the robot rejected it with
+  `immutable staged artifact already exists with different content`. Transfer
+  now keeps GLIM `map.ply`/`map.json`/overview/build files immutable while
+  atomically replacing the revisioned `navigation-workspace.json` and route-
+  bound `checkpoints.json` at the map-job root. The route builder prefers that
+  current checkpoint asset and retains a legacy read fallback.
+- The workstation now explains that any route, green-area or checkpoint edit
+  requires a new publication and immediately shows upload progress instead of
+  appearing inert. The current revision-4 GoGoGuard bundle
+  `route-70fb209b5b20-workspace-r4` was uploaded through the real adapter and is
+  platform-verified with the matching workspace hash; activation remains an
+  explicit platform/operator action. This proves the platform accepted the
+  edited asset and isolates the former failure to robot-side repeated import.
+- Offline receipt: all 198 repository unit/integration tests pass, Python
+  compilation and JavaScript/UI smoke pass, generated repository knowledge and
+  container contracts validate, and `git diff --check` is clean. The correction
+  is not yet a robot deployment receipt; build/install and static robot
+  acceptance follow separately, with no autonomous motion authorized.
+
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on

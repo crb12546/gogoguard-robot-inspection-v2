@@ -11,9 +11,68 @@ from gogoguard_navigation.checkpoint_runtime import (
     CheckpointExecutor,
     load_navigation_mission,
 )
+from gogoguard_navigation.checkpoint_alignment import (
+    plan_checkpoint_view_alignment,
+)
 
 
 class CheckpointRuntimeTest(unittest.TestCase):
+    def test_recorded_view_uses_camera_without_turning_body_when_reachable(self) -> None:
+        alignment = plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=math.radians(-60.0),
+            recorded_camera_pan_deg=0.0,
+            current_body_yaw_rad=math.radians(10.0),
+            pan_limit_deg=110.0,
+        )
+        self.assertEqual(alignment.mode, "camera_only")
+        self.assertAlmostEqual(alignment.body_turn_rad, 0.0)
+        self.assertAlmostEqual(alignment.camera_pan_deg, 70.0)
+        self.assertAlmostEqual(
+            alignment.target_body_yaw_rad
+            - math.radians(alignment.camera_pan_deg),
+            alignment.desired_view_yaw_rad,
+        )
+
+    def test_view_outside_preferred_pan_uses_minimum_body_turn(self) -> None:
+        alignment = plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=math.radians(-150.0),
+            recorded_camera_pan_deg=0.0,
+            current_body_yaw_rad=0.0,
+            pan_limit_deg=110.0,
+        )
+        self.assertEqual(alignment.mode, "body_plus_camera")
+        self.assertAlmostEqual(math.degrees(alignment.body_turn_rad), -40.0)
+        self.assertAlmostEqual(alignment.camera_pan_deg, 110.0)
+
+    def test_hard_camera_range_can_finish_a_stalled_body_turn(self) -> None:
+        preferred = plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=math.radians(-150.0),
+            recorded_camera_pan_deg=0.0,
+            current_body_yaw_rad=0.0,
+            pan_limit_deg=110.0,
+        )
+        fallback = plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=math.radians(-150.0),
+            recorded_camera_pan_deg=0.0,
+            current_body_yaw_rad=math.radians(-10.0),
+            pan_limit_deg=140.0,
+        )
+        self.assertLess(preferred.body_turn_rad, 0.0)
+        self.assertAlmostEqual(fallback.body_turn_rad, 0.0)
+        self.assertAlmostEqual(fallback.camera_pan_deg, 140.0)
+
+    def test_positive_z1pro_pan_is_camera_right(self) -> None:
+        alignment = plan_checkpoint_view_alignment(
+            recorded_body_yaw_rad=0.0,
+            recorded_camera_pan_deg=45.0,
+            current_body_yaw_rad=0.0,
+            pan_limit_deg=110.0,
+        )
+        self.assertAlmostEqual(
+            math.degrees(alignment.desired_view_yaw_rad), -45.0
+        )
+        self.assertAlmostEqual(alignment.camera_pan_deg, 45.0)
+
     def mission(self, root: Path) -> Path:
         payload = {
             "schema": "gogoguard.navigation_mission.v1",

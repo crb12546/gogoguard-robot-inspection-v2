@@ -130,6 +130,11 @@ class EdgeTransferTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            checkpoints = artifacts.parent / "checkpoints.json"
+            checkpoints.write_text(
+                '{"schema":"gogoguard.checkpoints.v1","routeId":"route-r1"}\n',
+                encoding="utf-8",
+            )
             committed = client.deploy_map(
                 {
                     "job_id": JOB_ID,
@@ -139,6 +144,7 @@ class EdgeTransferTest(unittest.TestCase):
                     "metrics": {"worker": "cloud-glim"},
                 },
                 artifacts,
+                additional_files={"checkpoints.json": checkpoints},
             )
             self.assertEqual(committed["stage"], "deployed_to_robot")
             self.assertTrue((self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply").is_file())
@@ -151,10 +157,20 @@ class EdgeTransferTest(unittest.TestCase):
                 ).read_text(encoding="utf-8"),
                 workspace.read_text(encoding="utf-8"),
             )
+            self.assertEqual(
+                (self.root / "map-jobs" / JOB_ID / "checkpoints.json").read_text(
+                    encoding="utf-8"
+                ),
+                checkpoints.read_text(encoding="utf-8"),
+            )
 
             immutable_map = self.root / "map-jobs" / JOB_ID / "artifacts" / "map.ply"
             immutable_receipt = (immutable_map.stat().st_ino, digest(immutable_map.read_bytes()))
             workspace.write_text('{"revision":2}\n', encoding="utf-8")
+            checkpoints.write_text(
+                '{"schema":"gogoguard.checkpoints.v1","routeId":"route-r2"}\n',
+                encoding="utf-8",
+            )
             updated = client.deploy_map(
                 {
                     "job_id": JOB_ID,
@@ -164,11 +180,18 @@ class EdgeTransferTest(unittest.TestCase):
                     "metrics": {"worker": "cloud-glim"},
                 },
                 artifacts,
+                additional_files={"checkpoints.json": checkpoints},
             )
             self.assertEqual(updated["stage"], "deployed_to_robot")
             self.assertEqual(
                 (self.root / "map-jobs" / JOB_ID / "navigation-workspace.json").read_text(encoding="utf-8"),
                 '{"revision":2}\n',
+            )
+            self.assertEqual(
+                (self.root / "map-jobs" / JOB_ID / "checkpoints.json").read_text(
+                    encoding="utf-8"
+                ),
+                '{"schema":"gogoguard.checkpoints.v1","routeId":"route-r2"}\n',
             )
             self.assertEqual(
                 (immutable_map.stat().st_ino, digest(immutable_map.read_bytes())),
@@ -185,6 +208,7 @@ class EdgeTransferTest(unittest.TestCase):
                     "metrics": {"worker": "cloud-glim"},
                 },
                 artifacts,
+                additional_files={"checkpoints.json": checkpoints},
             )
             self.assertEqual(repeated["stage"], "deployed_to_robot")
             self.assertFalse((self.root / "workstation-imports" / JOB_ID).exists())

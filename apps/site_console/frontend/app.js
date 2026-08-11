@@ -318,7 +318,7 @@ function renderLocalCheckpoint() {
     SETTLING: '正在确认真实停稳',
     POSE_REQUESTED: '正在转到录制时朝向',
     POSING: '正在转到录制时朝向',
-    WAITING_PLATFORM: '正在调整镜头并准备旋转',
+    WAITING_PLATFORM: '正在调整镜头',
     SPIN_REQUESTED: '正在准备 360° 旋转',
     SPINNING: '正在 360° 旋转',
     WAITING_VERDICT: '已停稳，等待您确认',
@@ -329,7 +329,15 @@ function renderLocalCheckpoint() {
   $('checkpointValidationState').textContent = phaseLabels[checkpoint.phase] || checkpoint.phase;
   $('checkpointValidationState').className = checkpoint.phase === 'WAITING_VERDICT' ? 'online' : '';
   $('checkpointValidationTitle').textContent = `第 ${ordinal} / ${total} 个巡检点 · ${activeId}`;
-  $('checkpointValidationMeta').textContent = `${audit?.note || '未填备注'} · pan ${Number(checkpoint.camera?.pan || 0).toFixed(1)}° / tilt ${Number(checkpoint.camera?.tilt || 0).toFixed(1)}° · ${checkpoint.spin ? '包含 360° 旋转' : '不旋转'}`;
+  const alignmentMode = checkpoint.observationAlignment?.mode;
+  const alignmentLabel = alignmentMode === 'camera_only'
+    ? '镜头对准'
+    : alignmentMode === 'camera_fallback'
+      ? '镜头补偿对准'
+      : alignmentMode === 'body_plus_camera'
+        ? '机身最小转向 + 镜头对准'
+        : '定点照片';
+  $('checkpointValidationMeta').textContent = `${audit?.note || '未填备注'} · pan ${Number(checkpoint.camera?.pan || 0).toFixed(1)}° / tilt ${Number(checkpoint.camera?.tilt || 0).toFixed(1)}° · ${alignmentLabel}`;
   const ready = checkpoint.phase === 'WAITING_VERDICT';
   $('checkpointVerdictActions').hidden = !ready;
   for (const id of ['checkpointContinue', 'checkpointRetake', 'checkpointSkip']) {
@@ -439,7 +447,7 @@ async function markCheckpoint() {
   try {
     await post(`/api/v1/sessions/${encodeURIComponent(state.active.session_id)}/checkpoints`, {
       note: $('checkpointNote').value,
-      spin: true,
+      spin: false,
       camera: state.gimbal?.angles || {pan: 0, tilt: 0, roll: 0},
     });
     $('checkpointNote').value = '';
@@ -743,11 +751,22 @@ async function refreshPlatformUpload() {
 
 async function uploadPlatformBundle() {
   if (!state.latestMapJob) return;
+  $('navigationError').textContent = '';
+  state.platformUpload = {
+    ...(state.platformUpload || {}),
+    state: 'queued',
+    progress: 0,
+    message: '正在生成并上传当前地图、路线、绿色区域和巡检点，请稍候…',
+  };
+  renderPlatformUpload();
   try {
     state.platformUpload = await post(`/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/platform-upload`);
     renderPlatformUpload();
   } catch (error) {
-    $('navigationError').textContent = friendlyError(error);
+    const message = friendlyError(error);
+    state.platformUpload = {...(state.platformUpload || {}), state: 'failed', message};
+    renderPlatformUpload();
+    $('navigationError').textContent = message;
   }
 }
 
@@ -1031,7 +1050,7 @@ function renderNavigation() {
   if (runtime.state === 'RESUMING') guidance = '定位已经恢复，正在从未完成的路线位置继续巡检。';
   if (runtime.state === 'CHECKPOINT_PAUSING') guidance = '已到平台标记点，正在取消路线速度并关闭运动权。';
   if (runtime.state === 'CHECKPOINT_SETTLING') guidance = '已到平台标记点，正在验证机器狗连续停稳，不是只记录“收到停止”。';
-  if (runtime.state === 'INSPECTING') guidance = '机器狗已停稳，正由 Nav2 在现有碰撞检测下原地旋转 360°；完成后从剩余路线继续。';
+  if (runtime.state === 'INSPECTING') guidance = '机器狗已停稳，正在优先用摄像头恢复录制时的观察方向；只有摄像头角度不够时才让机身补转。';
   if (runtime.state === 'PAUSED' && runtime.checkpoint?.decisionMode === 'local_operator') guidance = '机器狗已在巡检点保持停车。请在下方对比参考照片和实时画面，由您决定是否继续。';
   if (['FAULT', 'BLOCKED'].includes(runtime.state)) guidance = `${runtime.operatorMessage || runtime.reason}；需要遥控机器狗时先点击“停止巡检并释放遥控权”，需要继续测试时再启动定位与 Nav2。`;
   if (operation?.state === 'failed') {

@@ -307,6 +307,24 @@ class InspectionApplication:
                 camera = camera if isinstance(camera, dict) else {}
                 self.move_gimbal(camera)
                 time.sleep(max(0.0, min(30.0, float(checkpoint.get("dwellSec") or 0.0))))
+                actual_status = self.gimbal_status()
+                actual = actual_status.get("angles")
+                actual = actual if isinstance(actual, dict) else {}
+                errors = {
+                    name: abs(
+                        float(actual.get(name, math.inf))
+                        - float(camera.get(name) or 0.0)
+                    )
+                    for name in ("pan", "tilt", "roll")
+                }
+                if any(not math.isfinite(value) or value > 2.0 for value in errors.values()):
+                    raise RuntimeError(
+                        "Z1Pro did not reach checkpoint view: "
+                        + ", ".join(
+                            f"{name} error={value:.1f}deg"
+                            for name, value in errors.items()
+                        )
+                    )
         return self.navigation.checkpoint_control(action)
 
     def stop_patrol(self) -> dict:

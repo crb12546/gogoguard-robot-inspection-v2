@@ -9,6 +9,8 @@ from typing import Any
 
 from gogoguard_contracts import is_safe_external_id, utc_now
 
+from .checkpoint_alignment import CheckpointViewAlignment
+
 
 @dataclass(frozen=True)
 class RuntimeCheckpoint:
@@ -166,6 +168,7 @@ class CheckpointExecutor:
         self.failure_reason: str | None = None
         self.attempt = 1
         self.last_control_id: str | None = None
+        self.view_alignment: CheckpointViewAlignment | None = None
 
     def reset(self) -> None:
         self.__init__(self.mission)
@@ -181,6 +184,7 @@ class CheckpointExecutor:
         if int(route_progress_index) < checkpoint.route_progress_index:
             return False
         self.active_checkpoint = checkpoint
+        self.view_alignment = None
         self.phase = "PAUSING"
         return True
 
@@ -254,6 +258,11 @@ class CheckpointExecutor:
             raise RuntimeError("checkpoint pose is not active")
         self.phase = "WAITING_PLATFORM"
 
+    def set_view_alignment(self, alignment: CheckpointViewAlignment) -> None:
+        if self.active_checkpoint is None:
+            raise RuntimeError("checkpoint is not active")
+        self.view_alignment = alignment
+
     def request_spin(self) -> None:
         if self.phase != "WAITING_PLATFORM":
             raise RuntimeError("checkpoint is not ready for platform capture")
@@ -309,6 +318,7 @@ class CheckpointExecutor:
         self.last_completed_checkpoint_id = self.active_checkpoint.checkpoint_id
         self.cursor += 1
         self.active_checkpoint = None
+        self.view_alignment = None
         self.stable_since = None
         self.attempt = 1
         self.phase = "TRAVELING"
@@ -340,11 +350,20 @@ class CheckpointExecutor:
             ),
             "camera": (
                 {
-                    "pan": self.active_checkpoint.camera_pan_deg,
+                    "pan": (
+                        self.view_alignment.camera_pan_deg
+                        if self.view_alignment is not None
+                        else self.active_checkpoint.camera_pan_deg
+                    ),
                     "tilt": self.active_checkpoint.camera_tilt_deg,
                     "roll": self.active_checkpoint.camera_roll_deg,
                 }
                 if self.active_checkpoint else None
+            ),
+            "observationAlignment": (
+                self.view_alignment.as_status()
+                if self.view_alignment is not None
+                else None
             ),
             "spin": self.active_checkpoint.spin if self.active_checkpoint else None,
             "dwellSec": (

@@ -430,7 +430,10 @@ class FieldWorkstationApplication:
                 {
                     "checkpointId": item["checkpointId"],
                     "routeProgressIndex": item["routeProgressIndex"],
-                    "spin": item.get("spin") is not False,
+                    # Current product checkpoints are one fixed-direction
+                    # photo.  The runtime retains legacy 360 support, but the
+                    # workstation must not request it for this workflow.
+                    "spin": False,
                     "dwellSec": item.get("dwellSec", 3),
                 }
                 for item in checkpoints
