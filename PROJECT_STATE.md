@@ -18,7 +18,7 @@ is now frozen as the operator-accepted release baseline. The previously
 independent realtime-dialogue implementation has been merged. The selected-
 patrol platform lifecycle, complete heartbeat, real battery observation, 10 Hz
 map-bound pose uplink and true-stop/body-spin checkpoint slice are deployed in
-the current platform-patrol-r4 release while retaining separate module
+the current platform-patrol-r5 release while retaining separate module
 boundaries and no unsolicited motion. The map/route delivery bundle also exists
 on the Mac. There is not yet a robot-verified end-to-end checkpoint mission.
 
@@ -36,7 +36,7 @@ on the Mac. There is not yet a robot-verified end-to-end checkpoint mission.
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime can now true-stop at a version-bound checkpoint and use Nav2's collision-checked Spin behavior for one 360-degree body rotation while video remains live | Physical checkpoint acceptance, gimbal commissioning and end-to-end evidence upload remain pending |
 | Mission/task system | The deployed platform adapter may start/stop only the already selected map-bound route. Its mission adapter validates ordered `routeProgressIndex` checkpoints, proves a correlated true stop, performs a 360-degree body spin and resumes the retained suffix | Platform must freeze/consume the MissionPlan and checkpoint status contract; physical field acceptance and complete mission/report aggregation remain pending |
 | SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle and map-bound LiveKit pose-stream code are deployed and the static heartbeat/media receipt passed | SaaS asset upload/receipt/activation, MissionPlan consumption, live pose receipt, command-result UX and operational rollout remain open |
-| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. A bounded latest-only robot pose publisher now reuses that DataChannel | Reliable audible wake acknowledgement, consistent full-volume quality, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
+| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
 
@@ -139,7 +139,7 @@ these decisions and lessons when continuing in a new conversation:
     Realtime dialogue was developed on its own branch and has now been merged
     into the V6 integration branch as the independent `interaction` module. It
     ships disabled by default, is explicitly enabled in the current platform-
-    patrol-r4 joint-test configuration and cannot issue motion commands.
+    patrol-r5 joint-test configuration and cannot issue motion commands.
     Checkpoint work composes it through contracts instead of merging media or
     cloud-model code into navigation.
 
@@ -174,15 +174,18 @@ boundaries and receipts to distinguish them.
   later local handoff commit. Checkpoint inspection code is deployed but remains
   dormant until a platform MissionPlan and explicit physical test start it.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r4`, built from
-  platform integration commit `495d41b` and Unitree battery correction
-  `a85708b`. Its Linux/ARM64 local manifest-list ID is
-  `sha256:c8582c48eaec002c76e8740db96540083019825894ae9a1d08588fd7a962e3bf`;
+  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r5`, built from
+  platform integration commit `495d41b`, Unitree battery correction `a85708b`
+  and peak-limited threefold speaker gain commit `a1c279f`. Its Linux/ARM64
+  local manifest-list ID is
+  `sha256:56e79f9c253c1faad055b1bf3d54e3ae60cb1628527e91581e891c41dc935364`;
   the robot-loaded config ID is
-  `sha256:1c02faf94ee7e7b37b57932f871f0bba86c7f1bc3499a8b644f46aec8afd843c`.
+  `sha256:adbac4e22f9e523be3c37e9dbe0eb0eb94e89f661bfa7ac0f06438557faf45f4`.
   The enabled service is active with zero restarts, the platform heartbeat is
   online through the frozen HTTP IP endpoint and all four media booleans are
-  true. The real Unitree LowState observer reported 24 percent and 27.55 V.
+  true. The r5 media receipt exposes `outputGain=3.0`, source/output RMS and
+  zero speaker drops or underflows. The real Unitree LowState observer most
+  recently reported 20 percent and 27.35 V.
   Nav2, patrol runtime and the Unitree motion bridge are stopped and UDP 5005
   is unbound. Always re-read live robot state before deployment or motion
   because the operator can change it between tasks.
@@ -1803,12 +1806,44 @@ requires an explicit success receipt.
   sample. No Nav2, patrol runtime, Unitree receiver or physical motion was
   started during deployment.
 
+## 2026-08-11 threefold downlink playback gain deployed statically
+
+- Field listening established that Go2 hardware volume 10 alone was still too
+  quiet. The `device_io` speaker boundary now applies a fixed 3x gain to the
+  decoded 48 kHz mono s16 agent PCM immediately before the existing bounded
+  speaker buffer. A per-frame peak limiter retains two percent headroom and
+  reduces gain only when the requested multiplication would clip; the Unitree
+  VUI hardware volume remains fixed at 10 with the existing set/read-back.
+- The media receipt now records `outputGain`, last/maximum source RMS and
+  last/maximum output RMS so the next field round can distinguish a quiet
+  platform source from dog-side playback. This is an owned `device_io` change;
+  it does not alter LiveKit signalling, platform contracts, navigation or
+  motion authority.
+- The release passed 167 repository tests, Python compilation,
+  container-contract validation and generated-knowledge validation. The final
+  Linux/ARM64 image is
+  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r5`, manifest-list
+  ID `sha256:56e79f9c253c1faad055b1bf3d54e3ae60cb1628527e91581e891c41dc935364`,
+  robot config ID
+  `sha256:adbac4e22f9e523be3c37e9dbe0eb0eb94e89f661bfa7ac0f06438557faf45f4`,
+  1,389,551,074 bytes and 44 layers. Its first 32 layers exactly match the
+  accepted V6-r4 base; an in-image sample proved s16 input 1000 becomes 3000.
+- The checksummed offline release was staged and installed on LLYJ0001. The
+  service is active with zero restarts, platform and LiveKit are online, all
+  four media booleans are true, and `outputGain=3.0` is live. One observed
+  platform-audio window measured source/output maximum RMS 6972/11310 with
+  6,445 decoded frames, three frame gaps above 40 ms (maximum 79.2 ms), zero
+  speaker drops and zero underflows. The dog remained stopped: Nav2, patrol and
+  the Unitree motion bridge were absent and UDP 5005 was unbound. Operator
+  listening acceptance of the new loudness remains pending.
+
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
 `agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
 source, `6e842d1` as the historical interaction merge and platform-patrol-r4
-with the digests above as the latest verified robot deployment. The old
+as the patrol/checkpoint baseline. Treat platform-patrol-r5 with the digests
+above as the latest verified robot deployment. The old
 realtime worktrees are evidence/provenance only and must not be deployed.
 
 The immediate release is already installed and statically accepted. Physical
@@ -1819,6 +1854,12 @@ generation-6 route with one conservatively placed checkpoint and verify true
 stop, collision-checked 360-degree body spin, retained-suffix continuation and
 final route completion.
 
+First have the operator listen to a normal multi-sentence platform response on
+r5. Compare the new source/output RMS and speaker-buffer counters with the
+physical result; do not increase hardware volume beyond 10. If loudness is
+still inconsistent, freeze platform TTS loudness and correlate one round's
+pre-LiveKit PCM, LiveKit loss/jitter/NACK/concealment and dog decoded timing.
+
 In parallel, GoGoGuard must freeze the SaaS asset upload/receipt/activation API
 for the already-produced portable bundle and accept the MissionPlan/pose wire
 shapes, or return its adapter mapping. Audio remains a joint evidence task:
@@ -1828,8 +1869,9 @@ realtime path; the server already proved the selected pair is UDP 7882 direct,
 while TURN remains fallback. Do not change the frozen V6 mobility parameters or
 give interaction arbitrary motion authority while closing these receipts.
 
-The last recorded robot state had platform-patrol-r4 active with zero restarts,
-platform and interaction online and real 24 percent battery. Nav2, patrol
+The last recorded robot state had platform-patrol-r5 active with zero restarts,
+platform and interaction online, peak-limited 3x playback gain active and real
+20 percent battery. Nav2, patrol
 runtime and the Unitree motion bridge were stopped and UDP 5005 was unbound.
 This is a receipt, not a promise of current live state: a new task must re-read
 the robot before any deployment, and must obtain explicit authorization before
