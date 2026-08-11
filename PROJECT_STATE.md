@@ -1971,17 +1971,52 @@ requires an explicit success receipt.
   neither printed nor persisted. The first physical checkpoint mission remains
   explicit operator work after the dog is stood up and localization is ready.
 
+## 2026-08-11 selected-patrol runtime-generation fence deployed statically
+
+- Two consecutive local-checkpoint start failures were an orchestration defect,
+  not a localization, MPPI, avoidance or speed regression. A new mission UUID
+  restarted Nav2, but the manager continued reading the previous observer's
+  healthy localization/costmap file. It therefore called the costmap clear
+  service before the replacement Nav2 generation was active; one timeout even
+  reported the contradictory reason `OK`.
+- Source commit `703576c` removes that cross-generation ambiguity. Starting a
+  runtime invalidates the previous observer file; selected-patrol readiness
+  requires a nonempty `runtimeInstanceId` different from the previous
+  generation; post-clear readiness still requires a strictly newer costmap
+  sequence and now reports `COSTMAP_REFRESH_PENDING` when that proof is absent.
+  A workstation retry while the same local mission is READY and has not moved
+  reuses its mission ID instead of forcing another Nav2 restart.
+- No accepted V6 speed, acceleration, localization, MPPI, costmap, allowed-area,
+  collision or Unitree receiver parameter changed. The independent wake-word
+  investigation was explicitly deferred by the operator after the microphone
+  may have lost power; no speculative interaction change is in this release.
+- Offline verification passed all 193 repository tests, Python compilation,
+  container-contract validation, generated-knowledge validation and clean diff
+  checks. The Linux/ARM64 release is
+  `gogoguard-robot-inspection:v2-edge-20260811-start-fence-r1`, manifest-list ID
+  `sha256:60e9e4b13f3e7d1cf372afa40ccc17e988cfdf23ba50116c06097a6d85e43087`,
+  44 layers and archive size 1,389,717,504 bytes. The archive SHA-256 is
+  `7646d826a759ccb18bcd9a184cfea6c977b523f474ba171496303312846e22bb` and
+  passed on both Mac and robot.
+- LLYJ0001 installed the release while stopped. The service is active/enabled
+  with zero restarts; Nav2 and the Unitree motion bridge remain stopped, UDP
+  5005 is unbound and the last command is exactly zero. The Mac workstation was
+  restarted from the same source at `http://127.0.0.1:8080/`; its device token
+  remains process-memory only, and its page plus navigation, maps,
+  capabilities and platform proxies returned HTTP 200. No patrol, localization
+  reset, body motion or gimbal action was started during deployment.
+
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
 `agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
 source, `6e842d1` as the historical interaction merge, `f4dd9ac` as the
 recording-to-checkpoint closure and `cadba9b` as the local checkpoint-validation
-workflow. Treat local-checkpoint-r1 with the digests above as the latest
+workflow. Treat `703576c` and start-fence-r1 with the digests above as the latest
 verified robot deployment. The old
 realtime worktrees are evidence/provenance only and must not be deployed.
 
-Local-checkpoint-r1 remains the installed and statically accepted robot release,
+Start-fence-r1 remains the installed and statically accepted robot release,
 and the LLYJ0001 device token is injected only into the currently running Mac
 workstation. Physical acceptance must begin only when the operator has stood
 the dog up, started localization/Nav2 and explicitly clicks the local validation
