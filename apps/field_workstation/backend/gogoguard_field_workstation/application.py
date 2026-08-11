@@ -390,11 +390,35 @@ class FieldWorkstationApplication:
         checkpoints = list(descriptor.get("checkpoints") or [])
         if not checkpoints:
             raise RuntimeError("当前路线没有录制巡检点")
-        mission_id = (
-            f"local:{descriptor['mapVersion']}:"
-            f"{self.navigation_workspaces.get(job_id)['revision']}:"
-            f"{uuid.uuid4().hex[:8]}"
-        )
+        mission_id = ""
+        try:
+            navigation = self.navigation_status()
+        except (OSError, RuntimeError, RobotConnectionError):
+            navigation = {}
+        runtime = navigation.get("runtime")
+        runtime = runtime if isinstance(runtime, dict) else {}
+        checkpoint = runtime.get("checkpoint")
+        checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        # A retry before motion starts must address the same mission. Creating
+        # a new UUID here changes missionHash and needlessly restarts Nav2.
+        if (
+            navigation.get("runtime_process", {}).get("running") is True
+            and runtime.get("state") in {"BOOTING", "READY"}
+            and runtime.get("motionAuthorized") is not True
+            and runtime.get("mapVersion") == descriptor["mapVersion"]
+            and runtime.get("routeId") == descriptor["routeId"]
+            and checkpoint.get("decisionMode") == "local_operator"
+            and checkpoint.get("phase") == "TRAVELING"
+            and int(checkpoint.get("completedCheckpointCount") or 0) == 0
+            and not checkpoint.get("activeCheckpointId")
+        ):
+            mission_id = str(checkpoint.get("missionId") or "")
+        if not mission_id:
+            mission_id = (
+                f"local:{descriptor['mapVersion']}:"
+                f"{self.navigation_workspaces.get(job_id)['revision']}:"
+                f"{uuid.uuid4().hex[:8]}"
+            )
         mission_plan = {
             "missionId": mission_id,
             "mapVersion": descriptor["mapVersion"],

@@ -4,6 +4,7 @@ import time
 import unittest
 import json
 from pathlib import Path
+from unittest import mock
 
 from gogoguard_navigation.supervisor import NavigationSupervisorServer, SupervisorService
 from gogoguard_navigation.supervisor_client import NavigationSupervisorClient
@@ -43,6 +44,101 @@ class FakeManager:
 
 
 class NavigationSupervisorTest(unittest.TestCase):
+    def test_selected_patrol_waits_for_current_runtime_generation(self):
+        manager = NavigationManager.__new__(NavigationManager)
+        candidate = {
+            "candidate_id": "map-123456789abc",
+            "map_version": "map-123456789abc",
+            "route_id": "route-r1",
+        }
+        manager._loaded_candidate = lambda: candidate
+        manager._configure_mission = lambda _candidate, _plan: {
+            "missionId": "mission-new",
+            "missionHash": "hash-new",
+            "checkpoints": [],
+        }
+        manager._launched_mission_hash = None
+        statuses = [
+            {
+                "runtime_process": {"running": False},
+                "motion_bridge": {"running": False},
+                "runtime": {"runtimeInstanceId": "generation-old"},
+            },
+            {
+                "runtime_process": {"running": True},
+                "motion_bridge": {"running": True},
+                "localization": {"usable": True, "reason": "OK"},
+                "runtime": {
+                    "runtimeInstanceId": "generation-old",
+                    "costmapHealth": {"healthy": True, "reason": "OK"},
+                },
+            },
+            {
+                "runtime_process": {"running": True},
+                "motion_bridge": {"running": True},
+                "localization": {"usable": True, "reason": "OK"},
+                "runtime": {
+                    "runtimeInstanceId": "generation-new",
+                    "costmapHealth": {"healthy": True, "reason": "OK"},
+                },
+            },
+        ]
+        observed = []
+
+        def status():
+            value = statuses.pop(0)
+            observed.append(value)
+            return value
+
+        manager.status = status
+        manager.start_runtime = lambda _candidate_id: {}
+        patrol_calls = []
+        manager.start_patrol = lambda: patrol_calls.append(len(observed)) or {
+            "success": True
+        }
+
+        with mock.patch("gogoguard_navigation.manager.time.sleep"):
+            result = manager.start_selected_patrol(
+                mission_plan={"missionId": "mission-new"},
+                readiness_timeout_s=5.0,
+            )
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(patrol_calls, [3])
+
+    def test_patrol_clear_requires_fresh_costmap_sequence(self):
+        manager = NavigationManager.__new__(NavigationManager)
+        manager._loaded_candidate = lambda: {
+            "map_version": "map-123456789abc",
+            "route_id": "route-r1",
+        }
+
+        class Running:
+            @staticmethod
+            def poll():
+                return None
+
+        manager._process = Running()
+        manager._receiver_process = Running()
+        manager.status = lambda: {
+            "runtime_process": {"running": True},
+            "runtime": {
+                "costmapHealth": {
+                    "sequence": 7,
+                    "healthy": True,
+                    "reason": "OK",
+                }
+            },
+        }
+        manager._service = lambda *_args, **_kwargs: {"success": True}
+
+        with mock.patch(
+            "gogoguard_navigation.manager.time.monotonic",
+            side_effect=[0.0, 1.0, 5.0],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "COSTMAP_REFRESH_PENDING"):
+                manager.start_patrol()
+
     def test_checkpoint_mission_is_bound_to_execution_route_and_360_spin(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = NavigationManager(

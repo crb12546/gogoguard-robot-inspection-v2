@@ -310,6 +310,13 @@ class NavigationManager:
                 else:
                     raise RuntimeError("another navigation runtime is already active")
             if not already_running:
+                # status.json belongs to the observer inside one Nav2 runtime
+                # generation.  Keeping the previous file while a replacement
+                # process boots lets readiness checks mistake old localization
+                # and costmap health for the new generation.
+                status_path = getattr(self, "status_path", None)
+                if status_path is not None:
+                    Path(status_path).unlink(missing_ok=True)
                 self._candidate = candidate
                 self._last_runtime_exit = None
                 self._last_receiver_exit = None
@@ -423,12 +430,15 @@ class NavigationManager:
         while time.monotonic() < deadline:
             current = self.status()
             health = (current.get("runtime") or {}).get("costmapHealth") or {}
-            last_reason = str(health.get("reason") or last_reason)
-            if (
-                int(health.get("sequence") or 0) > before_sequence
-                and health.get("healthy") is True
-            ):
-                break
+            current_sequence = int(health.get("sequence") or 0)
+            if current_sequence > before_sequence:
+                last_reason = str(health.get("reason") or "COSTMAP_UNHEALTHY")
+                if health.get("healthy") is True:
+                    break
+            else:
+                # A pre-clear healthy=OK value is not evidence that the clear
+                # completed.  Name the missing freshness proof explicitly.
+                last_reason = "COSTMAP_REFRESH_PENDING"
             if not current.get("runtime_process", {}).get("running"):
                 raise RuntimeError("导航运行进程已退出，无法开始巡检")
             time.sleep(0.05)
@@ -475,6 +485,12 @@ class NavigationManager:
 
         mission = self._configure_mission(candidate, mission_plan)
         status = self.status()
+        previous_runtime = status.get("runtime")
+        previous_runtime = previous_runtime if isinstance(previous_runtime, dict) else {}
+        previous_runtime_instance_id = str(
+            previous_runtime.get("runtimeInstanceId") or ""
+        )
+        require_new_runtime_generation = False
         if (
             status.get("runtime_process", {}).get("running")
             and self._launched_mission_hash != mission["missionHash"]
@@ -482,6 +498,7 @@ class NavigationManager:
             self.stop_runtime()
             status = self.status()
         if not status.get("runtime_process", {}).get("running"):
+            require_new_runtime_generation = True
             self.start_runtime(str(candidate["candidate_id"]))
 
         deadline = time.monotonic() + float(readiness_timeout_s)
@@ -497,6 +514,15 @@ class NavigationManager:
             localization = localization if isinstance(localization, dict) else {}
             runtime = status.get("runtime")
             runtime = runtime if isinstance(runtime, dict) else {}
+            runtime_instance_id = str(runtime.get("runtimeInstanceId") or "")
+            if require_new_runtime_generation and (
+                not runtime_instance_id
+                or runtime_instance_id == previous_runtime_instance_id
+            ):
+                last_localization_reason = "NAV2_RUNTIME_GENERATION_PENDING"
+                last_costmap_reason = "NAV2_RUNTIME_GENERATION_PENDING"
+                time.sleep(0.1)
+                continue
             health = runtime.get("costmapHealth")
             health = health if isinstance(health, dict) else {}
             last_localization_reason = str(

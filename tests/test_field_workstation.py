@@ -94,6 +94,7 @@ class FieldWorkstationTest(unittest.TestCase):
                 ],
             }
             app.navigation_workspaces.get = lambda _job_id: {"revision": 7}
+            app.navigation_status = lambda: {}
             posted = []
             app.robot.post = lambda path, body, **kwargs: posted.append(
                 (path, body, kwargs)
@@ -107,6 +108,52 @@ class FieldWorkstationTest(unittest.TestCase):
             self.assertEqual(
                 [item["routeProgressIndex"] for item in mission["checkpoints"]],
                 [33, 57],
+            )
+
+    def test_local_inspection_retry_reuses_unstarted_runtime_mission(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = FieldWorkstationApplication(
+                data_root=Path(temporary),
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            app.checkpoint_audit = lambda _job_id: {
+                "mapVersion": "map-123456789abc",
+                "routeId": "route-r7",
+                "audit": {"ready": True},
+                "checkpoints": [
+                    {"checkpointId": "cp_01", "routeProgressIndex": 33}
+                ],
+            }
+            app.navigation_workspaces.get = lambda _job_id: {"revision": 7}
+            app.navigation_status = lambda: {
+                "runtime_process": {"running": True},
+                "runtime": {
+                    "runtimeInstanceId": "generation-new",
+                    "state": "READY",
+                    "motionAuthorized": False,
+                    "mapVersion": "map-123456789abc",
+                    "routeId": "route-r7",
+                    "checkpoint": {
+                        "missionId": "local:map-123456789abc:7:existing",
+                        "decisionMode": "local_operator",
+                        "phase": "TRAVELING",
+                        "completedCheckpointCount": 0,
+                        "activeCheckpointId": None,
+                    },
+                },
+            }
+            posted = []
+            app.robot.post = lambda path, body, **kwargs: posted.append(
+                (path, body, kwargs)
+            ) or {"state": "accepted"}
+
+            app.start_local_inspection("map-123456789abc")
+
+            self.assertEqual(
+                posted[0][1]["mission_plan"]["missionId"],
+                "local:map-123456789abc:7:existing",
             )
 
     def test_checkpoint_reference_is_resolved_only_inside_recording(self) -> None:
