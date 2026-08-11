@@ -27,6 +27,7 @@ SDK_MOTION_PROBE = Path(
     "go2_sdk2_motion_probe"
 )
 UNITREE_SDK_LIBRARY_PATH = "/opt/gogoguard/deps/lib:/usr/local/lib"
+RUNTIME_MANAGER_READY_TIMEOUT_S = 12.0
 
 
 class NavigationManager:
@@ -65,9 +66,52 @@ class NavigationManager:
     def prepare(self, job_id: str) -> dict[str, Any]:
         candidate = self.routes.prepare_map_job(job_id)
         with self._lock:
+            # A mission is an execution-time binding, not part of the selected
+            # map release.  A newly published route must never inherit a task
+            # written for an older revision.
+            mission_path = getattr(self, "mission_path", None)
+            mission = self._read_json(mission_path) if mission_path else None
+            if mission_path and Path(mission_path).exists() and (
+                mission is None
+                or not self._mission_matches_candidate(mission, candidate)
+            ):
+                Path(mission_path).unlink(missing_ok=True)
             self._candidate = candidate
             self._atomic_json(self.selected_path, candidate)
         return candidate
+
+    @staticmethod
+    def _mission_matches_candidate(
+        mission: dict[str, Any], candidate: dict[str, Any]
+    ) -> bool:
+        return bool(
+            mission.get("schema") == "gogoguard.navigation_mission.v1"
+            and mission.get("missionHash")
+            and mission.get("mapVersion") == candidate.get("map_version")
+            and mission.get("routeId") == candidate.get("route_id")
+        )
+
+    def _mission_path_for_launch(
+        self,
+        candidate: dict[str, Any],
+        mission: dict[str, Any] | None,
+    ) -> Path | None:
+        # Plain localization/Nav2 startup is intentionally mission-free.  A
+        # mission is loaded only by the selected-patrol operation that just
+        # validated and persisted that exact map/route-bound payload.
+        if mission is None:
+            return None
+        if not self._mission_matches_candidate(mission, candidate):
+            raise RuntimeError("navigation mission map or route binding is invalid")
+        mission_path = getattr(self, "mission_path", None)
+        persisted = self._read_json(mission_path) if mission_path else None
+        if (
+            persisted is None
+            or not self._mission_matches_candidate(persisted, candidate)
+            or persisted.get("missionHash") != mission.get("missionHash")
+        ):
+            raise RuntimeError("navigation mission was not persisted coherently")
+        return Path(mission_path)
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any] | None:
@@ -291,11 +335,18 @@ class NavigationManager:
         log_handle.close()
         receiver_log_handle.close()
 
-    def start_runtime(self, candidate_id: str) -> dict[str, Any]:
+    def start_runtime(
+        self,
+        candidate_id: str,
+        *,
+        mission: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not SAFE_ID.fullmatch(candidate_id):
             raise ValueError("invalid navigation candidate id")
         candidate = self.routes.get(candidate_id)
         self._validate_runtime_candidate(candidate)
+        mission_plan_path = self._mission_path_for_launch(candidate, mission)
+        mission_hash = str((mission or {}).get("missionHash") or "")
         already_running = False
         stale_generation = bool(
             (self._process and self._process.poll() is not None)
@@ -307,6 +358,10 @@ class NavigationManager:
             if self._process and self._process.poll() is None:
                 if self._candidate and self._candidate.get("candidate_id") == candidate_id:
                     already_running = True
+                    if mission is not None and self._launched_mission_hash != mission_hash:
+                        raise RuntimeError(
+                            "navigation runtime is already active with another mission"
+                        )
                 else:
                     raise RuntimeError("another navigation runtime is already active")
             if not already_running:
@@ -350,7 +405,7 @@ class NavigationManager:
                     candidate, site_id=self.site_id, robot_id=self.robot_id,
                     sensor_id=self.sensor_id, log_root=self.log_root,
                     profile=self.profiles.get(),
-                    mission_plan_path=getattr(self, "mission_path", None),
+                    mission_plan_path=mission_plan_path,
                 )
                 self._process = subprocess.Popen(
                     command,
@@ -364,12 +419,35 @@ class NavigationManager:
                 receiver_process = self._receiver_process
                 log_handle = self._log_handle
                 receiver_log_handle = self._receiver_log_handle
-                # A launch process that exits immediately is not a successful
-                # runtime start. This catches contract/configuration failures
-                # before the asynchronous operation is marked complete.
-                time.sleep(1.25)
-                if process.poll() is not None:
-                    exit_code = process.returncode
+                # The launch process can stay alive for several seconds while
+                # a required child fails.  Do not report startup complete until
+                # the runtime manager has published this generation's ID.
+                ready = False
+                readiness_deadline = (
+                    time.monotonic() + RUNTIME_MANAGER_READY_TIMEOUT_S
+                )
+                while (
+                    process.poll() is None
+                    and time.monotonic() < readiness_deadline
+                ):
+                    observed = (
+                        self._read_json(Path(status_path))
+                        if status_path is not None
+                        else None
+                    )
+                    if observed and observed.get("runtimeInstanceId"):
+                        ready = True
+                        break
+                    time.sleep(0.1)
+                if not ready:
+                    if process.poll() is None:
+                        exit_code = self._terminate_process(
+                            process, interrupt_timeout=5, terminate_timeout=3
+                        )
+                        failure = "runtime manager readiness timeout"
+                    else:
+                        exit_code = process.returncode
+                        failure = f"exit {exit_code}"
                     self._process = None
                     self._receiver_process = None
                     self._log_handle = None
@@ -384,7 +462,7 @@ class NavigationManager:
                     detail = self._runtime_failure_detail(log_path)
                     suffix = f": {detail}" if detail else ""
                     raise RuntimeError(
-                        f"Nav2 failed readiness check: exit {exit_code}{suffix}"
+                        f"Nav2 failed readiness check: {failure}{suffix}"
                     )
                 threading.Thread(
                     target=self._reap_runtime_generation,
@@ -392,10 +470,7 @@ class NavigationManager:
                     name=f"navigation-reaper-{candidate_id}",
                     daemon=True,
                 ).start()
-                mission_path = getattr(self, "mission_path", None)
-                mission = self._read_json(mission_path) if mission_path else {}
-                mission = mission or {}
-                self._launched_mission_hash = str(mission.get("missionHash") or "")
+                self._launched_mission_hash = mission_hash
         return self.status()
 
     def _service(self, service: str, type_name: str, request: str, timeout: int = 12) -> dict[str, Any]:
@@ -499,7 +574,7 @@ class NavigationManager:
             status = self.status()
         if not status.get("runtime_process", {}).get("running"):
             require_new_runtime_generation = True
-            self.start_runtime(str(candidate["candidate_id"]))
+            self.start_runtime(str(candidate["candidate_id"]), mission=mission)
 
         deadline = time.monotonic() + float(readiness_timeout_s)
         last_localization_reason = "LOCALIZATION_MISSING"

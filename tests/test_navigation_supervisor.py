@@ -91,7 +91,10 @@ class NavigationSupervisorTest(unittest.TestCase):
             return value
 
         manager.status = status
-        manager.start_runtime = lambda _candidate_id: {}
+        runtime_starts = []
+        manager.start_runtime = lambda _candidate_id, **kwargs: runtime_starts.append(
+            kwargs
+        ) or {}
         patrol_calls = []
         manager.start_patrol = lambda: patrol_calls.append(len(observed)) or {
             "success": True
@@ -105,6 +108,57 @@ class NavigationSupervisorTest(unittest.TestCase):
 
         self.assertTrue(result["accepted"])
         self.assertEqual(patrol_calls, [3])
+        self.assertEqual(runtime_starts[0]["mission"]["missionHash"], "hash-new")
+
+    def test_new_route_prepare_invalidates_old_bound_mission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager(
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+            )
+            old_mission = {
+                "schema": "gogoguard.navigation_mission.v1",
+                "missionHash": "old-hash",
+                "mapVersion": "map-123456789abc",
+                "routeId": "route-r1",
+            }
+            manager._atomic_json(manager.mission_path, old_mission)
+            candidate = {
+                "candidate_id": "map-123456789abc",
+                "map_version": "map-123456789abc",
+                "route_id": "route-r5",
+            }
+
+            class Routes:
+                @staticmethod
+                def prepare_map_job(_job_id):
+                    return candidate
+
+            manager.routes = Routes()
+            manager.prepare("job-1")
+
+            self.assertFalse(manager.mission_path.exists())
+            self.assertEqual(manager._loaded_candidate()["route_id"], "route-r5")
+
+    def test_plain_runtime_start_never_inherits_persisted_mission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager(
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+            )
+            manager._atomic_json(
+                manager.mission_path,
+                {
+                    "schema": "gogoguard.navigation_mission.v1",
+                    "missionHash": "old-hash",
+                    "mapVersion": "map-123456789abc",
+                    "routeId": "route-r1",
+                },
+            )
+            candidate = {
+                "map_version": "map-123456789abc",
+                "route_id": "route-r5",
+            }
+
+            self.assertIsNone(manager._mission_path_for_launch(candidate, None))
 
     def test_patrol_clear_requires_fresh_costmap_sequence(self):
         manager = NavigationManager.__new__(NavigationManager)
