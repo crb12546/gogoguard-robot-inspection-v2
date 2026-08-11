@@ -15,13 +15,12 @@ GoGoGuard V2 is a **field-commissioning system with one real mobility vertical
 slice**, not a completed inspection product. The robot -> Mac -> cloud -> Mac ->
 robot loop has produced real maps and completed real route patrols. V6 mobility
 is now frozen as the operator-accepted release baseline. The previously
-independent realtime-dialogue implementation has been merged, and its formal
-runtime is explicitly enabled in the current combined r8 release for static
-GoGoGuard joint testing while retaining a separate activation path and zero
-motion authority. The selected-patrol platform lifecycle, map/route delivery
-bundle, 10 Hz map-bound pose uplink and true-stop/body-spin checkpoint slice are
-now composed and tested offline. They are not yet in the deployed r8 image and
-there is not yet a robot-verified end-to-end inspection mission.
+independent realtime-dialogue implementation has been merged. The selected-
+patrol platform lifecycle, complete heartbeat, real battery observation, 10 Hz
+map-bound pose uplink and true-stop/body-spin checkpoint slice are deployed in
+the current platform-patrol-r4 release while retaining separate module
+boundaries and no unsolicited motion. The map/route delivery bundle also exists
+on the Mac. There is not yet a robot-verified end-to-end checkpoint mission.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -34,10 +33,10 @@ there is not yet a robot-verified end-to-end inspection mission.
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
 | Field workstation and UI | The Mac page is the working delivery console and includes the GLIM/map/route/allowed-area preparation workflow at `http://127.0.0.1:8080/` | It remains an engineering/field UI rather than a finished operator product |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure exist | Complete automatic IncidentBundle coverage and production retention policy remain partial |
-| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the offline runtime can now true-stop at a version-bound checkpoint and use Nav2's collision-checked Spin behavior for one 360-degree body rotation while video remains live | The new slice still needs container deployment and physical checkpoint acceptance; gimbal commissioning and end-to-end evidence upload remain pending |
-| Mission/task system | The platform may now start/stop only the already selected map-bound route. An offline-integrated mission adapter validates ordered `routeProgressIndex` checkpoints, proves a correlated true stop, performs a 360-degree body spin and resumes the retained suffix | Platform must freeze/consume the MissionPlan and checkpoint status contract; robot deployment, field acceptance and complete mission/report aggregation remain pending |
-| SaaS integration | Existing GoGoGuard SaaS is retained as an external system; the realtime heartbeat/interaction slice is deployed. Full null-safe heartbeat, real Unitree battery observation, selected-patrol lifecycle and map-bound LiveKit pose stream are implemented offline | SaaS asset upload/receipt/activation, MissionPlan consumption, command-result UX and operational rollout remain open |
-| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. A bounded latest-only robot pose publisher now reuses that DataChannel offline | Reliable audible wake acknowledgement, consistent full-volume quality, latency closure, pose-stream platform receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
+| Inspection actions/evidence | Existing realtime Z1Pro video is integrated; the deployed runtime can now true-stop at a version-bound checkpoint and use Nav2's collision-checked Spin behavior for one 360-degree body rotation while video remains live | Physical checkpoint acceptance, gimbal commissioning and end-to-end evidence upload remain pending |
+| Mission/task system | The deployed platform adapter may start/stop only the already selected map-bound route. Its mission adapter validates ordered `routeProgressIndex` checkpoints, proves a correlated true stop, performs a 360-degree body spin and resumes the retained suffix | Platform must freeze/consume the MissionPlan and checkpoint status contract; physical field acceptance and complete mission/report aggregation remain pending |
+| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle and map-bound LiveKit pose-stream code are deployed and the static heartbeat/media receipt passed | SaaS asset upload/receipt/activation, MissionPlan consumption, live pose receipt, command-result UX and operational rollout remain open |
+| Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. A bounded latest-only robot pose publisher now reuses that DataChannel | Reliable audible wake acknowledgement, consistent full-volume quality, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
 
@@ -139,10 +138,10 @@ these decisions and lessons when continuing in a new conversation:
 12. **Parallel feature work now has an explicit integration boundary.**
     Realtime dialogue was developed on its own branch and has now been merged
     into the V6 integration branch as the independent `interaction` module. It
-    ships disabled by default, is explicitly enabled in the current r8 joint-
-    test configuration and cannot issue motion commands. Checkpoint work
-    composes it through contracts instead of merging media or cloud-model code
-    into navigation.
+    ships disabled by default, is explicitly enabled in the current platform-
+    patrol-r4 joint-test configuration and cannot issue motion commands.
+    Checkpoint work composes it through contracts instead of merging media or
+    cloud-model code into navigation.
 
 The recurring lesson is to diagnose the whole ownership and data path before
 changing a local parameter. A field symptom may be algorithmic, orchestration,
@@ -172,20 +171,21 @@ boundaries and receipts to distinguish them.
   combined realtime/platform release implementation is `090635c`. Deployment
   implementation and receipts through `69f4849` are published to
   `origin/agent/three-end-field-workstation`; always check `git status` for a
-  later local handoff commit. Checkpoint inspection remains an offline,
-  default-disabled foundation rather than a deployed product capability.
+  later local handoff commit. Checkpoint inspection code is deployed but remains
+  dormant until a platform MissionPlan and explicit physical test start it.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260811-combined-live-r8`, whose
-  interaction/platform source is commit `0673849`. The Linux/ARM64 local
-  manifest ID is
-  `sha256:856c5d19e94901d55ed1fcf9d1677a3125a3530359cfc9862cea836115b11590`;
-  the robot-loaded config digest is
-  `sha256:3637efd4d79ccfeaee715bbf8e17e100f1992cfdb539c6df6833e20b6993f62e`.
-  The enabled service is active, the platform heartbeat is online through the
-  frozen HTTP IP endpoint and all four media booleans are true. Nav2, patrol
-  runtime and the Unitree motion bridge are stopped and UDP 5005 is unbound.
-  Always re-read live robot state before deployment or motion because the
-  operator can change it between tasks.
+  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r4`, built from
+  platform integration commit `495d41b` and Unitree battery correction
+  `a85708b`. Its Linux/ARM64 local manifest-list ID is
+  `sha256:c8582c48eaec002c76e8740db96540083019825894ae9a1d08588fd7a962e3bf`;
+  the robot-loaded config ID is
+  `sha256:1c02faf94ee7e7b37b57932f871f0bba86c7f1bc3499a8b644f46aec8afd843c`.
+  The enabled service is active with zero restarts, the platform heartbeat is
+  online through the frozen HTTP IP endpoint and all four media booleans are
+  true. The real Unitree LowState observer reported 24 percent and 27.55 V.
+  Nav2, patrol runtime and the Unitree motion bridge are stopped and UDP 5005
+  is unbound. Always re-read live robot state before deployment or motion
+  because the operator can change it between tasks.
 - The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
   deployed and has received an operator-accepted physical patrol. The selected
   robot candidate is
@@ -1736,7 +1736,7 @@ requires an explicit success receipt.
   legitimate "publish map to platform" action; manual file copying is only a
   temporary exchange, not product delivery.
 
-## 2026-08-11 platform patrol/checkpoint composition implemented offline
+## 2026-08-11 platform patrol/checkpoint composition deployed statically
 
 - The V6 mobility envelope and its accepted controller/localization/safety
   parameters are unchanged. The platform adapter now allow-lists
@@ -1774,14 +1774,13 @@ requires an explicit success receipt.
   costmap/collision/smoother/authorization chain. Success re-enters the existing
   fresh-costmap suffix-resume barrier; failure remains stopped/blocked and never
   silently skips the checkpoint.
-- Offline receipt: 163 repository tests pass after the pose-stream addition.
-  The completed static release receipt is 165 repository tests, Python
+- The completed static release receipt is 166 repository tests, Python
   compilation, UI smoke, generated-knowledge validation and container-contract
   validation. The final Linux/ARM64 image is
-  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r2`, manifest-list
-  ID `sha256:bdbf5e749241511bc7ded2bf4ab77b424a81d46974a6c3ff1f99ed809b1de637`,
-  config ID `sha256:b5d373533b1fc10b219d8aa685f2819101fcb68dfdd23aefb40326614977523d`,
-  1,389,551,590 bytes and 44 layers. Its first 32 layers exactly match the
+  `gogoguard-robot-inspection:v2-edge-20260811-platform-patrol-r4`, manifest-list
+  ID `sha256:c8582c48eaec002c76e8740db96540083019825894ae9a1d08588fd7a962e3bf`,
+  config ID `sha256:1c02faf94ee7e7b37b57932f871f0bba86c7f1bc3499a8b644f46aec8afd843c`,
+  1,389,551,636 bytes and 44 layers. Its first 32 layers exactly match the
   accepted V6-r4 base. In-image checks proved that the installed ROS Python
   runtime, launch and YAML equal the owned source, the Nav2 `Spin` interface and
   `nav2_behaviors behavior_server` exist, the profile validates, launch
@@ -1794,26 +1793,31 @@ requires an explicit success receipt.
   points, SHA-256
   `ce84be14d56e0e801b9c1d93fdb040397fef11677f323c118d54b466bd39424e`.
   These are local handoff artifacts; no SaaS upload/activation API exists yet.
-- No robot connection, install, runtime start or physical motion occurred for
-  this composition. The deployed robot remains on combined-live-r8 until an
-  explicit deployment request and a new digest/field receipt are recorded.
+- Robot static receipt: the release archive passed SHA-256 on both Mac and
+  robot, the service is enabled/active with zero restarts, the platform
+  heartbeat is online, audio/video/subscription/DataChannel are all live and
+  Livox was measured at about 10.07 Hz. The first battery deployment exposed
+  that navigation domain 42 cannot see Unitree's bare-DDS domain 0; r4 isolates
+  only the read-only observer on domain 0 and matches Unitree's RELIABLE
+  depth-10 LowState subscription. It then produced a real 24 percent, 27.55 V
+  sample. No Nav2, patrol runtime, Unitree receiver or physical motion was
+  started during deployment.
 
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
 Start only from `gogoguard_robot_inspection_v2_field` on
 `agent/three-end-field-workstation`. Treat `922b301` as the frozen V6 mobility
-source, `6e842d1` as the historical interaction merge and `0673849` plus the r8
-digests above as the latest verified realtime robot deployment. The old
+source, `6e842d1` as the historical interaction merge and platform-patrol-r4
+with the digests above as the latest verified robot deployment. The old
 realtime worktrees are evidence/provenance only and must not be deployed.
 
-The immediate release candidate is the statically accepted ARM64 platform
-patrol/checkpoint image above. Ask explicitly before installing it on the
-lying-down robot. Static robot acceptance must prove the full/null-safe
-heartbeat, real battery sample, platform start/stop command dispatch, 10 Hz pose
-DataChannel receipt and zero unsolicited motion. Physical acceptance then runs
-one selected generation-6 route with one conservatively placed checkpoint and
-verifies true stop, collision-checked 360-degree body spin, retained-suffix
-continuation and final route completion.
+The immediate release is already installed and statically accepted. Physical
+acceptance must begin only when the operator has stood the dog up and explicitly
+starts the experiment. First use the platform to start/stop one selected route
+without checkpoints and verify pose/progress and remote release. Then run one
+generation-6 route with one conservatively placed checkpoint and verify true
+stop, collision-checked 360-degree body spin, retained-suffix continuation and
+final route completion.
 
 In parallel, GoGoGuard must freeze the SaaS asset upload/receipt/activation API
 for the already-produced portable bundle and accept the MissionPlan/pose wire
@@ -1824,8 +1828,9 @@ realtime path; the server already proved the selected pair is UDP 7882 direct,
 while TURN remains fallback. Do not change the frozen V6 mobility parameters or
 give interaction arbitrary motion authority while closing these receipts.
 
-The last recorded robot state had the r8 service active and interaction online,
-with Nav2, patrol runtime and the Unitree motion bridge stopped and UDP 5005
-unbound. This is a receipt, not a promise of current live state: a new task must
-re-read the robot before any deployment, and must obtain explicit authorization
-before starting localization, Nav2 or physical motion.
+The last recorded robot state had platform-patrol-r4 active with zero restarts,
+platform and interaction online and real 24 percent battery. Nav2, patrol
+runtime and the Unitree motion bridge were stopped and UDP 5005 was unbound.
+This is a receipt, not a promise of current live state: a new task must re-read
+the robot before any deployment, and must obtain explicit authorization before
+starting localization, Nav2 or physical motion.

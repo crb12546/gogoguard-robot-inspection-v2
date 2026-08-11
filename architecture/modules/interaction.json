@@ -2,7 +2,7 @@
   "id": "interaction",
   "responsibility": "Robot-side realtime multimodal session, half-duplex echo safety, playback interruption and platform status without motion ownership",
   "runtime": ["robot"],
-  "status": "formal_runtime_deployed_plus_map_bound_pose_data_uplink_implemented_offline_audio_quality_pending",
+  "status": "formal_runtime_and_map_bound_pose_uplink_deployed_pose_field_receipt_and_audio_quality_pending",
   "codeRoots": ["modules/interaction", "services/interaction_edge", "config/robot/interaction-persona.json", "docs/realtime-interaction.md"],
   "entrypoints": ["gogoguard_interaction.session:InteractionManager", "gogoguard_interaction_edge.__main__:main"],
   "dependsOn": ["contracts", "device_io"],

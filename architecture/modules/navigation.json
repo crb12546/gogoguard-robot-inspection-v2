@@ -2,7 +2,7 @@
   "id": "navigation",
   "responsibility": "Execute a map-bound route with one MPPI controller, Nav2 global bypass planning, continuous recovery and localization-hold ownership",
   "runtime": ["robot"],
-  "status": "v6_mobility_baseline_plus_platform_lifecycle_and_nav2_spin_checkpoint_implemented_offline_robot_acceptance_pending",
+  "status": "v6_mobility_plus_platform_lifecycle_and_nav2_spin_checkpoint_deployed_static_motion_acceptance_pending",
   "codeRoots": ["modules/navigation", "third_party/locked_stack/src/go2_nav2_interfaces", "third_party/locked_stack/src/go2_fastlio_patrol"],
   "entrypoints": ["gogoguard_navigation.supervisor:main", "gogoguard_navigation.observer:main", "ros2 launch go2_nav2_runtime active_map_patrol.launch.py"],
   "dependsOn": ["contracts", "localization", "route"],
