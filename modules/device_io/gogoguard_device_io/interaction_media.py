@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 import json
 import os
 import subprocess
@@ -24,6 +25,7 @@ class InteractionHardwareProfile:
     speaker_prebuffer_ms: int
     speaker_max_buffer_ms: int
     speaker_default_volume: int
+    speaker_gain: float
     camera_rtsp: str
     video_width: int
     video_height: int
@@ -55,6 +57,7 @@ def load_interaction_hardware_profile(path: Path) -> InteractionHardwareProfile:
         speaker_prebuffer_ms=_integer(speaker, "prebuffer_ms"),
         speaker_max_buffer_ms=_integer(speaker, "max_buffer_ms"),
         speaker_default_volume=_integer(speaker, "default_volume"),
+        speaker_gain=_number(speaker, "gain"),
         camera_rtsp=_text(camera, "rtsp"),
         video_width=_integer(camera, "width"),
         video_height=_integer(camera, "height"),
@@ -74,6 +77,8 @@ def load_interaction_hardware_profile(path: Path) -> InteractionHardwareProfile:
         raise ValueError("speaker max buffer must cover the prebuffer")
     if profile.speaker_default_volume != 10:
         raise ValueError("commissioned Go2 speaker default must remain 10")
+    if not 1.0 <= profile.speaker_gain <= 8.0:
+        raise ValueError("speaker PCM gain must be in [1, 8]")
     if (profile.video_width, profile.video_height) != (1920, 1080):
         raise ValueError("commissioned Z1Pro profile must remain 1920x1080")
     if not 1 <= profile.video_fps <= 30:
@@ -130,6 +135,25 @@ def decode_s24_3le_stereo_to_s16_mono(data: bytes, *, gain: float) -> bytes:
         output[target : target + 2] = int(sample).to_bytes(2, "little", signed=True)
         target += 2
     return bytes(output)
+
+
+def amplify_s16_pcm(data: bytes, *, gain: float) -> bytes:
+    """Apply fixed playback gain with a per-frame no-overflow peak limiter."""
+
+    if len(data) % 2:
+        raise ValueError("speaker PCM must contain complete s16 samples")
+    if not 1.0 <= gain <= 8.0:
+        raise ValueError("speaker PCM gain must be in [1, 8]")
+    if not data or gain == 1.0:
+        return data
+    peak = audioop.max(data, 2)
+    if peak <= 0:
+        return data
+    # Keep a small headroom below positive s16 full-scale. This preserves the
+    # requested gain for quiet TTS and reduces it only for a frame that would
+    # otherwise hard-clip or wrap.
+    applied_gain = min(gain, (32767.0 * 0.98) / peak)
+    return audioop.mul(data, 2, applied_gain)
 
 
 def microphone_capture_command(profile: InteractionHardwareProfile) -> list[str]:

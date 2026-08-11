@@ -15,6 +15,7 @@ from .interaction_media import (
     Go2VolumeController,
     InteractionHardwareProfile,
     SpeakerJitterBuffer,
+    amplify_s16_pcm,
     decode_s24_3le_stereo_to_s16_mono,
     microphone_capture_command,
 )
@@ -68,6 +69,10 @@ class LiveKitGo2Transport:
         self._agent_frame_count = 0
         self._agent_frame_gap_over_40ms = 0
         self._agent_frame_gap_max_ms = 0.0
+        self._agent_source_rms_last = 0
+        self._agent_output_rms_last = 0
+        self._agent_source_rms_max = 0
+        self._agent_output_rms_max = 0
         self._transcript_audio_samples = 0
         self._last_transcript_to_audio_ms: float | None = None
         self._max_transcript_to_audio_ms = 0.0
@@ -266,6 +271,10 @@ class LiveKitGo2Transport:
                 "agentFrames": self._agent_frame_count,
                 "agentFrameGapOver40ms": self._agent_frame_gap_over_40ms,
                 "agentFrameGapMaxMs": round(self._agent_frame_gap_max_ms, 3),
+                "agentSourceRmsLast": self._agent_source_rms_last,
+                "agentOutputRmsLast": self._agent_output_rms_last,
+                "agentSourceRmsMax": self._agent_source_rms_max,
+                "agentOutputRmsMax": self._agent_output_rms_max,
                 "transcriptToAudioSamples": self._transcript_audio_samples,
                 "lastTranscriptToAudioMs": (
                     round(self._last_transcript_to_audio_ms, 3)
@@ -276,6 +285,8 @@ class LiveKitGo2Transport:
                     self._max_transcript_to_audio_ms, 3
                 ),
             }
+        speaker_status = self.speaker.status()
+        speaker_status["outputGain"] = self.profile.speaker_gain
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "microphoneMuted": self._microphone_muted.is_set(),
@@ -286,7 +297,7 @@ class LiveKitGo2Transport:
                 "droppedLatestOnly": self._data_dropped,
                 "publishErrors": self._data_publish_errors,
             },
-            "speaker": self.speaker.status(),
+            "speaker": speaker_status,
         }
 
     def _accepted_transcript(self, *, now: float | None = None) -> None:
@@ -294,7 +305,12 @@ class LiveKitGo2Transport:
             self._pending_transcript_at = time.monotonic() if now is None else now
 
     def _observe_agent_audio_frame(
-        self, *, active: bool, now: float | None = None
+        self,
+        *,
+        active: bool,
+        source_rms: int | None = None,
+        output_rms: int | None = None,
+        now: float | None = None,
     ) -> None:
         instant = time.monotonic() if now is None else now
         with self._timing_lock:
@@ -307,6 +323,16 @@ class LiveKitGo2Transport:
                     self._agent_frame_gap_over_40ms += 1
             self._agent_frame_at = instant
             self._agent_frame_count += 1
+            if source_rms is not None:
+                self._agent_source_rms_last = int(source_rms)
+                self._agent_source_rms_max = max(
+                    self._agent_source_rms_max, int(source_rms)
+                )
+            if output_rms is not None:
+                self._agent_output_rms_last = int(output_rms)
+                self._agent_output_rms_max = max(
+                    self._agent_output_rms_max, int(output_rms)
+                )
             if active and self._pending_transcript_at is not None:
                 latency_ms = max(
                     0.0, (instant - self._pending_transcript_at) * 1000.0
@@ -467,10 +493,19 @@ class LiveKitGo2Transport:
             )
             try:
                 async for event in stream:
-                    pcm = bytes(event.frame.data)
+                    source_pcm = bytes(event.frame.data)
+                    pcm = amplify_s16_pcm(
+                        source_pcm, gain=profile.speaker_gain
+                    )
                     speaker_buffer.append(pcm)
-                    active = audioop.rms(pcm, 2) >= 90
-                    self._observe_agent_audio_frame(active=active)
+                    source_rms = audioop.rms(source_pcm, 2)
+                    output_rms = audioop.rms(pcm, 2)
+                    active = output_rms >= 90
+                    self._observe_agent_audio_frame(
+                        active=active,
+                        source_rms=source_rms,
+                        output_rms=output_rms,
+                    )
                     if active:
                         playback_active_until = time.monotonic() + 0.35
                         set_playback_active(True)

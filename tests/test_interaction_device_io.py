@@ -12,6 +12,7 @@ from gogoguard_device_io import (
     LiveKitGo2Transport,
     NavigationReadOnlyGuard,
     SpeakerJitterBuffer,
+    amplify_s16_pcm,
     decode_s24_3le_stereo_to_s16_mono,
     load_interaction_hardware_profile,
     microphone_capture_command,
@@ -35,6 +36,7 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertEqual(profile.microphone_device, "hw:CARD=B2,DEV=0")
         self.assertEqual(profile.microphone_gain, 4.0)
         self.assertEqual(profile.speaker_default_volume, 10)
+        self.assertEqual(profile.speaker_gain, 3.0)
         self.assertEqual((profile.video_width, profile.video_height, profile.video_fps), (1920, 1080, 30))
 
     def test_owned_vui_boundary_and_container_keep_the_zero_to_ten_scale(self) -> None:
@@ -79,6 +81,18 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertIn("alsa", command)
         self.assertEqual(command.count("pcm_s24le"), 2)
         self.assertEqual(command[-2:], ["s24le", "pipe:1"])
+
+    def test_speaker_gain_is_three_x_with_peak_limiting(self) -> None:
+        quiet = (1000).to_bytes(2, "little", signed=True) * 4
+        amplified = amplify_s16_pcm(quiet, gain=3.0)
+        self.assertEqual(
+            int.from_bytes(amplified[:2], "little", signed=True), 3000
+        )
+        loud = (30000).to_bytes(2, "little", signed=True) * 4
+        limited = amplify_s16_pcm(loud, gain=3.0)
+        peak = int.from_bytes(limited[:2], "little", signed=True)
+        self.assertGreater(peak, 30000)
+        self.assertLessEqual(peak, 32767)
 
     def test_unitree_rtc_loads_before_other_native_media_runtime(self) -> None:
         native = (
