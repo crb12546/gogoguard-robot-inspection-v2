@@ -13,6 +13,7 @@ from gogoguard_device_io import (
     SpeakerJitterBuffer,
     decode_s24_3le_stereo_to_s16_mono,
     load_interaction_hardware_profile,
+    microphone_capture_command,
 )
 
 
@@ -58,6 +59,17 @@ class InteractionDeviceIoTest(unittest.TestCase):
             s24(0x7FFFFF) + s24(0x7FFFFF), gain=16
         )
         self.assertEqual(int.from_bytes(clipped, "little", signed=True), 32767)
+
+    def test_boya_capture_reuses_frozen_ffmpeg_instead_of_missing_arecord(self) -> None:
+        profile = load_interaction_hardware_profile(
+            ROOT / "config/robot/interaction-hardware.json"
+        )
+        command = microphone_capture_command(profile)
+        self.assertEqual(command[0], "ffmpeg")
+        self.assertNotIn("arecord", command)
+        self.assertIn("alsa", command)
+        self.assertEqual(command.count("pcm_s24le"), 2)
+        self.assertEqual(command[-2:], ["s24le", "pipe:1"])
 
     def test_speaker_prebuffers_and_reprime_after_underflow(self) -> None:
         buffer = SpeakerJitterBuffer(prebuffer_ms=60, max_buffer_ms=100)

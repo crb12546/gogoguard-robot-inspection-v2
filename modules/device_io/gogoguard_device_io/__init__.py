@@ -7,6 +7,7 @@ from .interaction_media import (
     SpeakerJitterBuffer,
     decode_s24_3le_stereo_to_s16_mono,
     load_interaction_hardware_profile,
+    microphone_capture_command,
 )
 from .livekit_go2 import LiveKitGo2Transport
 from .z1pro_gimbal import (
@@ -22,7 +23,7 @@ __all__ = [
     "create_camera_gateway", "create_gateway",
     "Go2VolumeController", "InteractionHardwareProfile", "NavigationReadOnlyGuard",
     "SpeakerJitterBuffer", "decode_s24_3le_stereo_to_s16_mono",
-    "load_interaction_hardware_profile",
+    "load_interaction_hardware_profile", "microphone_capture_command",
     "LiveKitGo2Transport",
     "Z1ProGimbal",
     "Z1ProGimbalReply",

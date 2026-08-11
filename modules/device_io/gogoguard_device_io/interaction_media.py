@@ -130,6 +130,39 @@ def decode_s24_3le_stereo_to_s16_mono(data: bytes, *, gain: float) -> bytes:
     return bytes(output)
 
 
+def microphone_capture_command(profile: InteractionHardwareProfile) -> list[str]:
+    """Use the already-commissioned FFmpeg ALSA boundary in the frozen image."""
+
+    if (
+        profile.microphone_format != "S24_3LE"
+        or profile.microphone_rate_hz != 48000
+        or profile.microphone_channels != 2
+    ):
+        raise ValueError("unsupported realtime microphone capture profile")
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "alsa",
+        "-acodec",
+        "pcm_s24le",
+        "-ac",
+        str(profile.microphone_channels),
+        "-ar",
+        str(profile.microphone_rate_hz),
+        "-i",
+        profile.microphone_device,
+        "-acodec",
+        "pcm_s24le",
+        "-f",
+        "s24le",
+        "pipe:1",
+    ]
+
+
 class SpeakerJitterBuffer:
     """Bounded 20 ms PCM queue with prebuffering and observable underflow."""
 

@@ -18,6 +18,7 @@ from .interaction_media import (
     InteractionHardwareProfile,
     SpeakerJitterBuffer,
     decode_s24_3le_stereo_to_s16_mono,
+    microphone_capture_command,
 )
 
 
@@ -327,9 +328,7 @@ class LiveKitGo2Transport:
 
         async def publish_microphone() -> None:
             process = await asyncio.create_subprocess_exec(
-                "arecord", "-q", "-D", profile.microphone_device,
-                "-t", "raw", "-f", profile.microphone_format,
-                "-r", str(profile.microphone_rate_hz), "-c", str(profile.microphone_channels),
+                *microphone_capture_command(profile),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             input_bytes = profile.microphone_rate_hz * profile.microphone_channels * 3 * profile.speaker_frame_ms // 1000
@@ -347,7 +346,7 @@ class LiveKitGo2Transport:
             except asyncio.IncompleteReadError as exc:
                 if not self._session_stop.is_set():
                     error = (await process.stderr.read()).decode("utf-8", errors="replace")[-300:]
-                    raise RuntimeError("BOYA capture ended: " + error) from exc
+                    raise RuntimeError("BOYA FFmpeg capture ended: " + error) from exc
             finally:
                 if process.returncode is None:
                     process.terminate()
