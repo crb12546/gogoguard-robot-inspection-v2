@@ -37,6 +37,33 @@ class FakeRobot:
 
 
 class FieldWorkstationTest(unittest.TestCase):
+    def test_robot_observability_surfaces_are_proxied(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app = FieldWorkstationApplication(
+                data_root=Path(temporary),
+                robot={"base_url": "http://127.0.0.1:9"},
+                cloud={},
+                map_worker="demo",
+            )
+            requested = []
+
+            def get(path):
+                requested.append(path)
+                return {"path": path}
+
+            app.robot.get = get
+            self.assertEqual(app.capabilities()["path"], "api/v1/capabilities")
+            self.assertEqual(app.interaction_status()["path"], "api/v1/interaction")
+            self.assertEqual(app.platform_status()["path"], "api/v1/platform")
+            self.assertEqual(
+                requested,
+                [
+                    "api/v1/capabilities",
+                    "api/v1/interaction",
+                    "api/v1/platform",
+                ],
+            )
+
     def test_map_jobs_are_newest_first_and_labels_are_local_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             app = FieldWorkstationApplication(

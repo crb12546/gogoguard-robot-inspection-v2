@@ -87,6 +87,15 @@ class FieldWorkstationApplication:
     def gimbal_status(self) -> dict:
         return self.robot.gimbal()
 
+    def capabilities(self) -> dict:
+        return self.robot.get("api/v1/capabilities")
+
+    def interaction_status(self) -> dict:
+        return self.robot.get("api/v1/interaction")
+
+    def platform_status(self) -> dict:
+        return self.robot.get("api/v1/platform")
+
     def move_gimbal(self, payload: dict) -> dict:
         return self.robot.move_gimbal(payload)
 

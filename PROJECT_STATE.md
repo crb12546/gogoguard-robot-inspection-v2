@@ -1871,7 +1871,7 @@ requires an explicit success receipt.
   localization, MPPI, costmap and receiver limits are unchanged. This slice
   composes around navigation; it does not replace or retune the successful
   patrol path.
-- Offline receipt: 182 repository unit/integration tests pass, Python
+- Offline receipt: 183 repository unit/integration tests pass, Python
   compilation passes, JavaScript syntax and UI smoke pass, generated repository
   knowledge is current, container contract validation passes and `git diff
   --check` is clean. A browser drove the local demo through Z1Pro adjustment,
@@ -1914,6 +1914,14 @@ requires an explicit success receipt.
   the restarted workstation process and its presence was verified without
   printing it; no secret was persisted or copied to the robot. No asset upload
   was started during this static deployment receipt.
+- The final HTTP sweep exposed three missing Mac-only read proxies inherited
+  from the shared Site Console router: capabilities, interaction status and
+  platform status returned 500 even though the robot endpoints were healthy.
+  The workstation now proxies those three narrow read-only routes explicitly;
+  one regression test was added, all 183 tests pass and status, capabilities,
+  interaction, platform, gimbal, navigation, map-jobs and sessions each return
+  HTTP 200 from the running Mac process. This hotfix does not affect or require
+  rebuilding the already deployed robot image.
 
 ## Current next-task handoff (2026-08-11; supersedes older next experiments)
 
