@@ -232,9 +232,15 @@ class InteractionManager:
         try:
             self.transport.disconnect()
         except Exception as exc:
+            safe_code = getattr(exc, "safe_code", "MEDIA_DISCONNECT_FAILED")
+            if (
+                not isinstance(safe_code, str)
+                or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", safe_code) is None
+            ):
+                safe_code = "MEDIA_DISCONNECT_FAILED"
             with self._lock:
                 self._status.state = InteractionSessionState.FAILED
-                self._status.last_error_code = "MEDIA_DISCONNECT_FAILED"
+                self._status.last_error_code = safe_code
                 self._status.last_error = f"{type(exc).__name__}: media disconnect failed"
                 self._status.observed_at = utc_now()
                 return replace(self._status)

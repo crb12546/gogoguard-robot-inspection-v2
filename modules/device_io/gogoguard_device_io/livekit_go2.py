@@ -38,15 +38,26 @@ class LiveKitGo2Transport:
         profile: InteractionHardwareProfile,
         unitree_aes_128_key: str,
         volume_controller: Go2VolumeController | None = None,
+        startup_timeout_s: float = 15.0,
+        cleanup_timeout_s: float = 4.0,
+        livekit_connect_timeout_s: float = 8.0,
     ) -> None:
         if not unitree_aes_128_key:
             raise ValueError("per-device Unitree AES key is required")
+        if startup_timeout_s <= 0 or cleanup_timeout_s <= 0:
+            raise ValueError("media lifecycle timeouts must be positive")
+        if livekit_connect_timeout_s <= 0:
+            raise ValueError("LiveKit connect timeout must be positive")
         self.profile = profile
         self._unitree_key = unitree_aes_128_key
         self._volume_controller = volume_controller
+        self._startup_timeout_s = float(startup_timeout_s)
+        self._cleanup_timeout_s = float(cleanup_timeout_s)
+        self._livekit_connect_timeout_s = float(livekit_connect_timeout_s)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._session_stop: asyncio.Event | None = None
+        self._session_task: asyncio.Task | None = None
         self._shutdown = threading.Event()
         self._request_lock = threading.Lock()
         self._dependency_lock = threading.Lock()
@@ -64,6 +75,7 @@ class LiveKitGo2Transport:
         self._ever_connected = False
         self._reconnect_count = 0
         self._startup_stage = "MEDIA_THREAD_START"
+        self._cleanup_stuck = False
         self._timing_lock = threading.Lock()
         self._pending_transcript_at: float | None = None
         self._agent_frame_at: float | None = None
@@ -126,7 +138,13 @@ class LiveKitGo2Transport:
 
     def connect(self, request: RealtimeMediaSessionRequest) -> MediaConnectionReceipt:
         if self._thread and self._thread.is_alive():
-            raise RuntimeError("media transport is already running")
+            # A FAILED public session must never hide a still-running native
+            # media generation. Make one bounded cleanup attempt before a new
+            # token is accepted instead of permanently rejecting every retry.
+            self._startup_stage = "STALE_MEDIA_CLEANUP"
+            self.disconnect()
+        elif self._thread is not None:
+            self._clear_session_references()
         if self._volume_controller is not None:
             self._startup_stage = "VOLUME_CONTROL"
             try:
@@ -137,8 +155,10 @@ class LiveKitGo2Transport:
                 raise MediaStageError("VOLUME_CONTROL_FAILED") from exc
         self._ready = queue.Queue(maxsize=1)
         self._shutdown.clear()
+        self._cleanup_stuck = False
         self._ever_connected = False
         self._reconnect_count = 0
+        self._startup_stage = "MEDIA_THREAD_START"
         with self._request_lock:
             self._request = request
         self._thread = threading.Thread(
@@ -149,27 +169,49 @@ class LiveKitGo2Transport:
         )
         self._thread.start()
         try:
-            result = self._ready.get(timeout=15)
+            result = self._ready.get(timeout=self._startup_timeout_s)
         except queue.Empty as exc:
             stage = self._startup_stage
-            self.disconnect()
+            try:
+                self.disconnect()
+            except Exception as cleanup_exc:
+                raise MediaStageError(f"{stage}_CLEANUP_TIMEOUT") from cleanup_exc
             raise MediaStageError(f"{stage}_TIMEOUT") from exc
         if isinstance(result, BaseException):
-            self.disconnect()
+            try:
+                self.disconnect()
+            except Exception as cleanup_exc:
+                raise MediaStageError(
+                    f"{self._startup_stage}_CLEANUP_TIMEOUT"
+                ) from cleanup_exc
             raise result
         return result
 
     def disconnect(self) -> None:
         self._shutdown.set()
-        if self._loop is not None and self._session_stop is not None:
-            self._loop.call_soon_threadsafe(self._session_stop.set)
+        loop = self._loop
+        session_stop = self._session_stop
+        session_task = self._session_task
+        if loop is not None and loop.is_running():
+            def request_stop() -> None:
+                if session_stop is not None:
+                    session_stop.set()
+                if session_task is not None and not session_task.done():
+                    session_task.cancel()
+
+            loop.call_soon_threadsafe(request_stop)
         if self._thread is not None:
-            self._thread.join(timeout=8)
+            self._thread.join(timeout=self._cleanup_timeout_s)
             if self._thread.is_alive():
-                raise TimeoutError("media transport did not stop within 8 seconds")
+                self._cleanup_stuck = True
+                raise MediaStageError("MEDIA_CLEANUP_TIMEOUT")
+        self._clear_session_references()
+
+    def _clear_session_references(self) -> None:
         self._thread = None
         self._loop = None
         self._session_stop = None
+        self._session_task = None
         with self._request_lock:
             self._request = None
         self._microphone_track = None
@@ -177,6 +219,7 @@ class LiveKitGo2Transport:
         with self._data_publish_lock:
             self._data_publish_pending = False
         self._microphone_muted.clear()
+        self._cleanup_stuck = False
         with self._timing_lock:
             self._pending_transcript_at = None
             self._agent_frame_at = None
@@ -293,6 +336,8 @@ class LiveKitGo2Transport:
         speaker_status["outputGain"] = self.profile.speaker_gain
         return {
             "running": bool(self._thread and self._thread.is_alive()),
+            "startupStage": self._startup_stage,
+            "cleanupStuck": self._cleanup_stuck,
             "microphoneMuted": self._microphone_muted.is_set(),
             "reconnectCount": self._reconnect_count,
             "audioTiming": audio_timing,
@@ -397,11 +442,22 @@ class LiveKitGo2Transport:
             with self._request_lock:
                 current = self._request or request
             try:
-                asyncio.run(self._run(current))
+                async def run_session() -> None:
+                    self._session_task = asyncio.current_task()
+                    try:
+                        if self._shutdown.is_set():
+                            return
+                        await self._run(current)
+                    finally:
+                        self._session_task = None
+
+                asyncio.run(run_session())
                 if self._shutdown.is_set():
                     return
                 raise ConnectionError("media session ended unexpectedly")
             except BaseException as exc:
+                if self._shutdown.is_set():
+                    return
                 if not self._ever_connected:
                     if self._ready.empty():
                         error = exc
@@ -479,6 +535,9 @@ class LiveKitGo2Transport:
         agent_audio_ready = asyncio.Event()
         self._loop = asyncio.get_running_loop()
         self._session_stop = asyncio.Event()
+        if self._shutdown.is_set():
+            self._session_stop.set()
+            return
         playback_active = False
         playback_active_until = 0.0
 
@@ -621,7 +680,20 @@ class LiveKitGo2Transport:
             self._startup_stage = "GO2_SPEAKER_ATTACH"
             go2.pc.addTrack(SpeakerTrack())
             self._startup_stage = "LIVEKIT_CONNECT"
-            await room.connect(request.url, request.token, rtc.RoomOptions(auto_subscribe=True))
+            connect_task = asyncio.create_task(
+                room.connect(
+                    request.url,
+                    request.token,
+                    rtc.RoomOptions(auto_subscribe=True),
+                )
+            )
+            done, _ = await asyncio.wait(
+                {connect_task}, timeout=self._livekit_connect_timeout_s
+            )
+            if connect_task not in done:
+                connect_task.cancel()
+                raise MediaStageError("LIVEKIT_CONNECT_TIMEOUT")
+            connect_task.result()
             self._local_participant = (
                 room.local_participant if request.publish_data else None
             )
@@ -696,7 +768,10 @@ class LiveKitGo2Transport:
             for task in tasks:
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            if tasks:
+                _, pending = await asyncio.wait(tasks, timeout=2.0)
+                for task in pending:
+                    task.cancel()
             if go2 is not None:
                 try:
                     go2.audio.switchAudioChannel(False)
@@ -706,17 +781,23 @@ class LiveKitGo2Transport:
             self._local_participant = None
             with self._data_publish_lock:
                 self._data_publish_pending = False
-            self._loop = None
-            try:
-                await room.disconnect()
-            except Exception:
-                pass
+            cleanup_calls = [room.disconnect()]
             if audio_source is not None:
-                await audio_source.aclose()
+                cleanup_calls.append(audio_source.aclose())
             if video_source is not None:
-                await video_source.aclose()
+                cleanup_calls.append(video_source.aclose())
             if go2 is not None:
-                try:
-                    await go2.disconnect()
-                except Exception:
-                    pass
+                cleanup_calls.append(go2.disconnect())
+            cleanup_tasks = [asyncio.create_task(call) for call in cleanup_calls]
+            if cleanup_tasks:
+                done, pending = await asyncio.wait(cleanup_tasks, timeout=3.0)
+                for task in pending:
+                    task.cancel()
+                for task in done:
+                    try:
+                        task.result()
+                    except BaseException:
+                        pass
+                if pending:
+                    await asyncio.wait(pending, timeout=0.25)
+            self._loop = None

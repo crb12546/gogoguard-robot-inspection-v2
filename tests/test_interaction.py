@@ -67,6 +67,7 @@ class FakeTransport:
         self.playback_stops = 0
         self.playback_resumes = 0
         self.refreshes = []
+        self.disconnect_error: Exception | None = None
 
     def connect(self, request):
         self.requests.append(request)
@@ -79,6 +80,8 @@ class FakeTransport:
 
     def disconnect(self) -> None:
         self.disconnects += 1
+        if self.disconnect_error:
+            raise self.disconnect_error
 
     def set_microphone_muted(self, muted: bool) -> None:
         self.microphone_muted.append(muted)
@@ -180,6 +183,32 @@ class InteractionManagerTest(unittest.TestCase):
         transport.connect_error = invalid
         status = manager.start(start_payload())
         self.assertEqual(status.last_error_code, "MEDIA_CONNECT_FAILED")
+
+    def test_failed_start_can_retry_with_a_new_platform_command(self) -> None:
+        manager, transport = self.create_manager()
+        staged = RuntimeError("first connection failed")
+        staged.safe_code = "LIVEKIT_CONNECT_FAILED"
+        transport.connect_error = staged
+        failed = manager.start(start_payload())
+        self.assertEqual(failed.state, InteractionSessionState.FAILED)
+        self.assertEqual(failed.last_error_code, "LIVEKIT_CONNECT_FAILED")
+
+        transport.connect_error = None
+        recovered = manager.start(
+            start_payload(token=livekit_token(expires_in=7200))
+        )
+        self.assertEqual(recovered.state, InteractionSessionState.LIVE)
+        self.assertEqual(len(transport.requests), 2)
+
+    def test_stop_preserves_a_public_safe_cleanup_failure_code(self) -> None:
+        manager, transport = self.create_manager()
+        manager.start(start_payload())
+        cleanup = RuntimeError("private native cleanup detail")
+        cleanup.safe_code = "MEDIA_CLEANUP_TIMEOUT"
+        transport.disconnect_error = cleanup
+        failed = manager.stop()
+        self.assertEqual(failed.state, InteractionSessionState.FAILED)
+        self.assertEqual(failed.last_error_code, "MEDIA_CLEANUP_TIMEOUT")
 
     def test_half_duplex_and_ordered_interrupt(self) -> None:
         manager, transport = self.create_manager()

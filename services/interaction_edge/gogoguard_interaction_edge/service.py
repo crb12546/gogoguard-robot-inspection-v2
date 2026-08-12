@@ -345,6 +345,12 @@ class InteractionUnixServer:
                     "errorCode": type(exc).__name__,
                     "message": "interaction command failed",
                 }
-            connection.sendall(
-                (json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-            )
+            try:
+                connection.sendall(
+                    (json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+                )
+            except (BrokenPipeError, ConnectionResetError):
+                # Latest-only pose clients intentionally do not wait for a
+                # response. Their disconnect must not flood the media log or
+                # hide the first actionable startup failure.
+                pass

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import tempfile
@@ -17,6 +18,7 @@ from gogoguard_device_io import (
     load_interaction_hardware_profile,
     microphone_capture_command,
 )
+from gogoguard_contracts import MediaConnectionReceipt, RealtimeMediaSessionRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,6 +242,61 @@ class InteractionDeviceIoTest(unittest.TestCase):
         self.assertEqual(timing["agentFrameGapMaxMs"], 400.0)
         self.assertEqual(timing["transcriptToAudioSamples"], 1)
         self.assertEqual(timing["lastTranscriptToAudioMs"], 420.0)
+
+    def test_timed_out_media_generation_is_cancelled_and_next_start_succeeds(self) -> None:
+        profile = load_interaction_hardware_profile(
+            ROOT / "config/robot/interaction-hardware.json"
+        )
+
+        class RetryTransport(LiveKitGo2Transport):
+            def __init__(self):
+                super().__init__(
+                    profile=profile,
+                    unitree_aes_128_key="test-only",
+                    startup_timeout_s=0.05,
+                    cleanup_timeout_s=1.0,
+                )
+                self.attempt = 0
+
+            async def _run(self, request):
+                self.attempt += 1
+                self._loop = asyncio.get_running_loop()
+                self._session_stop = asyncio.Event()
+                if self.attempt == 1:
+                    self._startup_stage = "LIVEKIT_CONNECT"
+                    await asyncio.Event().wait()
+                self._ever_connected = True
+                self._startup_stage = "MEDIA_READY"
+                self._ready.put(
+                    MediaConnectionReceipt(
+                        participant_id="robot:LLYJ0001",
+                        video_published=True,
+                        audio_published=True,
+                        audio_subscribed=True,
+                        data_connected=True,
+                    )
+                )
+                await self._session_stop.wait()
+
+        request = RealtimeMediaSessionRequest(
+            command_id=1,
+            robot_id="LLYJ0001",
+            url="ws://39.96.37.187:7880",
+            room="patrol-test-001",
+            token="not-inspected-by-transport-test",
+        )
+        transport = RetryTransport()
+        with self.assertRaisesRegex(RuntimeError, "realtime media startup failed") as failure:
+            transport.connect(request)
+        self.assertEqual(failure.exception.safe_code, "LIVEKIT_CONNECT_TIMEOUT")
+        self.assertFalse(transport.status()["running"])
+        self.assertFalse(transport.status()["cleanupStuck"])
+
+        receipt = transport.connect(request)
+        self.assertEqual(receipt.participant_id, "robot:LLYJ0001")
+        self.assertEqual(transport.status()["startupStage"], "MEDIA_READY")
+        transport.disconnect()
+        self.assertFalse(transport.status()["running"])
 
     @patch("gogoguard_device_io.interaction_media.subprocess.run")
     def test_volume_ten_is_set_and_verified(self, run) -> None:

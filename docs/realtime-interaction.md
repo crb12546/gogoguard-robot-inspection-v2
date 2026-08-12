@@ -102,6 +102,17 @@ in-memory reconnect token without restarting a healthy room connection. The
 public status never contains the URL or token. Transport errors retain only an
 error class and stable error code.
 
+Failed media startup is generation-scoped. LiveKit signalling has an explicit
+8 second bound and the whole native-media generation has a 15 second startup
+bound. Before accepting a later `start_live`, the runtime cancels and joins any
+failed generation; it never reports `failed` while silently keeping that
+generation as the owner of the camera, microphone or Go2 media connection. A
+cleanup that misses its four-second join bound is reported as
+`MEDIA_CLEANUP_TIMEOUT` and a new generation is refused while the former
+generation remains alive. Read-only media status exposes `startupStage` and
+`cleanupStuck` so field evidence distinguishes signalling failure from stale
+native cleanup.
+
 The current IP-only development endpoint requires the robot-local
 `GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS=1` setting. A platform payload cannot
 downgrade TLS. Production keeps the setting at `0` and requires `wss`.
@@ -203,8 +214,8 @@ docker buildx build --platform linux/arm64 --load \
 
 ## Acceptance still required
 
-Offline tests and disposable probes do not prove the formal runtime on the
-robot. Acceptance order is:
+Offline tests and disposable probes do not prove a changed formal runtime on
+the robot. Acceptance order is:
 
 1. Build the ARM64 image and verify all Python/native imports in-image.
 2. Install without activating interaction; verify patrol behavior is unchanged.
