@@ -52,11 +52,11 @@ diagnosing or deploying the camera feedback defect.
 | Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area. Generation 8 preserves the GLIM timestamp/quaternion timeline and binds recorded checkpoints by time. Real map `map-70fb209b5b20` revision 6 is installed on the robot with both GLIM-quaternion orientations verified from the robot file | Run both checkpoints locally, then upload/activate only after local acceptance |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, checkpoint capture/audit and local validation. It now serves cache-busted live actual pan/tilt, 1° fine controls and writable target-angle fields against the matching robot backend | Reload the browser and physically accept the new angle controls; securely reinject the LLYJ0001 token only when platform upload is required because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, checkpoint capture/audit and local validation. It now serves cache-busted live actual pan/tilt, 1° fine controls and writable target-angle fields against the matching robot backend. The current process has the platform token only in memory | Reload the browser and physically accept the new angle controls; after a future workstation restart, securely reinject the token because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The deployed platform adapter may start/stop only the selected map-bound route and implements the frozen reliable checkpoint event sequence, announcement wait, verdict dedupe/ack, retake limit, timeout and mission-context pose stream. A separate `local_operator` decision mode composes the same executor without letting the platform adapter race the workstation | Run and accept one real local checkpoint mission and one frozen platform MissionPlan; complete mission/report aggregation remains platform work |
-| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The real revision-4 bundle is SaaS-verified without automatic activation | Activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
+| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The latest `map-62d8cec9a1dc` revision-1 bundle with two checkpoints is SaaS-verified without automatic activation | Platform activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
@@ -2375,7 +2375,8 @@ restarts and generation 8 / revision 6 selected. Localization, Nav2, patrol
 runtime, motion bridge and UDP 5005 are stopped. Platform and realtime media
 were online in the static receipt, but that observation is not a promise of
 future connectivity. The current Mac workstation serves the matching frontend
-at `http://127.0.0.1:8080/` without a platform token.
+at `http://127.0.0.1:8080/`; its current process has the device token in memory
+only and does not persist it to source, configuration or runtime data.
 
 The next bounded experiment starts with the robot stationary and the motion
 stack stopped: reload the workstation, verify one `+1°` movement and one direct
@@ -2503,3 +2504,29 @@ authorization before localization, Nav2 or physical motion.
   deployment. The next acceptance is one operator-observed 1-degree adjustment
   followed by one explicit target-angle adjustment while the dog remains
   stationary.
+
+## 2026-08-12 latest platform asset upload receipt
+
+- The operator-reported upload failure was reproduced locally before any HTTP
+  request reached GoGoGuard: the running workstation had no
+  `GOGOGUARD_DEVICE_TOKEN`, so its fail-closed asset uploader returned
+  `platform device token is unavailable`. This was expected after the earlier
+  token-free workstation restart, but the UI message did not make the lifecycle
+  sufficiently obvious.
+- Latest map `map-62d8cec9a1dc` itself was ready: workspace revision 1 contained
+  24 operator route points, one four-vertex allowed-area polygon and two
+  checkpoint bindings with zero items needing review. The workstation was
+  restarted with the previously operator-provided token in process memory only;
+  the token was not written to source, config, logs or this receipt.
+- The platform accepted and verified bundle
+  `route-62d8cec9a1dc-workspace-r1`, archive SHA-256
+  `5fa175905c2ac01e605e797f7b826a12f44a3b9540d06a6120b1b0b916e87edc`,
+  upload ID `ab_2ee16988cc67ab5e`, for site `天津大学`. Verification reported
+  4,713 PCD points, 77 execution waypoints, four allowed-area polygon vertices,
+  two checkpoints and both reference JPEGs. The platform state is `verified`,
+  not `activated`; activation remains an explicit platform-side decision.
+- This operation changed only the Mac workstation process and SaaS asset state.
+  It did not start localization, Nav2, patrol runtime, the motion bridge, body
+  movement or camera movement. A future workstation restart will again require
+  secure token reinjection unless a separate credential-storage decision is
+  made.
