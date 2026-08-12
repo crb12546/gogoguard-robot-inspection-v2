@@ -2,7 +2,7 @@
   "id": "site_console",
   "responsibility": "Shared HTTP surface and field UI; workstation composes workflows while robot exposes narrow live and artifact APIs",
   "runtime": ["robot", "workstation", "browser"],
-  "status": "feedback_converged_gimbal_control_and_checkpoint_validation_ui_implemented_deployment_pending",
+  "status": "feedback_converged_gimbal_control_and_checkpoint_validation_ui_deployed_field_acceptance_pending",
   "codeRoots": ["apps/site_console"],
   "entrypoints": ["gogoguard_site_console.__main__:main"],
   "dependsOn": ["contracts", "device_io", "data_capture", "transfer", "map_factory", "route", "localization", "navigation", "evidence"],

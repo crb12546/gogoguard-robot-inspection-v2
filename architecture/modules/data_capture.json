@@ -2,11 +2,11 @@
   "id": "data_capture",
   "responsibility": "Start, stop, seal and replay raw mapping evidence without owning algorithms",
   "runtime": ["robot"],
-  "status": "real_mapping_recording_field_verified_plus_checkpoint_sampling_and_shutdown_lifecycle_hardened_local_acceptance_pending",
+  "status": "real_mapping_recording_field_verified_plus_checkpoint_sampling_and_shutdown_lifecycle_hardening_deployed_static_recording_acceptance_pending",
   "codeRoots": ["modules/data_capture", "third_party/locked_stack/src/go2_mapping_capture"],
   "entrypoints": ["gogoguard_data_capture.manager:CaptureManager", "go2_mapping_capture/launch/mid360_mapping_capture.launch.py"],
   "dependsOn": ["contracts", "device_io", "calibration", "localization", "evidence"],
   "consumes": ["PointCloud2", "Imu", "Odometry", "recording-time Z1Pro angles", "local JPEG configuration sample"],
   "produces": ["RecordingBundle", "rosbag2 MCAP", "gogoguard.recording_checkpoints.v1", "hashed checkpoint sample images"],
-  "sourceProvenance": ["V2 lifecycle plus locked real mapping launch/config from old commit 3a7597c", "2026-08-11 frozen recording-as-configuration workflow persists stable checkpoint IDs, raw pose, camera target, spin intent and local sample inside the sealed bundle", "2026-08-12 handoff review serializes periodic and checkpoint snapshot writes so recordingSampleIndex always identifies the exact persisted snapshot, joins the owned sampler and rosbag on runtime shutdown, marks interrupted recordings failed instead of falsely sealing them, and surfaces sampling I/O failure before bundle publication"]
+  "sourceProvenance": ["V2 lifecycle plus locked real mapping launch/config from old commit 3a7597c", "2026-08-11 frozen recording-as-configuration workflow persists stable checkpoint IDs, raw pose, camera target, spin intent and local sample inside the sealed bundle", "2026-08-12 handoff review serializes periodic and checkpoint snapshot writes so recordingSampleIndex always identifies the exact persisted snapshot, joins the owned sampler and rosbag on runtime shutdown, marks interrupted recordings failed instead of falsely sealing them, and surfaces sampling I/O failure before bundle publication", "2026-08-12 generation8-r1 installed this lifecycle on LLYJ0001 and passed static startup with no active recording; an interrupted or newly sealed real recording remains unexercised"]
 }

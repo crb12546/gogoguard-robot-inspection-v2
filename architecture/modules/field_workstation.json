@@ -2,7 +2,7 @@
   "id": "field_workstation",
   "responsibility": "Delivery-computer workflow, history catalog, cloud orchestration, map review and robot release/deployment",
   "runtime": ["workstation", "browser"],
-  "status": "generation_8_checkpoint_orientation_and_revision_6_bundle_prepared_local_deployment_pending",
+  "status": "generation_8_workstation_running_and_revision_6_published_robot_field_acceptance_pending",
   "codeRoots": ["apps/field_workstation", "deployment/workstation"],
   "entrypoints": ["gogoguard_field_workstation.__main__:main", "deployment/workstation/run-native", "deployment/workstation/compose.yaml"],
   "dependsOn": ["contracts", "transfer", "map_factory", "route", "site_console", "evidence"],
