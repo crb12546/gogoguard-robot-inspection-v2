@@ -45,6 +45,29 @@ if [[ ! -x $MAPPING_PYTHON ]]; then
   echo "sealed mapping Python executable is missing" >&2
   exit 78
 fi
+
+output_is_complete() {
+  local artifact
+  [[ -d $OUTPUT_ROOT && ! -L $OUTPUT_ROOT ]] || return 1
+  for artifact in \
+    map.json \
+    map.ply \
+    overview.svg \
+    glim-build.json \
+    trajectory-poses.json; do
+    [[ -s $OUTPUT_ROOT/$artifact && ! -L $OUTPUT_ROOT/$artifact ]] || return 1
+  done
+}
+
+# The cloud build can complete while the workstation loses its download
+# connection. A retry for that immutable job must reuse its sealed artifacts
+# instead of attempting to overwrite the original GLIM result.
+if output_is_complete; then
+  echo "GOGOGUARD_PROGRESS 93 cloud_complete 复用云端已完成的 GLIM 结果"
+  echo "GoGoGuard cloud GLIM job already complete: $JOB_ID"
+  exit 0
+fi
+
 if [[ -e $WORK_ROOT || -e $OUTPUT_ROOT || -e $OUTPUT_STAGING ]]; then
   echo "map job output already exists; job ids are immutable" >&2
   exit 78
