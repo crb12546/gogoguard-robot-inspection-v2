@@ -38,22 +38,23 @@ Commit `1c81255` was built and installed as the generation-8 robot release
 described below. The later cloud trajectory-export recovery and the local-only
 Z1Pro mixed-feedback correction are recorded in the final dated sections. The
 current worktree passes all 214 tests, compilation, UI smoke, container
-contract, generated knowledge and JavaScript syntax. The robot still runs the
-pre-correction generation8-r1 image; no localization, Nav2, body motion or real
-gimbal motion occurred while diagnosing the camera feedback defect.
+contract, generated knowledge and JavaScript syntax. The corrected
+`gimbal-feedback-r1` release is now installed and statically verified on the
+robot; no localization, Nav2, body motion or real gimbal motion occurred while
+diagnosing or deploying the camera feedback defect.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
 | Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
-| Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active. The current source corrects Z1Pro command-feedback frames, but that correction is not yet deployed | Deploy and physically verify the corrected Z1Pro feedback; long-duration full-load performance is not yet characterized |
+| Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active. Z1Pro command feedback now uses the protocol-correct mixed frames on the robot | Physically verify one fine manual adjustment; long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
 | Map and route assets | Maps have immutable history/labels; the Mac workbench shows gray map points, an editable blue route and an editable green allowed area. Generation 8 preserves the GLIM timestamp/quaternion timeline and binds recorded checkpoints by time. Real map `map-70fb209b5b20` revision 6 is installed on the robot with both GLIM-quaternion orientations verified from the robot file | Run both checkpoints locally, then upload/activate only after local acceptance |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes; the deployed V6 runtime uses one MPPI controller, SmacPlanner2D for wider bypasses, one 0.48 m safety circle and the green allowed-area mask. The operator accepted the first V6-r4 patrol for release | Sustained cruise speed, passable bypass/rejoin and repeatability remain commissioning work |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, checkpoint capture/audit and local validation. The current frontend adds live actual pan/tilt, 1° fine controls and writable target-angle fields | The new controls need a browser reload plus the matching robot backend deployment and physical acceptance; securely reinject the LLYJ0001 token only when platform upload is required because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, checkpoint capture/audit and local validation. It now serves cache-busted live actual pan/tilt, 1° fine controls and writable target-angle fields against the matching robot backend | Reload the browser and physically accept the new angle controls; securely reinject the LLYJ0001 token only when platform upload is required because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
-| Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 are installed and resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. A real packet later proved the installed convergence check compares tilt/roll against the wrong relative-motor fields; the current source corrects this and keeps checkpoint and manual tolerances separate | Deploy the correction, verify explicit/manual camera angles, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
+| Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The deployed platform adapter may start/stop only the selected map-bound route and implements the frozen reliable checkpoint event sequence, announcement wait, verdict dedupe/ack, retake limit, timeout and mission-context pose stream. A separate `local_operator` decision mode composes the same executor without letting the platform adapter race the workstation | Run and accept one real local checkpoint mission and one frozen platform MissionPlan; complete mission/report aggregation remains platform work |
 | SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The real revision-4 bundle is SaaS-verified without automatic activation | Activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
@@ -2369,22 +2370,25 @@ workflow, `074f379` as the camera-first/revision-publication correction,
 digests above as the latest installed robot release. Old realtime worktrees are
 evidence/provenance only and must not be deployed.
 
-The latest observed state has generation8-r1 active with zero service restarts
-and generation 8 / revision 6 selected. The robot is lying down; localization,
-Nav2, patrol runtime, motion bridge and UDP 5005 are stopped. Platform and
-realtime media were online in the static receipt, but that observation is not a
-promise of future connectivity. The current Mac workstation is running the
-same source at `http://127.0.0.1:8080/` without a platform token.
+The latest observed state has `gimbal-feedback-r1` active with zero service
+restarts and generation 8 / revision 6 selected. Localization, Nav2, patrol
+runtime, motion bridge and UDP 5005 are stopped. Platform and realtime media
+were online in the static receipt, but that observation is not a promise of
+future connectivity. The current Mac workstation serves the matching frontend
+at `http://127.0.0.1:8080/` without a platform token.
 
-The next bounded experiment is one local two-checkpoint physical validation,
-not another deployment or parameter change. Only when the operator is ready,
-have the operator stand the dog, then explicitly start localization and verify
-it before starting the local mission. At `cp_01`, compare the recorded image
-with live video, verify the camera reaches the corrected view, capture/continue
-and confirm suffix navigation. Repeat at `cp_02` and verify final mission
-completion. Preserve the complete runtime/evidence bundle. Do not retune VGICP,
-Nav2/MPPI, obstacle behavior, speed, acceleration or the 0.48 m safety circle
-unless new evidence identifies a separate defect.
+The next bounded experiment starts with the robot stationary and the motion
+stack stopped: reload the workstation, verify one `+1°` movement and one direct
+target-angle movement against the displayed actual angles. If that passes,
+continue to one local two-checkpoint physical validation. Only when the
+operator is ready, have the operator stand the dog, then explicitly start
+localization and verify it before starting the local mission. At `cp_01`,
+compare the recorded image with live video, verify the camera reaches the
+corrected view, capture/continue and confirm suffix navigation. Repeat at
+`cp_02` and verify final mission completion. Preserve the complete
+runtime/evidence bundle. Do not retune VGICP, Nav2/MPPI, obstacle behavior,
+speed, acceleration or the 0.48 m safety circle unless new evidence identifies
+a separate defect.
 
 Only after that local physical pass should the operator securely reinject the
 LLYJ0001 token, upload the revision-6 bundle, inspect the server receipt and
@@ -2466,3 +2470,36 @@ authorization before localization, Nav2 or physical motion.
   command/read-only probe; no body, localization, Nav2 or real camera motion
   was initiated. Generation8-r1 on the robot still contains the old feedback
   comparison until the operator explicitly authorizes a new deployment.
+
+## 2026-08-12 Z1Pro mixed-feedback deployment receipt (static verified)
+
+- The operator explicitly authorized deployment. Commits `6c78265` and
+  `d4b00ce` intentionally separate the already-deployed cloud map-job recovery
+  from the Z1Pro feedback/UI correction. The release was built from `d4b00ce`
+  as `gogoguard-robot-inspection:v2-edge-20260812-gimbal-feedback-r1` on the
+  unchanged frozen V6 base.
+- The Mac ARM64 manifest-list ID is
+  `sha256:2cde294c6bbd2082f25d53bd38215fb57fc309f228aeda6fc3c32e92ef94215b`.
+  The robot-loaded ARM64 config image ID is
+  `sha256:3811b6e358d0fd06eded7dd6e446640bb08bbe67b4d6b5415a0b2b9ba7a5bc7f`.
+  The 1,389,770,240-byte archive passed SHA-256 on both Mac and robot with
+  `252790e330acc6a3a77481700473f1c42a9fff050898f869e724f427d82df142`.
+- Before activation, `generation8-r1` was active with zero service restarts;
+  localization, Nav2, patrol runtime and the Unitree motion bridge were absent,
+  and UDP 5005 was unbound. Installation preserved commissioned runtime values
+  and did not auto-start the new image. One explicit service restart activated
+  `gimbal-feedback-r1` at 2026-08-12 19:46:34 CST with zero restarts.
+- Static post-install checks reported online LiDAR/IMU/odometry, ready 1920x1080
+  Z1Pro video, online platform heartbeat and LiveKit audio/video, with no motion
+  authority. A read-only GCU response through the deployed API reported the
+  command-aligned angles roll -3.02, tilt 0.57 and pan 82.13 degrees while the
+  old motor-relative Y field remained -10.16 degrees. This proves the deployed
+  endpoint now exposes the correct feedback group; it does not yet prove a
+  commanded camera movement.
+- The robot and Mac `http://127.0.0.1:8080/` surfaces both expose
+  `gimbalPanTarget`, `gimbalTiltTarget` and `gimbalApplyTarget`. Localization,
+  Nav2, patrol runtime, the Unitree motion bridge and UDP 5005 remained stopped
+  after activation. No body or real camera movement command was sent during
+  deployment. The next acceptance is one operator-observed 1-degree adjustment
+  followed by one explicit target-angle adjustment while the dog remains
+  stationary.
