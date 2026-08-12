@@ -16,6 +16,7 @@ required = {
         "研发事故记录", "incidentTimeline", "diagnosticMode",
         "巡检地图工作台", "workspaceMap", "startGlimEditor",
         "editRoute", "editAllowedArea", "saveWorkspace",
+        "gimbalPanTarget", "gimbalTiltTarget", "gimbalApplyTarget",
     ],
     "app.js": [
         "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
@@ -38,6 +39,7 @@ required = {
         "/navigation-workspace", "/glim-editor/start", "/glim-editor/publish",
         "robotRadiusM", "allowedArea", "candidateGeneration >= 5",
         "candidate.workspace_hash === state.navigationWorkspace.workspaceHash",
+        "submitGimbalTarget", "state.gimbalTarget",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",

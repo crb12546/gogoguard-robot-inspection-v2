@@ -96,20 +96,38 @@ class InspectionApplication:
                 return value | {"online": True}
             try:
                 reply = self.gimbal.probe()
-                angles = {
-                    "pan": reply.relative_pan_deg,
-                    "tilt": reply.relative_tilt_deg,
-                    "roll": reply.relative_roll_deg,
-                }
+                angles = reply.angle_control_feedback()
                 if all(item is not None for item in angles.values()):
                     self._gimbal_angles = {key: float(item) for key, item in angles.items()}
-                return value | {"online": True, "angles": dict(self._gimbal_angles)}
+                return value | {
+                    "online": True,
+                    "angles": dict(self._gimbal_angles),
+                    "feedbackFrames": {
+                        "pan": "carrier_relative_z",
+                        "tilt": "absolute_euler_pitch",
+                        "roll": "absolute_euler_roll",
+                    },
+                    "relativeAngles": {
+                        "x": reply.relative_roll_deg,
+                        "y": reply.relative_tilt_deg,
+                        "z": reply.relative_pan_deg,
+                    },
+                    "absoluteAngles": {
+                        "roll": reply.absolute_roll_deg,
+                        "pitch": reply.absolute_pitch_deg,
+                        "yaw": reply.absolute_yaw_deg,
+                    },
+                }
             except Exception as exc:
                 return value | {"online": False, "reason": type(exc).__name__}
 
     def move_gimbal(self, payload: dict) -> dict:
         with self._gimbal_lock:
             angles = self._validated_gimbal_angles(payload)
+            precision = payload.get("precision")
+            if precision not in {None, "fine"}:
+                raise ValueError("gimbal precision must be fine when provided")
+            tolerance_deg = 0.5 if precision == "fine" else None
             pan, tilt, roll = angles["pan"], angles["tilt"], angles["roll"]
             try:
                 if self.mode == "demo":
@@ -119,18 +137,27 @@ class InspectionApplication:
                         pan_body_deg=pan,
                         tilt_euler_deg=tilt,
                         roll_euler_deg=roll,
+                        tolerance_deg=tolerance_deg,
                     )
+                    feedback = reply.angle_control_feedback()
+                    if any(value is None for value in feedback.values()):
+                        raise RuntimeError(
+                            "Z1Pro GCU response contains no angle-control feedback"
+                        )
                     actual = {
-                        "pan": float(reply.relative_pan_deg),
-                        "tilt": float(reply.relative_tilt_deg),
-                        "roll": float(reply.relative_roll_deg),
+                        name: float(value)
+                        for name, value in feedback.items()
                     }
                 self._gimbal_angles = actual
                 self.journal.append(
                     "gimbal.move_converged",
                     target=angles,
                     actual=actual,
-                    tolerance_deg=self.gimbal.angle_tolerance_deg,
+                    tolerance_deg=(
+                        self.gimbal.angle_tolerance_deg
+                        if tolerance_deg is None
+                        else tolerance_deg
+                    ),
                 )
                 return {
                     **self.gimbal.capability(),
@@ -165,7 +192,14 @@ class InspectionApplication:
         return result
 
     def center_gimbal(self) -> dict:
-        return self.move_gimbal({"pan": 0.0, "tilt": 0.0, "roll": 0.0})
+        return self.move_gimbal(
+            {
+                "pan": 0.0,
+                "tilt": 0.0,
+                "roll": 0.0,
+                "precision": "fine",
+            }
+        )
 
     def capabilities(self) -> dict:
         value = json_ready(self.capability_profile)

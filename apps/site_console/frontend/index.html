@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GoGoGuard 现场交付工作台</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260812-gimbal1">
 </head>
 <body>
   <header><div><small>GOGOGUARD · FIELD WORKSTATION</small><h1>现场交付工作台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
@@ -17,7 +17,7 @@
     </section>
     <section class="workspace">
       <div class="visual-stack">
-        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe><div class="gimbal-bar"><span>镜头 <b id="gimbalAngles">pan 0° · tilt 0°</b></span><div><button id="gimbalLeft" class="mini-button">左 1°</button><button id="gimbalRight" class="mini-button">右 1°</button><button id="gimbalUp" class="mini-button">上 1°</button><button id="gimbalDown" class="mini-button">下 1°</button><button id="gimbalCenter" class="mini-button">回中</button></div></div></article>
+        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe><div class="gimbal-bar"><span>实际角度 <b id="gimbalAngles">左右 0° · 上下 0°</b></span><div class="gimbal-controls"><div class="gimbal-buttons"><button id="gimbalLeft" class="mini-button">左 1°</button><button id="gimbalRight" class="mini-button">右 1°</button><button id="gimbalUp" class="mini-button">上 1°</button><button id="gimbalDown" class="mini-button">下 1°</button><button id="gimbalCenter" class="mini-button">回中</button></div><form id="gimbalTargetForm" class="gimbal-target-form"><label>左右目标 <input id="gimbalPanTarget" type="number" min="-140" max="140" step="0.1" inputmode="decimal"><span>°</span></label><label>上下目标 <input id="gimbalTiltTarget" type="number" min="-110" max="120" step="0.1" inputmode="decimal"><span>°</span></label><button id="gimbalApplyTarget" class="mini-button" type="submit">转到这个角度</button></form><small id="gimbalControlMessage">目标角度可直接输入；正数为右/上</small></div></div></article>
         <article class="panel compact-map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
       </div>
       <article class="panel map-panel"><div class="panel-title"><div><span>实时点云</span><small>拖动旋转 · 滚轮缩放</small></div><b id="pointCount">0 点</b></div><canvas id="cloud"></canvas></article>
@@ -122,7 +122,7 @@
         <figure><figcaption>当前 Z1Pro 实时画面</figcaption><iframe id="checkpointCameraFrame" title="巡检点 Z1Pro 实时画面" allow="autoplay; fullscreen; picture-in-picture"></iframe></figure>
       </div>
       <div class="checkpoint-validation-footer">
-        <div><strong id="checkpointValidationTitle">等待巡检点</strong><small id="checkpointValidationMeta">到点后会自动调整机身和镜头，并保持停车等您确认。</small></div>
+        <div><strong id="checkpointValidationTitle">等待巡检点</strong><small id="checkpointValidationMeta">到点后会自动调整机身和镜头，并保持停车等您确认。</small><small>如需人工微调，可使用页面顶部的“左右/上下目标”直接输入角度。</small></div>
         <div id="checkpointVerdictActions" class="checkpoint-verdict-actions" hidden>
           <button id="checkpointContinue">通过并到下一点</button>
           <button id="checkpointRetake" class="secondary">重新对准并再看一次</button>
@@ -189,6 +189,6 @@
       </article>
     </section>
   </main>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260812-gimbal1"></script>
 </body>
 </html>

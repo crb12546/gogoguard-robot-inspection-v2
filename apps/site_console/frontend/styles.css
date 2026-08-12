@@ -31,10 +31,15 @@ main { padding: 22px 28px 40px; max-width: 1600px; margin: auto; }
 .map-panel, .camera-panel, .compact-map-panel { display: flex; flex-direction: column; overflow: hidden; }
 .map-panel { height: 460px; }
 .camera-panel iframe { display: block; width: 100%; height: 100%; min-height: 0; border: 0; background: #02070c; }
-.gimbal-bar { min-height: 56px; padding: 7px 10px; display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; border-top: 1px solid var(--line); background: #071421; color: var(--muted); font-size: 11px; }
+.gimbal-bar { min-height: 104px; padding: 8px 10px; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; border-top: 1px solid var(--line); background: #071421; color: var(--muted); font-size: 11px; }
 .gimbal-bar b { color: var(--cyan); }
-.gimbal-bar > div { display: flex; justify-content: flex-end; gap: 5px; }
+.gimbal-controls { display: grid; justify-items: end; gap: 6px; }
+.gimbal-buttons { display: flex; justify-content: flex-end; gap: 5px; }
 .gimbal-bar .mini-button { width: auto; margin: 0; padding: 6px 7px; white-space: nowrap; }
+.gimbal-target-form { display: flex; justify-content: flex-end; gap: 6px; align-items: center; }
+.gimbal-target-form label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.gimbal-target-form input { width: 72px; padding: 6px 7px; border: 1px solid #31506d; border-radius: 6px; background: #06101c; color: var(--text); font-size: 12px; }
+.gimbal-controls > small { color: var(--muted); text-align: right; }
 .panel-title { height: 60px; min-height: 60px; padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .compact-map-panel .panel-title { height: 48px; min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
 .panel-title > div { display: grid; gap: 3px; }
@@ -223,6 +228,9 @@ button.incident-row:hover, button.incident-row.selected { background: #17304a; }
   .status-row { grid-template-columns: 1fr 1fr; }
   .workspace { grid-template-columns: 1fr; }
   .visual-stack { height: 532px; grid-template-rows: 300px 220px; }
+  .gimbal-bar { grid-template-columns: 1fr; }
+  .gimbal-controls { justify-items: start; }
+  .gimbal-buttons, .gimbal-target-form { flex-wrap: wrap; justify-content: flex-start; }
   .control-panel { grid-column: auto; }
   .results { grid-template-columns: 1fr; }
   .map-panel { height: 360px; }

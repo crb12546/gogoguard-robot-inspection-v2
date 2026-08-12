@@ -58,6 +58,23 @@ class Z1ProGimbalReply:
     relative_roll_deg: float | None
     relative_tilt_deg: float | None
     relative_pan_deg: float | None
+    absolute_roll_deg: float | None
+    absolute_pitch_deg: float | None
+    absolute_yaw_deg: float | None
+
+    def angle_control_feedback(self) -> dict[str, float | None]:
+        """Return feedback in the same mixed frames used by command 0x10.
+
+        The vendor protocol defines roll and pitch control values as absolute
+        Euler angles, but yaw/pan as an angle relative to the carrier. The GCU
+        reply exposes those values in two different byte ranges.
+        """
+
+        return {
+            "roll": self.absolute_roll_deg,
+            "tilt": self.absolute_pitch_deg,
+            "pan": self.relative_pan_deg,
+        }
 
 
 def parse_gcu_reply(data: bytes) -> Z1ProGimbalReply:
@@ -70,16 +87,22 @@ def parse_gcu_reply(data: bytes) -> Z1ProGimbalReply:
     received_crc = (frame[-2] << 8) | frame[-1]
     if crc16_ccitt_nibble(frame[:-2]) != received_crc:
         raise ValueError("Z1Pro GCU response CRC is invalid")
-    angles = (None, None, None)
-    if len(data) >= 18:
-        raw = struct.unpack_from("<hhh", data, 12)
-        angles = tuple(value / 100.0 for value in raw)
+    relative_angles = (None, None, None)
+    absolute_angles = (None, None, None)
+    if len(frame) >= 24:
+        relative_raw = struct.unpack_from("<hhh", frame, 12)
+        absolute_raw = struct.unpack_from("<hhH", frame, 18)
+        relative_angles = tuple(value / 100.0 for value in relative_raw)
+        absolute_angles = tuple(value / 100.0 for value in absolute_raw)
     return Z1ProGimbalReply(
-        command=data[69] if len(data) >= 70 else None,
-        status=data[70] if len(data) >= 71 else None,
-        relative_roll_deg=angles[0],
-        relative_tilt_deg=angles[1],
-        relative_pan_deg=angles[2],
+        command=frame[69] if len(frame) >= 70 else None,
+        status=frame[70] if len(frame) >= 71 else None,
+        relative_roll_deg=relative_angles[0],
+        relative_tilt_deg=relative_angles[1],
+        relative_pan_deg=relative_angles[2],
+        absolute_roll_deg=absolute_angles[0],
+        absolute_pitch_deg=absolute_angles[1],
+        absolute_yaw_deg=absolute_angles[2],
     )
 
 
@@ -155,6 +178,7 @@ class Z1ProGimbal:
         pan_body_deg: float,
         tilt_euler_deg: float,
         roll_euler_deg: float = 0.0,
+        tolerance_deg: float | None = None,
     ) -> Z1ProGimbalReply:
         if not self.commissioned:
             raise RuntimeError("Z1Pro angle control is not field commissioned")
@@ -168,11 +192,22 @@ class Z1ProGimbal:
             yaw=pan,
             control_valid=True,
         )
+        convergence_tolerance_deg = (
+            self.angle_tolerance_deg
+            if tolerance_deg is None
+            else float(tolerance_deg)
+        )
+        if not 0.1 <= convergence_tolerance_deg <= self.angle_tolerance_deg:
+            raise ValueError(
+                "Z1Pro move tolerance must stay between 0.1 degrees and "
+                "the commissioned inspection tolerance"
+            )
         return self._move_until_converged(
             packet,
             roll_deg=float(roll_euler_deg),
             tilt_deg=float(tilt_euler_deg),
             pan_deg=float(pan_body_deg),
+            tolerance_deg=convergence_tolerance_deg,
         )
 
     def trigger_native_photo(self) -> Z1ProGimbalReply:
@@ -193,6 +228,7 @@ class Z1ProGimbal:
         roll_deg: float,
         tilt_deg: float,
         pan_deg: float,
+        tolerance_deg: float,
     ) -> Z1ProGimbalReply:
         deadline = time.monotonic() + self.move_timeout_s
         interval = 1.0 / self.command_hz
@@ -226,7 +262,7 @@ class Z1ProGimbal:
                     tilt_deg=tilt_deg,
                     pan_deg=pan_deg,
                 )
-                if all(error <= self.angle_tolerance_deg for error in errors.values()):
+                if all(error <= tolerance_deg for error in errors.values()):
                     confirmed += 1
                     if confirmed >= self.confirmation_samples:
                         return reply
@@ -274,14 +310,10 @@ class Z1ProGimbal:
         tilt_deg: float,
         pan_deg: float,
     ) -> dict[str, float]:
-        actual = {
-            "roll": reply.relative_roll_deg,
-            "tilt": reply.relative_tilt_deg,
-            "pan": reply.relative_pan_deg,
-        }
+        actual = reply.angle_control_feedback()
         target = {"roll": roll_deg, "tilt": tilt_deg, "pan": pan_deg}
         if any(value is None for value in actual.values()):
-            raise ValueError("Z1Pro GCU response contains no relative angle feedback")
+            raise ValueError("Z1Pro GCU response contains no angle-control feedback")
         return {
             name: abs(float(actual[name]) - target[name])
             for name in ("roll", "tilt", "pan")

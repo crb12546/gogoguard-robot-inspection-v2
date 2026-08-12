@@ -25,6 +25,8 @@ const state = {
   platformUploadSupported: null,
   cameraStarted: false,
   robotReachable: false,
+  gimbalTarget: null,
+  gimbalTargetEditing: false,
   navigationProfile: null,
   diagnosticProfile: null,
   incidents: [],
@@ -377,32 +379,83 @@ async function refreshGimbal() {
   try {
     state.gimbal = await api('/api/v1/gimbal');
     const angles = state.gimbal.angles || {};
-    $('gimbalAngles').textContent = `pan ${Number(angles.pan || 0).toFixed(1)}° · tilt ${Number(angles.tilt || 0).toFixed(1)}°`;
-    for (const id of ['gimbalLeft', 'gimbalRight', 'gimbalUp', 'gimbalDown', 'gimbalCenter']) {
+    const actualPan = Number(angles.pan || 0);
+    const actualTilt = Number(angles.tilt || 0);
+    const actualRoll = Number(angles.roll || 0);
+    $('gimbalAngles').textContent = `左右 ${actualPan.toFixed(1)}° · 上下 ${actualTilt.toFixed(1)}°`;
+    if (!gimbalCommandBusy) {
+      state.gimbalTarget = {pan: actualPan, tilt: actualTilt, roll: actualRoll};
+    }
+    if (!state.gimbalTargetEditing && !gimbalCommandBusy) {
+      $('gimbalPanTarget').value = Number(state.gimbalTarget.pan).toFixed(1);
+      $('gimbalTiltTarget').value = Number(state.gimbalTarget.tilt).toFixed(1);
+    }
+    for (const id of [
+      'gimbalLeft', 'gimbalRight', 'gimbalUp', 'gimbalDown',
+      'gimbalCenter', 'gimbalApplyTarget',
+    ]) {
       $(id).disabled = !state.gimbal.supported;
     }
   } catch (_) {
-    $('gimbalAngles').textContent = '云台不可用';
+    $('gimbalAngles').textContent = '镜头不可用';
   }
 }
 
 let gimbalCommandBusy = false;
-async function moveGimbal(panDelta, tiltDelta, center = false) {
+async function moveGimbal(panDelta, tiltDelta, center = false, explicitTarget = null) {
   if (gimbalCommandBusy) return;
   gimbalCommandBusy = true;
-  const current = state.gimbal?.angles || {};
-  try {
-    state.gimbal = await post(center ? '/api/v1/gimbal/center' : '/api/v1/gimbal/move', center ? undefined : {
+  const actual = state.gimbal?.angles || {};
+  const current = state.gimbalTarget || {
+    pan: Number(actual.pan || 0),
+    tilt: Number(actual.tilt || 0),
+    roll: Number(actual.roll || 0),
+  };
+  const target = center
+    ? {pan: 0, tilt: 0, roll: 0}
+    : explicitTarget || {
       pan: Number(current.pan || 0) + panDelta,
       tilt: Number(current.tilt || 0) + tiltDelta,
       roll: Number(current.roll || 0),
-    });
+    };
+  $('gimbalControlMessage').textContent = `正在转到：左右 ${Number(target.pan).toFixed(1)}° · 上下 ${Number(target.tilt).toFixed(1)}°`;
+  try {
+    state.gimbal = await post(
+      center ? '/api/v1/gimbal/center' : '/api/v1/gimbal/move',
+      center ? undefined : {...target, precision: 'fine'},
+    );
+    const reached = state.gimbal.angles || target;
+    state.gimbalTarget = {
+      pan: Number(target.pan),
+      tilt: Number(target.tilt),
+      roll: Number(target.roll),
+    };
+    $('gimbalControlMessage').textContent = `已到位：左右 ${Number(reached.pan).toFixed(1)}° · 上下 ${Number(reached.tilt).toFixed(1)}°`;
+    $('error').textContent = '';
     await refreshGimbal();
   } catch (error) {
-    $('error').textContent = friendlyError(error);
+    const message = friendlyError(error);
+    $('gimbalControlMessage').textContent = `镜头调整失败：${message}`;
+    $('error').textContent = message;
   } finally {
     gimbalCommandBusy = false;
   }
+}
+
+function submitGimbalTarget(event) {
+  event.preventDefault();
+  const pan = $('gimbalPanTarget').valueAsNumber;
+  const tilt = $('gimbalTiltTarget').valueAsNumber;
+  if (!Number.isFinite(pan) || pan < -140 || pan > 140) {
+    $('gimbalControlMessage').textContent = '左右目标必须在 -140° 到 140° 之间';
+    return;
+  }
+  if (!Number.isFinite(tilt) || tilt < -110 || tilt > 120) {
+    $('gimbalControlMessage').textContent = '上下目标必须在 -110° 到 120° 之间';
+    return;
+  }
+  const roll = Number(state.gimbalTarget?.roll ?? state.gimbal?.angles?.roll ?? 0);
+  moveGimbal(0, 0, false, {pan, tilt, roll});
 }
 
 function bindGimbalHold(id, panDelta, tiltDelta) {
@@ -1595,6 +1648,20 @@ bindGimbalHold('gimbalRight', 1, 0);
 bindGimbalHold('gimbalUp', 0, 1);
 bindGimbalHold('gimbalDown', 0, -1);
 $('gimbalCenter').addEventListener('click', () => moveGimbal(0, 0, true));
+$('gimbalTargetForm').addEventListener('submit', event => {
+  state.gimbalTargetEditing = false;
+  submitGimbalTarget(event);
+});
+$('gimbalTargetForm').addEventListener('focusin', () => {
+  state.gimbalTargetEditing = true;
+});
+$('gimbalTargetForm').addEventListener('focusout', () => {
+  setTimeout(() => {
+    if (!$('gimbalTargetForm').contains(document.activeElement)) {
+      state.gimbalTargetEditing = false;
+    }
+  }, 0);
+});
 $('uploadPlatformBundle').addEventListener('click', uploadPlatformBundle);
 $('prepareNavigation').addEventListener('click', () => navigationAction('prepare'));
 $('startRuntime').addEventListener('click', () => navigationAction('runtime'));

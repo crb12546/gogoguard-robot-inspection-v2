@@ -20,7 +20,15 @@ OFFICIAL_REPLY = bytes.fromhex(
 )
 
 
-def reply_with_angles(roll: float, tilt: float, pan: float) -> bytes:
+def reply_with_angles(
+    roll: float,
+    tilt: float,
+    pan: float,
+    *,
+    absolute_roll: float | None = None,
+    absolute_pitch: float | None = None,
+    absolute_yaw: float = 0.0,
+) -> bytes:
     frame = bytearray(OFFICIAL_REPLY)
     struct.pack_into(
         "<hhh",
@@ -29,6 +37,14 @@ def reply_with_angles(roll: float, tilt: float, pan: float) -> bytes:
         int(round(roll * 100)),
         int(round(tilt * 100)),
         int(round(pan * 100)),
+    )
+    struct.pack_into(
+        "<hhH",
+        frame,
+        18,
+        int(round((roll if absolute_roll is None else absolute_roll) * 100)),
+        int(round((tilt if absolute_pitch is None else absolute_pitch) * 100)),
+        int(round(absolute_yaw * 100)) % 36000,
     )
     crc = crc16_ccitt_nibble(bytes(frame[:-2]))
     frame[-2:] = bytes([(crc >> 8) & 0xFF, crc & 0xFF])
@@ -84,6 +100,13 @@ class Z1ProGimbalProtocolTest(unittest.TestCase):
         self.assertAlmostEqual(reply.relative_roll_deg, -8.03)
         self.assertAlmostEqual(reply.relative_tilt_deg, 0.32)
         self.assertAlmostEqual(reply.relative_pan_deg, 62.18)
+        self.assertAlmostEqual(reply.absolute_roll_deg, -0.01)
+        self.assertAlmostEqual(reply.absolute_pitch_deg, 9.33)
+        self.assertAlmostEqual(reply.absolute_yaw_deg, 62.15)
+        self.assertEqual(
+            reply.angle_control_feedback(),
+            {"roll": -0.01, "tilt": 9.33, "pan": 62.18},
+        )
         damaged = bytearray(OFFICIAL_REPLY)
         damaged[12] ^= 0x01
         with self.assertRaisesRegex(ValueError, "CRC"):
@@ -151,6 +174,69 @@ class Z1ProGimbalProtocolTest(unittest.TestCase):
         self.assertAlmostEqual(reply.relative_pan_deg, 20.0)
         self.assertGreaterEqual(len(fake.sent), 4)
         self.assertTrue(all(packet[69] == 0x10 for packet in fake.sent))
+
+    def test_angle_move_compares_mixed_protocol_feedback_frames(self) -> None:
+        fake = FakeGcuSocket(
+            [
+                reply_with_angles(
+                    -3.0,
+                    -10.0,
+                    82.0,
+                    absolute_roll=-3.0,
+                    absolute_pitch=0.58,
+                    absolute_yaw=104.0,
+                )
+            ]
+        )
+        gimbal = Z1ProGimbal(
+            commissioned=True,
+            move_timeout_s=0.25,
+            confirmation_samples=1,
+        )
+        with patch(
+            "gogoguard_device_io.z1pro_gimbal.socket.create_connection",
+            return_value=fake,
+        ):
+            reply = gimbal.move_for_inspection(
+                pan_body_deg=82.0,
+                tilt_euler_deg=0.58,
+                roll_euler_deg=-3.0,
+            )
+        self.assertAlmostEqual(reply.relative_tilt_deg, -10.0)
+        self.assertAlmostEqual(reply.absolute_pitch_deg, 0.58)
+
+    def test_fine_move_does_not_accept_one_degree_without_actuation(self) -> None:
+        fake = FakeGcuSocket(
+            [
+                reply_with_angles(0.0, 0.0, 0.0),
+                reply_with_angles(0.0, 0.0, 1.0),
+            ]
+        )
+        gimbal = Z1ProGimbal(
+            commissioned=True,
+            move_timeout_s=0.25,
+            confirmation_samples=1,
+        )
+        with patch(
+            "gogoguard_device_io.z1pro_gimbal.socket.create_connection",
+            return_value=fake,
+        ):
+            reply = gimbal.move_for_inspection(
+                pan_body_deg=1.0,
+                tilt_euler_deg=0.0,
+                tolerance_deg=0.5,
+            )
+        self.assertAlmostEqual(reply.relative_pan_deg, 1.0)
+        self.assertGreaterEqual(len(fake.sent), 2)
+
+    def test_move_rejects_precision_looser_than_inspection_contract(self) -> None:
+        gimbal = Z1ProGimbal(commissioned=True)
+        with self.assertRaisesRegex(ValueError, "move tolerance"):
+            gimbal.move_for_inspection(
+                pan_body_deg=0.0,
+                tilt_euler_deg=0.0,
+                tolerance_deg=3.0,
+            )
 
     def test_angle_move_reports_axis_errors_when_feedback_never_converges(self) -> None:
         fake = FakeGcuSocket([reply_with_angles(0.0, 0.0, 0.0)])

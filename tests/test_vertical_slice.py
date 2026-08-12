@@ -118,6 +118,10 @@ class VerticalSliceTest(unittest.TestCase):
             self.app.move_gimbal({"pan": math.nan, "tilt": 0, "roll": 0})
         with self.assertRaisesRegex(ValueError, "supported range"):
             self.app.move_gimbal({"pan": 141, "tilt": 0, "roll": 0})
+        with self.assertRaisesRegex(ValueError, "precision"):
+            self.app.move_gimbal(
+                {"pan": 0, "tilt": 0, "roll": 0, "precision": "loose"}
+            )
 
     def test_local_checkpoint_capture_restores_camera_before_navigation_control(self) -> None:
         original = self.app.navigation
