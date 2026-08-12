@@ -2530,3 +2530,44 @@ authorization before localization, Nav2 or physical motion.
   movement or camera movement. A future workstation restart will again require
   secure token reinjection unless a separate credential-storage decision is
   made.
+
+## 2026-08-12 LiveKit failed-generation recovery deployment receipt
+
+- Dog-side network evidence separated reachability from lifecycle ownership:
+  the real `/rtc` WebSocket request returned `101 Switching Protocols`, and a
+  clean process using the installed LiveKit 1.1.14 SDK joined with the same
+  command URL and token. The deployed long-running service nevertheless
+  reported `failed` while its former native media thread remained alive. Every
+  later `start_live` therefore failed against the old camera/microphone/Go2
+  owner instead of performing a new LiveKit join.
+- Commit `8fa943c` makes each media generation explicit. LiveKit signalling and
+  whole-generation startup are time-bounded; stop cancels the active asyncio
+  task and joins the native thread; incomplete cleanup reports
+  `MEDIA_CLEANUP_TIMEOUT` and remains observable as `cleanupStuck`. A later
+  valid platform command may start a new generation only after the former one
+  has actually exited. The status now reaches `live` only after room join and
+  requested track publication.
+- All 217 repository tests, Python compilation, container contract, generated
+  knowledge, diff checks and ARM64 in-image imports passed. The release image
+  is `gogoguard-robot-inspection:v2-edge-20260812-livekit-recovery-r1`; Mac
+  manifest-list ID is
+  `sha256:7c0f387d5b040e7638f55826ddcbd5bb26e78b905a75965935fbae5db9d0fd45`
+  and robot ARM64 config ID is
+  `sha256:40fd4b3d667df6db2b1d550ead36c078d4201a3e73158ac66d2c4f106093b4c3`.
+  The 1,389,773,824-byte archive passed SHA-256
+  `d98742a5603261d859b896b1a7040f860dce269accd6ee2dac66ad4fab8d6876`
+  on the prepared release and robot install path.
+- Installation preserved commissioned runtime values. One explicit service
+  restart activated the image at 2026-08-12 21:48:55 CST with zero service
+  restarts. The platform heartbeat first returned no command, then a fresh
+  operator-triggered `start_live` was processed once with one result receipt.
+  The dog reached `MEDIA_READY`: audio published, video published, agent audio
+  subscribed and DataChannel connected were all true; `lastErrorCode` was null,
+  `cleanupStuck` was false, DataChannel publish errors were zero, and real agent
+  audio frames reached the speaker path during the observation window.
+- This was a static interaction acceptance. UDP 5005 stayed unbound and no
+  localization, Nav2, patrol runtime, motion bridge or body movement was
+  started. The next platform patrol still needs end-to-end checkpoint
+  announcement, video-frame extraction and verdict timing acceptance; this
+  receipt proves the prerequisite robot LiveKit session rather than that full
+  mission flow.
