@@ -9,6 +9,7 @@
    - [现场工作台操作](FIELD_WORKSTATION_GUIDE.md)
    - [导航编排](navigation-orchestration.md)
    - [实时音视频与小玖](realtime-interaction.md)
+   - [当前到点闭环修复待办](CHECKPOINT_CLOSURE_REPAIR_TODO.md)：下一次机器狗上线后的取证、开发、测试和验收步骤。
 5. `evidence/`：早期不可变构建/部署证据；`archive/`：已经完成使命、只用于追溯的一次性交付文档。
 
 ## 文档维护规则

@@ -43,6 +43,15 @@ contract, generated knowledge and JavaScript syntax. The corrected
 robot; no localization, Nav2, body motion or real gimbal motion occurred while
 diagnosing or deploying the camera feedback defect.
 
+The later `livekit-recovery-r1` interaction release is installed and reached
+`MEDIA_READY` with audio, video and data receipts true. Subsequent platform
+patrols completed, but the 22:10 platform timeline exposed a separate
+`platform_edge` defect: four checkpoint terminal messages were validated and
+ACKed while the coordinator failed to turn them into navigation controls, so
+both checkpoints used fixed navigation timeouts. The robot is now offline for
+charging. No fix has been implemented. The authoritative next-development
+checklist is `docs/CHECKPOINT_CLOSURE_REPAIR_TODO.md`.
+
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
 | Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
@@ -55,8 +64,8 @@ diagnosing or deploying the camera feedback defect.
 | Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` with GLIM/map/route/allowed-area preparation, checkpoint capture/audit and local validation. It now serves cache-busted live actual pan/tilt, 1° fine controls and writable target-angle fields against the matching robot backend. The current process has the platform token only in memory | Reload the browser and physically accept the new angle controls; after a future workstation restart, securely reinject the token because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
-| Mission/task system | The deployed platform adapter may start/stop only the selected map-bound route and implements the frozen reliable checkpoint event sequence, announcement wait, verdict dedupe/ack, retake limit, timeout and mission-context pose stream. A separate `local_operator` decision mode composes the same executor without letting the platform adapter race the workstation | Run and accept one real local checkpoint mission and one frozen platform MissionPlan; complete mission/report aggregation remains platform work |
-| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream, checkpoint event/verdict adapter and Mac asset uploader are deployed. The latest `map-62d8cec9a1dc` revision-1 bundle with two checkpoints is SaaS-verified without automatic activation | Platform activation, MissionPlan delivery and checkpoint evidence receipt are not yet accepted |
+| Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |
+| SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream and Mac asset upload are deployed. The latest `map-62d8cec9a1dc` revision-1 bundle is SaaS-verified and has been used in real platform patrols | Make checkpoint event delivery observable and ensure announcement/verdict terminal messages are applied immediately instead of merely ACKed |
 | Realtime dialogue and teleoperation | The formal LiveKit/BOYA/Z1Pro/Go2 `interaction` module and P1.5 heartbeat bridge are deployed on the frozen V6 base; real static audio/video publication, agent-audio subscription, DataChannel wake and physical playback reached `live` with zero motion. The current r5 release retains Go2 volume 10, applies peak-limited 3x downlink PCM gain and records source/output RMS. A bounded latest-only robot pose publisher reuses that DataChannel | Operator listening acceptance of the new gain, reliable audible wake acknowledgement, latency closure, a localization-on pose-stream receipt and concurrent patrol acceptance remain pending; remote teleoperation is not a product capability |
 
 ### Proven end-to-end product flow
@@ -2571,3 +2580,32 @@ authorization before localization, Nav2 or physical motion.
   announcement, video-frame extraction and verdict timing acceptance; this
   receipt proves the prerequisite robot LiveKit session rather than that full
   mission flow.
+
+## 2026-08-12 checkpoint terminal-message application defect (analysis only)
+
+- Platform evidence for mission `mission-20260812-221035-RG-狗02` proves that
+  both announcements played and that two `announcement_completed` plus two
+  `checkpoint_verdict` commands were accepted by the dog-side command bridge.
+  Despite those four `done` receipts, both checkpoints stayed in their wait
+  phases until the navigation fallback timers advanced them. The route itself
+  ultimately completed.
+- The receipt currently means validated, deduplicated and queued in
+  `checkpoint-inbox.jsonl`; it does not mean the checkpoint coordinator applied
+  the message. Code review and an offline fault injection reproduce the field
+  behavior: a synchronous mission-event exception occurs before inbox
+  consumption, leaves the coordinator in its old stage and prevents creation
+  of `capture` or `continue` controls even when a valid terminal message is
+  already present.
+- The defect is owned by `platform_edge`. It is not evidence of a localization,
+  Nav2, route-following, obstacle-avoidance or LiveKit transport failure.
+  `expiresAt` is only a late-message rejection boundary and does not instruct
+  the dog to wait.
+- The dog went offline for charging before its original checkpoint state,
+  inbox, control, command ledger and heartbeat log could be copied. Therefore
+  the exact first mission-event HTTP/local failure remains an evidence gap;
+  collect those files read-only before installing the next version.
+- No runtime correction or robot deployment was made in this analysis step.
+  The complete next-development order, tests, evidence checklist and field
+  acceptance thresholds live in
+  `docs/CHECKPOINT_CLOSURE_REPAIR_TODO.md` and are the authoritative todo for
+  the next dog session.
