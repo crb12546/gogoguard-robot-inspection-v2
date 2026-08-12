@@ -152,16 +152,21 @@ class NavigationManager:
             "allowed_area_mask_image",
             "allowed_area_mask_hash",
             "allowed_area_mask_image_hash",
+            "navigation_map",
+            "navigation_map_image",
+            "navigation_map_hash",
+            "navigation_map_image_hash",
         }
         missing = sorted(key for key in required if not candidate.get(key))
         try:
             generation = int(candidate.get("candidate_generation") or 0)
         except (TypeError, ValueError):
             generation = 0
-        if generation < 5 or missing:
+        if generation < 9 or missing:
             raise RuntimeError(
-                "当前地图与路线是旧版本，还没有绿色允许范围；"
-                "请在 Mac 工作台保存绿色区域后，重新点击“发布所选地图与路线到机器狗”"
+                "当前地图与路线是旧版本，还没有经过复核的静态导航地图；"
+                "请在 Mac 工作台确认红色障碍和绿色可走区后，"
+                "重新点击“发布所选地图与路线到机器狗”"
             )
 
     def status(self) -> dict[str, Any]:
@@ -245,6 +250,15 @@ class NavigationManager:
             f"mppi_batch_size:={controller['batchSize']}",
             f"mppi_iteration_count:={controller['iterationCount']}",
         ]
+        if candidate.get("navigation_map"):
+            arguments.extend(
+                [
+                    f"candidate_navigation_map:={candidate['navigation_map']}",
+                    f"candidate_navigation_map_image:={candidate['navigation_map_image']}",
+                    f"navigation_map_hash:={candidate['navigation_map_hash']}",
+                    f"navigation_map_image_hash:={candidate['navigation_map_image_hash']}",
+                ]
+            )
         if mission_plan_path is not None:
             arguments.append(f"mission_plan_path:={mission_plan_path}")
         return arguments

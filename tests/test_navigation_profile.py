@@ -84,11 +84,15 @@ class NavigationProfileTest(unittest.TestCase):
             "runtime_profile": "/maps/runtime_profile.json",
             "allowed_area_mask": "/maps/allowed-area-mask.yaml",
             "allowed_area_mask_image": "/maps/allowed-area-mask.pgm",
+            "navigation_map": "/maps/navigation-map.yaml",
+            "navigation_map_image": "/maps/navigation-map.pgm",
             "localization_map_hash": "map-hash",
             "route_hash": "route-hash",
             "runtime_profile_hash": "profile-hash",
             "allowed_area_mask_hash": "mask-hash",
             "allowed_area_mask_image_hash": "mask-image-hash",
+            "navigation_map_hash": "navigation-map-hash",
+            "navigation_map_image_hash": "navigation-map-image-hash",
         }
         arguments = NavigationManager._launch_arguments(
             candidate,

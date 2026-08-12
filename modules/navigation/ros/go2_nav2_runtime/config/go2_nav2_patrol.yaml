@@ -175,15 +175,23 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       transform_tolerance: 0.30
-      rolling_window: true
-      width: 24
-      height: 24
+      # The reviewed workstation map owns the full static planning extent.
+      # Smac may therefore find a doorway around a wall wider than the local
+      # MPPI horizon instead of searching only inside a rolling square.
+      rolling_window: false
       resolution: 0.10
       robot_radius: 0.48
-      track_unknown_space: false
+      track_unknown_space: true
       always_send_full_costmap: true
-      plugins: [obstacle_layer, inflation_layer]
+      plugins: [static_layer, obstacle_layer, inflation_layer]
       filters: [keepout_filter]
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        enabled: true
+        map_topic: /navigation_static_map
+        map_subscribe_transient_local: true
+        subscribe_to_updates: false
+        transform_tolerance: 0.30
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
         enabled: true
@@ -217,6 +225,13 @@ allowed_area_mask_server:
     use_sim_time: false
     yaml_filename: ""
     topic_name: /allowed_area_mask
+    frame_id: map
+
+navigation_map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: ""
+    topic_name: /navigation_static_map
     frame_id: map
 
 allowed_area_filter_info_server:
@@ -256,8 +271,15 @@ local_costmap:
       # looks stale even though the costmap thread is healthy. This grid is only
       # 100 x 100 cells, so a deterministic 2 Hz full snapshot is inexpensive.
       always_send_full_costmap: true
-      plugins: [obstacle_layer, inflation_layer]
+      plugins: [static_layer, obstacle_layer, inflation_layer]
       filters: [keepout_filter]
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        enabled: true
+        map_topic: /navigation_static_map
+        map_subscribe_transient_local: true
+        subscribe_to_updates: false
+        transform_tolerance: 0.30
       obstacle_layer:
         # Navigation owns a 2D obstacle surface. The complete 3D body cloud is
         # retained for localization, collision monitoring and incident replay;

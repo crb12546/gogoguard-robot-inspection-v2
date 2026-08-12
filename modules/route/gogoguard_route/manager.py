@@ -16,11 +16,18 @@ from typing import Any, Iterable
 
 from gogoguard_contracts import is_safe_external_id
 
-from .workspace import NavigationWorkspaceStore, validate_workspace, write_keepout_mask
+from .workspace import (
+    NavigationWorkspaceStore,
+    navigation_surface_cells,
+    plan_navigation_preview,
+    validate_workspace,
+    write_keepout_mask,
+    write_static_navigation_map,
+)
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 8
+CANDIDATE_GENERATION = 9
 CHECKPOINT_TIMESTAMP_TOLERANCE_S = 0.5
 
 
@@ -287,6 +294,13 @@ class RouteManager:
                         "allowed_area_mask_metadata_hash": Path(
                             existing["allowed_area_mask_metadata"]
                         ),
+                        "navigation_map_hash": Path(existing["navigation_map"]),
+                        "navigation_map_image_hash": Path(
+                            existing["navigation_map_image"]
+                        ),
+                        "navigation_map_metadata_hash": Path(
+                            existing["navigation_map_metadata"]
+                        ),
                     }
                     route_path = Path(existing["route"])
                     route_payload = json.loads(route_path.read_text(encoding="utf-8"))
@@ -346,6 +360,10 @@ class RouteManager:
                 destination,
             )
             mask_metadata_path = destination / "allowed-area-mask.json"
+            navigation_pgm_path, navigation_yaml_path, navigation_metadata = (
+                write_static_navigation_map(workspace, points, destination)
+            )
+            navigation_metadata_path = destination / "navigation-map.json"
             first = route["waypoints"][0]
             profile = {
                 "schema": "go2.runtime_profile.v1",
@@ -368,6 +386,8 @@ class RouteManager:
                     "plannerProfileId": "go2-nav2-smac-2d-v1",
                     "allowedAreaMaskArtifact": "allowed_area_mask",
                     "allowedAreaWorkspaceHash": workspace_hash,
+                    "staticNavigationMapArtifact": "navigation_map",
+                    "staticNavigationMapWorkspaceHash": workspace_hash,
                     "robotRadiusM": workspace["robotRadiusM"],
                 },
                 "patrol": {
@@ -421,20 +441,70 @@ class RouteManager:
                 "allowed_area_mask": str(mask_yaml_path),
                 "allowed_area_mask_image": str(mask_pgm_path),
                 "allowed_area_mask_metadata": str(mask_metadata_path),
+                "navigation_map": str(navigation_yaml_path),
+                "navigation_map_image": str(navigation_pgm_path),
+                "navigation_map_metadata": str(navigation_metadata_path),
                 "localization_map_hash": _file_hash(pcd_path),
                 "route_hash": _canonical_hash(route),
                 "runtime_profile_hash": _file_hash(profile_path),
                 "allowed_area_mask_hash": _file_hash(mask_yaml_path),
                 "allowed_area_mask_image_hash": _file_hash(mask_pgm_path),
                 "allowed_area_mask_metadata_hash": _file_hash(mask_metadata_path),
+                "navigation_map_hash": _file_hash(navigation_yaml_path),
+                "navigation_map_image_hash": _file_hash(navigation_pgm_path),
+                "navigation_map_metadata_hash": _file_hash(navigation_metadata_path),
                 "allowed_area_mask_dimensions": {
                     "width": mask_metadata["width"],
                     "height": mask_metadata["height"],
                     "resolutionM": mask_metadata["resolutionM"],
                 },
+                "navigation_map_dimensions": {
+                    "width": navigation_metadata["width"],
+                    "height": navigation_metadata["height"],
+                    "resolutionM": navigation_metadata["resolutionM"],
+                    "occupiedCellCount": navigation_metadata["occupiedCellCount"],
+                },
             }
             _atomic_json(candidate_path, metadata)
             return metadata
+
+    def navigation_surface_preview(self, job_id: str) -> dict[str, Any]:
+        if not SAFE_ID.fullmatch(job_id):
+            raise ValueError("invalid map job id")
+        map_ply = self.data_root / "map-jobs" / job_id / "artifacts" / "map.ply"
+        if not map_ply.is_file():
+            raise KeyError(job_id)
+        points, _digest = _read_binary_ply(map_ply)
+        return navigation_surface_cells(self.workspaces.get(job_id), points)
+
+    def plan_preview(
+        self,
+        job_id: str,
+        *,
+        start: Any,
+        goal: Any,
+        workspace: Any = None,
+    ) -> dict[str, Any]:
+        if not SAFE_ID.fullmatch(job_id):
+            raise ValueError("invalid map job id")
+        map_ply = self.data_root / "map-jobs" / job_id / "artifacts" / "map.ply"
+        if not map_ply.is_file():
+            raise KeyError(job_id)
+        points, _digest = _read_binary_ply(map_ply)
+        current = self.workspaces.get(job_id)
+        if isinstance(workspace, dict):
+            editable = dict(workspace)
+            editable.update(
+                {
+                    "mapJobId": job_id,
+                    "mapVersion": job_id,
+                    "revision": current["revision"],
+                    "sourceMapSha256": current["sourceMapSha256"],
+                }
+            )
+        else:
+            editable = current
+        return plan_navigation_preview(editable, points, start, goal)
 
     def get(self, candidate_id: str) -> dict[str, Any]:
         if not SAFE_ID.fullmatch(candidate_id):
@@ -678,6 +748,24 @@ class RouteManager:
                 "application/json",
             ),
             (
+                "static_navigation_map",
+                "navigation-map.yaml",
+                Path(candidate["navigation_map"]),
+                "application/yaml",
+            ),
+            (
+                "static_navigation_map_image",
+                "navigation-map.pgm",
+                Path(candidate["navigation_map_image"]),
+                "image/x-portable-graymap",
+            ),
+            (
+                "static_navigation_map_metadata",
+                "navigation-map.json",
+                Path(candidate["navigation_map_metadata"]),
+                "application/json",
+            ),
+            (
                 "checkpoints",
                 "checkpoints.json",
                 checkpoints_path,
@@ -749,6 +837,12 @@ class RouteManager:
             "allowedArea": {
                 "geometryPath": "navigation-workspace.json",
                 "robotRadiusM": workspace["robotRadiusM"],
+            },
+            "staticNavigationMap": {
+                "yamlPath": "navigation-map.yaml",
+                "imagePath": "navigation-map.pgm",
+                "metadataPath": "navigation-map.json",
+                "source": "height_slice_plus_operator_edits",
             },
             "checkpointBinding": {
                 "mapVersionField": "mapVersion",

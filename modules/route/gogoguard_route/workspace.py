@@ -12,10 +12,16 @@ from typing import Any, Iterable, Sequence
 
 
 SAFE_MAP_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-WORKSPACE_SCHEMA = "gogoguard.navigation_workspace.v1"
+WORKSPACE_SCHEMA = "gogoguard.navigation_workspace.v2"
+LEGACY_WORKSPACE_SCHEMA = "gogoguard.navigation_workspace.v1"
+NAVIGATION_SURFACE_SCHEMA = "gogoguard.navigation_surface_edit.v1"
 DEFAULT_ROBOT_RADIUS_M = 0.48
+DEFAULT_SURFACE_RESOLUTION_M = 0.10
+DEFAULT_OBSTACLE_MIN_Z = 0.05
+DEFAULT_OBSTACLE_MAX_Z = 1.80
 MAX_ROUTE_POINTS = 5000
 MAX_BOUNDARY_POINTS = 1000
+MAX_MANUAL_SURFACE_CELLS = 50000
 
 
 class NavigationWorkspaceError(ValueError):
@@ -237,6 +243,81 @@ def _validate_polygon(values: Any) -> list[list[float]]:
     return [[x, y] for x, y in points]
 
 
+def _validate_surface_cells(values: Any, label: str) -> list[list[int]]:
+    if values in (None, []):
+        return []
+    if not isinstance(values, list) or len(values) > MAX_MANUAL_SURFACE_CELLS:
+        raise NavigationWorkspaceError(
+            f"{label} must contain at most {MAX_MANUAL_SURFACE_CELLS} grid cells"
+        )
+    result: list[list[int]] = []
+    seen: set[tuple[int, int]] = set()
+    for index, value in enumerate(values):
+        if (
+            not isinstance(value, Sequence)
+            or isinstance(value, (str, bytes))
+            or len(value) != 2
+            or any(isinstance(item, bool) or not isinstance(item, int) for item in value)
+        ):
+            raise NavigationWorkspaceError(f"{label}[{index}] must contain integer x/y cells")
+        cell = (int(value[0]), int(value[1]))
+        if max(abs(cell[0]), abs(cell[1])) > 1000000:
+            raise NavigationWorkspaceError(f"{label}[{index}] is outside the map")
+        if cell not in seen:
+            seen.add(cell)
+            result.append([cell[0], cell[1]])
+    result.sort()
+    return result
+
+
+def _validate_navigation_surface(
+    value: Any,
+    *,
+    legacy_reviewed: bool,
+) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    resolution = _finite(
+        raw.get("resolutionM", DEFAULT_SURFACE_RESOLUTION_M),
+        "navigationSurface.resolutionM",
+    )
+    if not 0.05 <= resolution <= 0.25:
+        raise NavigationWorkspaceError(
+            "navigationSurface.resolutionM must be between 0.05m and 0.25m"
+        )
+    minimum_z = _finite(
+        raw.get("obstacleMinZ", DEFAULT_OBSTACLE_MIN_Z),
+        "navigationSurface.obstacleMinZ",
+    )
+    maximum_z = _finite(
+        raw.get("obstacleMaxZ", DEFAULT_OBSTACLE_MAX_Z),
+        "navigationSurface.obstacleMaxZ",
+    )
+    if not minimum_z < maximum_z or maximum_z - minimum_z > 5.0:
+        raise NavigationWorkspaceError(
+            "navigationSurface obstacle height range is invalid"
+        )
+    manual_blocked = _validate_surface_cells(
+        raw.get("manualBlockedCells"), "navigationSurface.manualBlockedCells"
+    )
+    manual_clear = _validate_surface_cells(
+        raw.get("manualClearCells"), "navigationSurface.manualClearCells"
+    )
+    clear_set = {tuple(cell) for cell in manual_clear}
+    manual_blocked = [cell for cell in manual_blocked if tuple(cell) not in clear_set]
+    reviewed = raw.get("reviewed", legacy_reviewed)
+    if not isinstance(reviewed, bool):
+        raise NavigationWorkspaceError("navigationSurface.reviewed must be boolean")
+    return {
+        "schema": NAVIGATION_SURFACE_SCHEMA,
+        "resolutionM": resolution,
+        "obstacleMinZ": minimum_z,
+        "obstacleMaxZ": maximum_z,
+        "manualBlockedCells": manual_blocked,
+        "manualClearCells": manual_clear,
+        "reviewed": reviewed,
+    }
+
+
 def _sample_segment(
     start: tuple[float, float], end: tuple[float, float], spacing_m: float = 0.10
 ) -> Iterable[tuple[float, float]]:
@@ -262,8 +343,20 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
     route = _validate_route(payload.get("route") or [])
     raw_area = payload.get("allowedArea")
     allowed_area = None if raw_area in (None, []) else _validate_polygon(raw_area)
+    surface = _validate_navigation_surface(
+        payload.get("navigationSurface"),
+        # Existing V1 green-area workspaces remain publishable. New workspaces
+        # and every edited V2 surface require the operator's explicit save.
+        legacy_reviewed=(
+            allowed_area is not None and not isinstance(payload.get("navigationSurface"), dict)
+        ),
+    )
     if require_ready and allowed_area is None:
         raise NavigationWorkspaceError("draw and save the green allowed area before publishing")
+    if require_ready and not surface["reviewed"]:
+        raise NavigationWorkspaceError(
+            "review and save the static navigation map before publishing"
+        )
     if allowed_area is not None:
         polygon = [(value[0], value[1]) for value in allowed_area]
         route_values = [(value[0], value[1]) for value in route]
@@ -291,10 +384,11 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
         "route": route,
         "allowedArea": allowed_area,
         "robotRadiusM": radius,
+        "navigationSurface": surface,
         "sourceMapSha256": str(payload.get("sourceMapSha256") or ""),
         "updatedAt": str(payload.get("updatedAt") or _utc_now()),
     }
-    normalized["ready"] = allowed_area is not None
+    normalized["ready"] = allowed_area is not None and surface["reviewed"]
     normalized["workspaceHash"] = _canonical_hash(
         {key: value for key, value in normalized.items() if key != "workspaceHash"}
     )
@@ -361,6 +455,15 @@ class NavigationWorkspaceStore:
                 "route": route,
                 "allowedArea": None,
                 "robotRadiusM": DEFAULT_ROBOT_RADIUS_M,
+                "navigationSurface": {
+                    "schema": NAVIGATION_SURFACE_SCHEMA,
+                    "resolutionM": DEFAULT_SURFACE_RESOLUTION_M,
+                    "obstacleMinZ": DEFAULT_OBSTACLE_MIN_Z,
+                    "obstacleMaxZ": DEFAULT_OBSTACLE_MAX_Z,
+                    "manualBlockedCells": [],
+                    "manualClearCells": [],
+                    "reviewed": False,
+                },
                 "sourceMapSha256": _file_hash(map_json),
                 "updatedAt": _utc_now(),
             }
@@ -382,6 +485,326 @@ class NavigationWorkspaceStore:
         normalized = validate_workspace(value)
         _atomic_json(self._path(job_id), normalized)
         return normalized
+
+
+def _map_point(value: Any, label: str) -> tuple[float, float, float]:
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes))
+        or len(value) < 3
+    ):
+        raise NavigationWorkspaceError(f"{label} must contain x/y/z")
+    return (
+        _finite(value[0], f"{label}.x"),
+        _finite(value[1], f"{label}.y"),
+        _finite(value[2], f"{label}.z"),
+    )
+
+
+def _surface_cell(x: float, y: float, resolution: float) -> tuple[int, int]:
+    return math.floor(x / resolution), math.floor(y / resolution)
+
+
+def navigation_surface_cells(
+    workspace: dict[str, Any],
+    map_points: Iterable[Sequence[Any]],
+) -> dict[str, Any]:
+    """Project one reviewed height slice into deterministic map-frame cells."""
+
+    value = validate_workspace(workspace)
+    surface = value["navigationSurface"]
+    resolution = float(surface["resolutionM"])
+    minimum_z = float(surface["obstacleMinZ"])
+    maximum_z = float(surface["obstacleMaxZ"])
+    cloud = [_map_point(point, "map point") for point in map_points]
+    raw_counts: dict[tuple[int, int], int] = {}
+    for point in cloud:
+        if minimum_z <= point[2] <= maximum_z:
+            cell = _surface_cell(point[0], point[1], resolution)
+            raw_counts[cell] = raw_counts.get(cell, 0) + 1
+    raw_cells = set(raw_counts)
+    # GLIM maps vary from sparse editor exports to dense full-resolution PCDs.
+    # Requiring a fixed point count would erase real walls from sparse maps or
+    # preserve every outlier in dense maps.  Keep a cell when it has repeated
+    # support, or when at least one neighboring cell supports the same surface;
+    # this is a small occupancy aggregation, not semantic object recognition.
+    automatic = {
+        cell
+        for cell, count in raw_counts.items()
+        if count >= 2
+        or any(
+            (cell[0] + dx, cell[1] + dy) in raw_cells
+            for dx in (-1, 0, 1)
+            for dy in (-1, 0, 1)
+            if dx or dy
+        )
+    }
+    rejected_isolated = len(raw_cells) - len(automatic)
+    # The robot physically occupied the recorded corridor while this map was
+    # captured. Clear that proven body footprint from the automatic projection
+    # so lidar self-returns, nearby floor noise or a sparse wall edge cannot
+    # make the recorded start pose occupied. An operator-edited route is not
+    # evidence of free space and never receives this treatment.
+    route_cleared: set[tuple[int, int]] = set()
+    if value["routeSource"] == "recorded":
+        route = [(point[0], point[1]) for point in value["route"]]
+        radius_cells = int(math.ceil(value["robotRadiusM"] / resolution))
+        for start, end in zip(route, route[1:]):
+            for point_x, point_y in _sample_segment(start, end, resolution / 2.0):
+                center = _surface_cell(point_x, point_y, resolution)
+                for dx in range(-radius_cells, radius_cells + 1):
+                    for dy in range(-radius_cells, radius_cells + 1):
+                        if math.hypot(dx, dy) * resolution <= value["robotRadiusM"]:
+                            route_cleared.add((center[0] + dx, center[1] + dy))
+        automatic -= route_cleared
+    manual_clear = {tuple(cell) for cell in surface["manualClearCells"]}
+    manual_blocked = {tuple(cell) for cell in surface["manualBlockedCells"]}
+    occupied = (automatic - manual_clear) | manual_blocked
+    return {
+        "schema": "gogoguard.navigation_surface_preview.v1",
+        "frame": "map",
+        "resolutionM": resolution,
+        "obstacleMinZ": minimum_z,
+        "obstacleMaxZ": maximum_z,
+        "automaticCells": [list(cell) for cell in sorted(automatic)],
+        "occupiedCells": [list(cell) for cell in sorted(occupied)],
+        "manualBlockedCells": [list(cell) for cell in sorted(manual_blocked)],
+        "manualClearCells": [list(cell) for cell in sorted(manual_clear)],
+        "stats": {
+            "sourcePointCount": len(cloud),
+            "rawHeightSliceCellCount": len(raw_cells),
+            "rejectedIsolatedCellCount": rejected_isolated,
+            "automaticCellCount": len(automatic),
+            "occupiedCellCount": len(occupied),
+            "manualBlockedCellCount": len(manual_blocked),
+            "manualClearCellCount": len(manual_clear),
+            "recordedCorridorClearCellCount": len(route_cleared),
+        },
+    }
+
+
+def _raster_bounds(
+    value: dict[str, Any],
+    cloud: Sequence[tuple[float, float, float]],
+) -> tuple[float, float, float, float, float, int, int]:
+    polygon = [(point[0], point[1]) for point in value["allowedArea"]]
+    bounds_points = [(point[0], point[1]) for point in cloud] + polygon
+    if not bounds_points:
+        raise NavigationWorkspaceError("map has no points for navigation bounds")
+    margin = max(2.0, value["robotRadiusM"] * 3.0)
+    minimum_x = min(point[0] for point in bounds_points) - margin
+    maximum_x = max(point[0] for point in bounds_points) + margin
+    minimum_y = min(point[1] for point in bounds_points) - margin
+    maximum_y = max(point[1] for point in bounds_points) + margin
+    requested = float(value["navigationSurface"]["resolutionM"])
+    resolution = max(
+        requested,
+        (maximum_x - minimum_x) / 4095.0,
+        (maximum_y - minimum_y) / 4095.0,
+    )
+    width = max(1, int(math.ceil((maximum_x - minimum_x) / resolution)))
+    height = max(1, int(math.ceil((maximum_y - minimum_y) / resolution)))
+    return minimum_x, maximum_x, minimum_y, maximum_y, resolution, width, height
+
+
+def write_static_navigation_map(
+    workspace: dict[str, Any],
+    map_points: Iterable[Sequence[Any]],
+    output_root: Path,
+) -> tuple[Path, Path, dict[str, Any]]:
+    """Build the Nav2 StaticLayer map without modifying the localization PCD."""
+
+    value = validate_workspace(workspace, require_ready=True)
+    cloud = [_map_point(point, "map point") for point in map_points]
+    polygon = [(point[0], point[1]) for point in value["allowedArea"]]
+    (
+        minimum_x,
+        _maximum_x,
+        minimum_y,
+        maximum_y,
+        resolution,
+        width,
+        height,
+    ) = _raster_bounds(value, cloud)
+    surface = navigation_surface_cells(value, cloud)
+    occupied = {tuple(cell) for cell in surface["occupiedCells"]}
+    pixels = bytearray(width * height)
+    for row in range(height):
+        world_y = maximum_y - (row + 0.5) * resolution
+        offset = row * width
+        for column in range(width):
+            world_x = minimum_x + (column + 0.5) * resolution
+            source_cell = _surface_cell(
+                world_x,
+                world_y,
+                float(value["navigationSurface"]["resolutionM"]),
+            )
+            free = (
+                _point_in_polygon((world_x, world_y), polygon)
+                and source_cell not in occupied
+            )
+            pixels[offset + column] = 255 if free else 0
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    pgm_path = output_root / "navigation-map.pgm"
+    yaml_path = output_root / "navigation-map.yaml"
+    temporary = pgm_path.with_suffix(".pgm.tmp")
+    with temporary.open("wb") as handle:
+        handle.write(f"P5\n{width} {height}\n255\n".encode("ascii"))
+        handle.write(pixels)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, pgm_path)
+    yaml_text = (
+        "image: navigation-map.pgm\n"
+        f"resolution: {resolution:.9f}\n"
+        f"origin: [{minimum_x:.9f}, {minimum_y:.9f}, 0.0]\n"
+        "negate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\nmode: trinary\n"
+    )
+    yaml_temporary = yaml_path.with_suffix(".yaml.tmp")
+    yaml_temporary.write_text(yaml_text, encoding="utf-8")
+    os.replace(yaml_temporary, yaml_path)
+    metadata = {
+        "schema": "gogoguard.static_navigation_map.v1",
+        "frame": "map",
+        "width": width,
+        "height": height,
+        "resolutionM": resolution,
+        "origin": [minimum_x, minimum_y, 0.0],
+        "obstacleMinZ": value["navigationSurface"]["obstacleMinZ"],
+        "obstacleMaxZ": value["navigationSurface"]["obstacleMaxZ"],
+        "automaticCellCount": surface["stats"]["automaticCellCount"],
+        "occupiedCellCount": surface["stats"]["occupiedCellCount"],
+        "workspaceHash": value["workspaceHash"],
+    }
+    _atomic_json(output_root / "navigation-map.json", metadata)
+    return pgm_path, yaml_path, metadata
+
+
+def plan_navigation_preview(
+    workspace: dict[str, Any],
+    map_points: Iterable[Sequence[Any]],
+    start: Sequence[Any],
+    goal: Sequence[Any],
+) -> dict[str, Any]:
+    """Check static-map connectivity with the same body-radius assumption as Nav2."""
+
+    value = validate_workspace(workspace)
+    if value["allowedArea"] is None:
+        raise NavigationWorkspaceError(
+            "draw the green allowed area before previewing a route"
+        )
+    start_xy = _point(start, "start")
+    goal_xy = _point(goal, "goal")
+    polygon = [(point[0], point[1]) for point in value["allowedArea"]]
+    for label, point in (("start", start_xy), ("goal", goal_xy)):
+        if not _point_in_polygon(point, polygon):
+            raise NavigationWorkspaceError(f"preview {label} is outside the green area")
+    surface = navigation_surface_cells(value, map_points)
+    resolution = float(surface["resolutionM"])
+    occupied = {tuple(cell) for cell in surface["occupiedCells"]}
+    radius_cells = int(math.ceil(float(value["robotRadiusM"]) / resolution))
+    inflated: set[tuple[int, int]] = set()
+    for cell_x, cell_y in occupied:
+        for dx in range(-radius_cells, radius_cells + 1):
+            for dy in range(-radius_cells, radius_cells + 1):
+                if math.hypot(dx, dy) * resolution <= value["robotRadiusM"]:
+                    inflated.add((cell_x + dx, cell_y + dy))
+    minimum_x = min(point[0] for point in polygon)
+    maximum_x = max(point[0] for point in polygon)
+    minimum_y = min(point[1] for point in polygon)
+    maximum_y = max(point[1] for point in polygon)
+    min_cell = _surface_cell(minimum_x, minimum_y, resolution)
+    max_cell = _surface_cell(maximum_x, maximum_y, resolution)
+    start_cell = _surface_cell(*start_xy, resolution)
+    goal_cell = _surface_cell(*goal_xy, resolution)
+
+    def traversable(cell: tuple[int, int]) -> bool:
+        if cell in inflated:
+            return False
+        world = ((cell[0] + 0.5) * resolution, (cell[1] + 0.5) * resolution)
+        return (
+            min_cell[0] <= cell[0] <= max_cell[0]
+            and min_cell[1] <= cell[1] <= max_cell[1]
+            and _point_in_polygon(world, polygon)
+            and _distance_to_boundary(world, polygon) + 1.0e-6
+            >= value["robotRadiusM"]
+        )
+
+    if not traversable(start_cell) or not traversable(goal_cell):
+        raise NavigationWorkspaceError(
+            "preview start or goal has no room for the robot's 0.48m body"
+        )
+    import heapq
+
+    frontier: list[tuple[float, float, tuple[int, int]]] = []
+    heapq.heappush(frontier, (0.0, 0.0, start_cell))
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {start_cell: None}
+    cost = {start_cell: 0.0}
+    visited = 0
+    while frontier:
+        _priority, current_cost, current = heapq.heappop(frontier)
+        if current_cost > cost.get(current, math.inf) + 1.0e-9:
+            continue
+        visited += 1
+        if current == goal_cell:
+            break
+        for dx, dy in (
+            (-1, 0), (1, 0), (0, -1), (0, 1),
+            (-1, -1), (-1, 1), (1, -1), (1, 1),
+        ):
+            neighbor = (current[0] + dx, current[1] + dy)
+            if not traversable(neighbor):
+                continue
+            if dx and dy and (
+                not traversable((current[0] + dx, current[1]))
+                or not traversable((current[0], current[1] + dy))
+            ):
+                continue
+            next_cost = current_cost + (math.sqrt(2.0) if dx and dy else 1.0)
+            if next_cost + 1.0e-9 >= cost.get(neighbor, math.inf):
+                continue
+            cost[neighbor] = next_cost
+            parent[neighbor] = current
+            heuristic = math.hypot(goal_cell[0] - neighbor[0], goal_cell[1] - neighbor[1])
+            heapq.heappush(frontier, (next_cost + heuristic, next_cost, neighbor))
+    if goal_cell not in parent:
+        return {
+            "schema": "gogoguard.navigation_plan_preview.v1",
+            "reachable": False,
+            "reason": "STATIC_MAP_DISCONNECTED",
+            "path": [],
+            "visitedCellCount": visited,
+        }
+    cells = []
+    current: tuple[int, int] | None = goal_cell
+    while current is not None:
+        cells.append(current)
+        current = parent[current]
+    cells.reverse()
+    # The preview is for human review, not controller input. Keep corners and
+    # every tenth cell so a long result stays legible and bounded in the UI.
+    reduced: list[tuple[int, int]] = []
+    previous_direction = None
+    for index, cell in enumerate(cells):
+        direction = None if index == 0 else (
+            cell[0] - cells[index - 1][0], cell[1] - cells[index - 1][1]
+        )
+        if index in {0, len(cells) - 1} or direction != previous_direction or index % 10 == 0:
+            reduced.append(cell)
+        previous_direction = direction
+    path = [[start_xy[0], start_xy[1]]]
+    path.extend([[(cell[0] + 0.5) * resolution, (cell[1] + 0.5) * resolution] for cell in reduced[1:-1]])
+    path.append([goal_xy[0], goal_xy[1]])
+    return {
+        "schema": "gogoguard.navigation_plan_preview.v1",
+        "reachable": True,
+        "reason": "OK",
+        "path": path,
+        "lengthM": round(cost[goal_cell] * resolution, 3),
+        "visitedCellCount": visited,
+        "note": "编辑器连通性预演；狗端正式路径由 Nav2 SmacPlanner2D 计算",
+    }
 
 
 def write_keepout_mask(

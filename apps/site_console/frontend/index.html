@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GoGoGuard 现场交付工作台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260812-gimbal1">
+  <link rel="stylesheet" href="/styles.css?v=20260812-navmap2">
 </head>
 <body>
   <header><div><small>GOGOGUARD · FIELD WORKSTATION</small><h1>现场交付工作台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
@@ -44,31 +44,45 @@
     </section>
     <section class="map-workbench">
       <article class="panel map-workbench-canvas-panel">
-        <div class="panel-title"><div><span>巡检地图工作台</span><small>灰色是地图，蓝色是要走的路，绿色是允许进入的范围</small></div><b id="workspaceBadge">请先选地图</b></div>
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>绿色可走·红色固定障碍·蓝色录制路线·紫色规划预演</small></div><b id="workspaceBadge">请先选地图</b></div>
         <canvas id="workspaceMap"></canvas>
-        <div class="workspace-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>巡检路线</span><span><i class="allowed-area-swatch"></i>允许范围</span></div>
+        <div class="workspace-legend"><span><i class="map-dot"></i>点云</span><span><i class="obstacle-swatch"></i>固定障碍</span><span><i class="route-line"></i>录制路线</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
       </article>
       <article class="panel map-workbench-controls">
-        <div class="panel-title"><div><span>准备巡检材料</span><small>只需要确认一条路线和一块允许范围</small></div></div>
-        <div class="workbench-explanation">地图上偶然的人和车由 3D 清理工具处理。这里不再叠加多套“安全形状”，绿色边界是唯一的业务禁入线，机器狗自身半径为 0.48 m。</div>
+        <div class="panel-title"><div><span>准备巡检材料</span><small>日常只做三件事：选地图、画绿圈、预演并保存</small></div></div>
+        <div class="workbench-explanation"><b>最简单用法</b><span>1. 左边历史里选地图　2. 红色大致是墙和柱子就别改　3. 画绿色可走外圈　4. 点“预演自动路线”，能到就保存。</span><small>这里编辑的是“狗哪里能走”，不会改坏用于定位的原始 PCD 点云。</small></div>
         <div class="glim-editor-actions">
-          <strong>1. 需要时先清理 3D 地图</strong>
+          <strong>1. 可选：清掉建图时的临时人车</strong>
           <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
           <div><button id="publishGlimEditor" hidden>已保存，生成新地图版本</button><button id="stopGlimEditor" class="secondary" hidden>关闭清图会话</button></div>
           <small id="glimEditorState">需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。</small>
         </div>
-        <strong class="workspace-step-title">2. 确认蓝色路线和绿色允许范围</strong>
+        <div class="navigation-surface-editor">
+          <strong>2. 确认红色固定障碍</strong>
+          <div class="surface-preset-actions"><button id="indoorSurfacePreset" class="secondary">自动隐藏屋顶（推荐）</button><button id="outdoorSurfacePreset" class="secondary">室外高障碍</button></div>
+          <small id="surfaceStats">选择地图后自动识别。红色不对时才需要涂改。</small>
+          <div class="surface-edit-actions"><button id="paintBlocked" class="secondary">刷成固定障碍</button><button id="paintClear" class="secondary">擦掉误判障碍</button><button id="clearSurfaceEdits" class="secondary">清空手动涂改</button></div>
+          <label class="brush-size">刷子大小 <input id="surfaceBrushSize" type="range" min="0.15" max="1.00" step="0.05" value="0.35"><b id="surfaceBrushSizeValue">0.35 m</b></label>
+          <details><summary>识别高度不对时再调</summary><div class="surface-height-fields"><label>从地面上方 <input id="obstacleMinZ" type="number" min="-2" max="4" step="0.05"></label><label>到这个高度 <input id="obstacleMaxZ" type="number" min="-1" max="6" step="0.05"></label></div><small>单位是米。一般不用改；室内默认 0.05 到 1.80，地面和屋顶都不参与导航。</small></details>
+        </div>
+        <strong class="workspace-step-title">3. 画可走外圈，确认录制路线</strong>
         <div class="workbench-actions">
-          <button id="editRoute" class="secondary">重画蓝色巡检路线</button>
+          <button id="editRoute" class="secondary">重画蓝色推荐路线</button>
           <button id="restoreRecordedRoute" class="secondary">恢复录制路线</button>
-          <button id="editAllowedArea" class="secondary">绘制绿色允许范围</button>
-          <button id="undoWorkspacePoint" class="secondary">撤销上一个点</button>
+          <button id="editAllowedArea" class="secondary">绘制绿色可走外圈</button>
+          <button id="undoWorkspacePoint" class="secondary">撤销上一步</button>
           <button id="cancelWorkspaceEdit" class="secondary">取消本次编辑</button>
-          <button id="saveWorkspace">保存路线与允许范围</button>
         </div>
         <div id="workspaceHelp" class="workspace-help">选择已完成的地图后，录制轨迹会自动成为蓝色路线。</div>
+        <div class="plan-preview-editor">
+          <strong>4. 保存前预演能否到达</strong>
+          <small>默认从录制起点走到终点；也可分别点击“选起点/选目标”后在图上取点。</small>
+          <div><button id="selectPlanStart" class="secondary">选起点</button><button id="selectPlanGoal" class="secondary">选目标</button><button id="previewNavigationPlan">预演自动路线</button></div>
+          <small id="planPreviewResult">尚未预演</small>
+        </div>
+        <button id="saveWorkspace" class="save-navigation-map">确认并保存这张导航地图</button>
         <div class="checkpoint-audit">
-          <strong>3. 复核巡检点</strong>
+          <strong>5. 复核巡检点</strong>
           <small id="checkpointAudit">保存路线和绿色区域后，这里会显示录制时标记的点位。</small>
           <div id="checkpointAuditList" class="checkpoint-list"></div>
         </div>
@@ -189,6 +203,6 @@
       </article>
     </section>
   </main>
-  <script src="/app.js?v=20260812-gimbal1"></script>
+  <script src="/app.js?v=20260812-navmap2"></script>
 </body>
 </html>

@@ -11,6 +11,12 @@ const state = {
   savedNavigationWorkspace: null,
   workspaceEditMode: null,
   workspaceTransform: null,
+  navigationSurface: null,
+  surfaceBrushDown: false,
+  surfaceUndo: [],
+  planPreview: null,
+  planStart: null,
+  planGoal: null,
   navigation: null,
   live: null,
   camera: null,
@@ -593,6 +599,13 @@ async function showResult(job, {explicit = false} = {}) {
     `/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/navigation-workspace`,
   );
   try {
+    state.navigationSurface = await api(
+      `/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/navigation-surface`,
+    );
+  } catch (_) {
+    state.navigationSurface = null;
+  }
+  try {
     state.glimEditor = await api(
       `/api/v1/map-jobs/${encodeURIComponent(job.job_id)}/glim-editor`,
     );
@@ -603,6 +616,11 @@ async function showResult(job, {explicit = false} = {}) {
   state.checkpointAudit = null;
   state.platformUpload = null;
   state.workspaceEditMode = null;
+  state.surfaceUndo = [];
+  state.planPreview = null;
+  state.planStart = state.navigationWorkspace?.route?.[0] || null;
+  state.planGoal = state.navigationWorkspace?.route?.at(-1) || null;
+  syncSurfaceControls();
   const mapName = job.label ? `${job.label} · ${job.job_id}` : job.job_id;
   $('resultMeta').textContent = `${mapName} · ${job.metrics?.point_count || state.mapArtifact.points.length} 点 · ${job.metrics?.worker || 'cloud-glim'}`;
   redrawResult();
@@ -662,11 +680,27 @@ function drawWorkspace() {
     context.lineWidth = 3;
     context.stroke();
   }
-  context.fillStyle = '#94a3b87d';
+  const surface = state.navigationWorkspace?.navigationSurface || {};
+  const resolution = Number(surface.resolutionM || 0.10);
+  const maximumZ = Number(surface.obstacleMaxZ ?? 1.80);
+  const occupied = visibleNavigationSurfaceCells(surface);
+  context.fillStyle = '#e11d4899';
+  for (const key of occupied) {
+    const cell = key.split(',').map(Number);
+    const topLeft = worldToCanvas([cell[0] * resolution, (cell[1] + 1) * resolution]);
+    context.fillRect(
+      topLeft[0],
+      topLeft[1],
+      Math.max(1.5, resolution * scale + 0.4),
+      Math.max(1.5, resolution * scale + 0.4),
+    );
+  }
+  context.fillStyle = '#cbd5e171';
   const points = state.mapArtifact?.points || [];
-  for (let index = 0; index < points.length; index += 2) {
+  for (let index = 0; index < points.length; index += 1) {
+    if (Number(points[index][2]) > maximumZ + 0.4) continue;
     const point = worldToCanvas(points[index]);
-    context.fillRect(point[0], point[1], 1.5, 1.5);
+    context.fillRect(point[0], point[1], 1.2, 1.2);
   }
   const route = state.navigationWorkspace?.route || [];
   if (route.length) {
@@ -683,6 +717,29 @@ function drawWorkspace() {
       const value = worldToCanvas(point);
       context.beginPath(); context.arc(value[0], value[1], 3.5, 0, Math.PI * 2); context.fill();
     });
+  }
+  if (state.planPreview?.path?.length) {
+    context.strokeStyle = '#c084fc';
+    context.lineWidth = 4;
+    context.setLineDash([9, 6]);
+    context.beginPath();
+    state.planPreview.path.forEach((point, index) => {
+      const value = worldToCanvas(point);
+      index ? context.lineTo(...value) : context.moveTo(...value);
+    });
+    context.stroke();
+    context.setLineDash([]);
+  }
+  for (const [point, color, label] of [
+    [state.planStart, '#facc15', '起'],
+    [state.planGoal, '#c084fc', '终'],
+  ]) {
+    if (!point) continue;
+    const value = worldToCanvas(point);
+    context.fillStyle = color;
+    context.beginPath(); context.arc(value[0], value[1], 7, 0, Math.PI * 2); context.fill();
+    context.fillStyle = '#07111f'; context.font = 'bold 10px sans-serif';
+    context.fillText(label, value[0] - 5, value[1] + 3.5);
   }
   for (const checkpoint of state.checkpointAudit?.checkpoints || []) {
     const point = checkpoint.position ? [checkpoint.position.x, checkpoint.position.y] : null;
@@ -714,19 +771,33 @@ function renderWorkspaceControls() {
   const editing = Boolean(state.workspaceEditMode);
   $('workspaceBadge').textContent = !workspace
     ? '请先选地图'
-    : workspace.ready ? `可发布 · 版本 ${workspace.revision}` : '等待绿色允许范围';
+    : workspace.ready ? `可发布 · 版本 ${workspace.revision}`
+      : workspace.allowedArea?.length >= 3 ? '等待确认导航地图' : '等待绿色可走外圈';
   $('workspaceBadge').className = workspace?.ready ? 'online' : '';
   $('workspaceHelp').textContent = state.workspaceEditMode === 'route'
-    ? '请在地图上依次点击路线点；机器狗会按蓝线前进，需要时再由 Nav2 绕行。'
+      ? '请在地图上依次点击推荐路线点；蓝线保留巡检顺序，狗端由 Nav2 规划实际可走路径。'
     : state.workspaceEditMode === 'area'
       ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。蓝线与边界至少留出 0.48 m。'
+      : state.workspaceEditMode === 'blocked'
+        ? '按住鼠标在图上涂红：墙、柱子、固定柜子等不允许穿过。'
+        : state.workspaceEditMode === 'clear'
+          ? '按住鼠标擦掉误判的红色；只擦确认是空地的地方。'
+          : state.workspaceEditMode === 'plan-start'
+            ? '在绿色区域里点一下作为预演起点。'
+            : state.workspaceEditMode === 'plan-goal'
+              ? '在绿色区域里点一下作为预演目标。'
       : workspace?.ready
-        ? '已准备好：路线和允许范围会随地图一起发布，任何修改都会生成新版本。'
-        : '蓝色录制路线已就绪；再画一块绿色允许范围即可发布。';
-  for (const id of ['editRoute', 'restoreRecordedRoute', 'editAllowedArea']) $(id).disabled = !workspace || editing;
+        ? '已准备好：静态导航地图、推荐路线和绿色区域会一起发布。'
+        : '先确认红色障碍，再画绿色可走外圈，最后预演和保存。';
+  for (const id of ['editRoute', 'restoreRecordedRoute', 'editAllowedArea', 'indoorSurfacePreset', 'outdoorSurfacePreset', 'paintBlocked', 'paintClear', 'clearSurfaceEdits', 'selectPlanStart', 'selectPlanGoal', 'previewNavigationPlan']) $(id).disabled = !workspace || (editing && !['blocked', 'clear'].includes(state.workspaceEditMode));
   $('undoWorkspacePoint').disabled = !editing;
   $('cancelWorkspaceEdit').disabled = !editing;
   $('saveWorkspace').disabled = !workspace;
+  for (const id of ['paintBlocked', 'paintClear', 'selectPlanStart', 'selectPlanGoal']) $(id).classList.remove('active');
+  if (state.workspaceEditMode === 'blocked') $('paintBlocked').classList.add('active');
+  if (state.workspaceEditMode === 'clear') $('paintClear').classList.add('active');
+  if (state.workspaceEditMode === 'plan-start') $('selectPlanStart').classList.add('active');
+  if (state.workspaceEditMode === 'plan-goal') $('selectPlanGoal').classList.add('active');
   const editor = state.glimEditor || {state: 'not_started'};
   const editorActive = editor.state === 'active';
   $('startGlimEditor').hidden = editorActive;
@@ -886,6 +957,178 @@ function workspaceCanvasPoint(event) {
   ];
 }
 
+function ensureNavigationSurface() {
+  if (!state.navigationWorkspace) return null;
+  if (!state.navigationWorkspace.navigationSurface) {
+    state.navigationWorkspace.navigationSurface = {
+      schema: 'gogoguard.navigation_surface_edit.v1',
+      resolutionM: 0.10,
+      obstacleMinZ: 0.05,
+      obstacleMaxZ: 1.80,
+      manualBlockedCells: [],
+      manualClearCells: [],
+      reviewed: false,
+    };
+  }
+  return state.navigationWorkspace.navigationSurface;
+}
+
+function syncSurfaceControls() {
+  const surface = ensureNavigationSurface();
+  if (!surface) return;
+  $('obstacleMinZ').value = Number(surface.obstacleMinZ ?? 0.05).toFixed(2);
+  $('obstacleMaxZ').value = Number(surface.obstacleMaxZ ?? 1.80).toFixed(2);
+  const automatic = visibleNavigationSurfaceCells(surface);
+  const clear = new Set((surface.manualClearCells || []).map(surfaceCellKey));
+  const blocked = new Set((surface.manualBlockedCells || []).map(surfaceCellKey));
+  $('surfaceStats').textContent = `当前显示 ${automatic.size} 个固定障碍小格 · 手加 ${blocked.size} · 手擦 ${clear.size}。红色基本贴着墙/柱子就可以。`;
+}
+
+function surfaceCellKey(cell) { return `${cell[0]},${cell[1]}`; }
+
+function visibleNavigationSurfaceCells(surface) {
+  const resolution = Number(surface.resolutionM || 0.10);
+  const counts = new Map();
+  for (const point of state.mapArtifact?.points || []) {
+    if (Number(point[2]) < Number(surface.obstacleMinZ) || Number(point[2]) > Number(surface.obstacleMaxZ)) continue;
+    const key = `${Math.floor(Number(point[0]) / resolution)},${Math.floor(Number(point[1]) / resolution)}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const rawKeys = new Set(counts.keys());
+  const occupied = new Set();
+  for (const [key, count] of counts) {
+    const [cellX, cellY] = key.split(',').map(Number);
+    let supported = count >= 2;
+    for (let dx = -1; dx <= 1 && !supported; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        if ((dx || dy) && rawKeys.has(`${cellX + dx},${cellY + dy}`)) { supported = true; break; }
+      }
+    }
+    if (supported) occupied.add(key);
+  }
+  if (state.navigationWorkspace?.routeSource === 'recorded') {
+    const route = state.navigationWorkspace.route || [];
+    const robotRadius = Number(state.navigationWorkspace.robotRadiusM || 0.48);
+    const radiusCells = Math.ceil(robotRadius / resolution);
+    for (let segment = 0; segment + 1 < route.length; segment += 1) {
+      const start = route[segment];
+      const end = route[segment + 1];
+      const steps = Math.max(1, Math.ceil(Math.hypot(end[0] - start[0], end[1] - start[1]) / (resolution / 2)));
+      for (let step = 0; step <= steps; step += 1) {
+        const ratio = step / steps;
+        const center = [
+          Math.floor((start[0] + (end[0] - start[0]) * ratio) / resolution),
+          Math.floor((start[1] + (end[1] - start[1]) * ratio) / resolution),
+        ];
+        for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
+          for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
+            if (Math.hypot(dx, dy) * resolution <= robotRadius) occupied.delete(`${center[0] + dx},${center[1] + dy}`);
+          }
+        }
+      }
+    }
+  }
+  for (const cell of surface.manualClearCells || []) occupied.delete(surfaceCellKey(cell));
+  for (const cell of surface.manualBlockedCells || []) occupied.add(surfaceCellKey(cell));
+  return occupied;
+}
+
+function paintSurfaceAt(point) {
+  const surface = ensureNavigationSurface();
+  if (!surface || !['blocked', 'clear'].includes(state.workspaceEditMode)) return;
+  const resolution = Number(surface.resolutionM || 0.10);
+  const brushRadius = Number($('surfaceBrushSize').value || 0.35) / 2;
+  const center = [Math.floor(point[0] / resolution), Math.floor(point[1] / resolution)];
+  const radiusCells = Math.max(0, Math.ceil(brushRadius / resolution));
+  const blocked = new Map((surface.manualBlockedCells || []).map(cell => [surfaceCellKey(cell), cell]));
+  const clear = new Map((surface.manualClearCells || []).map(cell => [surfaceCellKey(cell), cell]));
+  let changed = false;
+  for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
+    for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
+      if (Math.hypot(dx, dy) * resolution > brushRadius + resolution / 2) continue;
+      const cell = [center[0] + dx, center[1] + dy];
+      const key = surfaceCellKey(cell);
+      if (state.workspaceEditMode === 'blocked') {
+        changed = clear.delete(key) || changed;
+        if (!blocked.has(key)) { blocked.set(key, cell); changed = true; }
+      } else {
+        changed = blocked.delete(key) || changed;
+        if (!clear.has(key)) { clear.set(key, cell); changed = true; }
+      }
+    }
+  }
+  if (!changed) return;
+  surface.manualBlockedCells = [...blocked.values()];
+  surface.manualClearCells = [...clear.values()];
+  surface.reviewed = false;
+  state.planPreview = null;
+  syncSurfaceControls();
+  drawWorkspace();
+}
+
+function snapshotSurfaceUndo() {
+  const surface = ensureNavigationSurface();
+  if (!surface) return;
+  state.surfaceUndo.push({
+    manualBlockedCells: structuredClone(surface.manualBlockedCells || []),
+    manualClearCells: structuredClone(surface.manualClearCells || []),
+  });
+  if (state.surfaceUndo.length > 30) state.surfaceUndo.shift();
+}
+
+function applySurfacePreset(minimumZ, maximumZ) {
+  const surface = ensureNavigationSurface();
+  if (!surface) return;
+  surface.obstacleMinZ = minimumZ;
+  surface.obstacleMaxZ = maximumZ;
+  surface.reviewed = false;
+  state.planPreview = null;
+  syncSurfaceControls();
+  drawWorkspace();
+  renderWorkspaceControls();
+}
+
+async function previewNavigationPlan() {
+  if (!state.latestMapJob || !state.navigationWorkspace) return;
+  const route = state.navigationWorkspace.route || [];
+  state.planStart ||= route[0] || null;
+  state.planGoal ||= route.at(-1) || null;
+  if (!state.planStart || !state.planGoal) {
+    $('planPreviewResult').textContent = '请先确认起点和目标。';
+    return;
+  }
+  $('planPreviewResult').textContent = '正在检查这张导航地图是否连通……';
+  $('previewNavigationPlan').disabled = true;
+  try {
+    const surface = ensureNavigationSurface();
+    const result = await post(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-plan-preview`,
+      {
+        start: state.planStart,
+        goal: state.planGoal,
+        workspace: {
+          route: state.navigationWorkspace.route,
+          allowedArea: state.navigationWorkspace.allowedArea,
+          routeSource: state.navigationWorkspace.routeSource,
+          robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
+          navigationSurface: {...surface, reviewed: false},
+        },
+      },
+    );
+    state.planPreview = result;
+    $('planPreviewResult').textContent = result.reachable
+      ? `可到达 · 预演路线约 ${Number(result.lengthM || 0).toFixed(1)} m。紫色线是编辑器的连通性预演，狗端由 Nav2 重新计算。`
+      : '不可到达：起点和目标之间被绿色边界或红色障碍隔断了。';
+  } catch (error) {
+    state.planPreview = null;
+    $('planPreviewResult').textContent = friendlyError(error);
+  } finally {
+    $('previewNavigationPlan').disabled = false;
+    drawWorkspace();
+    renderWorkspaceControls();
+  }
+}
+
 async function saveNavigationWorkspace() {
   if (!state.latestMapJob || !state.navigationWorkspace) return;
   $('workspaceError').textContent = '';
@@ -896,6 +1139,7 @@ async function saveNavigationWorkspace() {
       allowedArea: state.navigationWorkspace.allowedArea,
       routeSource: state.navigationWorkspace.routeSource,
       robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
+      navigationSurface: {...ensureNavigationSurface(), reviewed: true},
     };
     state.navigationWorkspace = await post(
       `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-workspace`,
@@ -903,7 +1147,11 @@ async function saveNavigationWorkspace() {
     );
     state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
     state.workspaceEditMode = null;
-    $('workspaceHelp').textContent = '已保存；这一版路线和允许范围会与地图绑定。';
+    $('workspaceHelp').textContent = '已保存；这一版静态导航地图、推荐路线和绿色范围已绑定。';
+    state.navigationSurface = await api(
+      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-surface`,
+    );
+    syncSurfaceControls();
     drawWorkspace();
     renderWorkspaceControls();
     await refreshCheckpointAudit();
@@ -1033,7 +1281,7 @@ function renderNavigation() {
     candidate
     && selectedJobId
     && candidate.map_job_id === selectedJobId
-    && candidateGeneration >= 5
+    && candidateGeneration >= 9
     && state.navigationWorkspace?.workspaceHash
     && candidate.workspace_hash === state.navigationWorkspace.workspaceHash
   );
@@ -1504,6 +1752,7 @@ $('editRoute').addEventListener('click', () => {
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
   state.navigationWorkspace.route = [];
   state.navigationWorkspace.routeSource = 'edited';
+  state.planPreview = null;
   state.workspaceEditMode = 'route';
   $('workspaceError').textContent = '';
   drawWorkspace(); renderWorkspaceControls();
@@ -1517,6 +1766,9 @@ $('restoreRecordedRoute').addEventListener('click', () => {
   }
   state.navigationWorkspace.route = route;
   state.navigationWorkspace.routeSource = 'recorded';
+  state.planStart = route[0];
+  state.planGoal = route.at(-1);
+  state.planPreview = null;
   $('workspaceError').textContent = '';
   drawWorkspace(); renderWorkspaceControls();
 });
@@ -1524,12 +1776,26 @@ $('editAllowedArea').addEventListener('click', () => {
   if (!state.navigationWorkspace) return;
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
   state.navigationWorkspace.allowedArea = [];
+  state.planPreview = null;
   state.workspaceEditMode = 'area';
   $('workspaceError').textContent = '';
   drawWorkspace(); renderWorkspaceControls();
 });
 $('undoWorkspacePoint').addEventListener('click', () => {
   if (!state.workspaceEditMode || !state.navigationWorkspace) return;
+  if (['blocked', 'clear'].includes(state.workspaceEditMode)) {
+    const previous = state.surfaceUndo.pop();
+    const surface = ensureNavigationSurface();
+    if (previous && surface) {
+      surface.manualBlockedCells = previous.manualBlockedCells;
+      surface.manualClearCells = previous.manualClearCells;
+      surface.reviewed = false;
+      syncSurfaceControls();
+      drawWorkspace();
+    }
+    return;
+  }
+  if (['plan-start', 'plan-goal'].includes(state.workspaceEditMode)) return;
   const key = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
   state.navigationWorkspace[key].pop();
   drawWorkspace();
@@ -1542,6 +1808,61 @@ $('cancelWorkspaceEdit').addEventListener('click', () => {
   drawWorkspace(); renderWorkspaceControls();
 });
 $('saveWorkspace').addEventListener('click', saveNavigationWorkspace);
+$('indoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 1.80));
+$('outdoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 2.50));
+$('paintBlocked').addEventListener('click', () => {
+  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.workspaceEditMode = 'blocked';
+  $('workspaceError').textContent = '';
+  renderWorkspaceControls();
+});
+$('paintClear').addEventListener('click', () => {
+  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+  state.workspaceEditMode = 'clear';
+  $('workspaceError').textContent = '';
+  renderWorkspaceControls();
+});
+$('clearSurfaceEdits').addEventListener('click', () => {
+  const surface = ensureNavigationSurface();
+  if (!surface) return;
+  snapshotSurfaceUndo();
+  surface.manualBlockedCells = [];
+  surface.manualClearCells = [];
+  surface.reviewed = false;
+  state.planPreview = null;
+  syncSurfaceControls();
+  drawWorkspace();
+});
+$('surfaceBrushSize').addEventListener('input', () => {
+  $('surfaceBrushSizeValue').textContent = `${Number($('surfaceBrushSize').value).toFixed(2)} m`;
+});
+for (const id of ['obstacleMinZ', 'obstacleMaxZ']) $(id).addEventListener('change', () => {
+  const surface = ensureNavigationSurface();
+  if (!surface) return;
+  const minimum = Number($('obstacleMinZ').value);
+  const maximum = Number($('obstacleMaxZ').value);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum >= maximum) {
+    $('workspaceError').textContent = '障碍高度填写不对：起始高度必须小于结束高度。';
+    syncSurfaceControls();
+    return;
+  }
+  surface.obstacleMinZ = minimum;
+  surface.obstacleMaxZ = maximum;
+  surface.reviewed = false;
+  state.planPreview = null;
+  $('workspaceError').textContent = '';
+  syncSurfaceControls();
+  drawWorkspace();
+});
+$('selectPlanStart').addEventListener('click', () => {
+  state.workspaceEditMode = 'plan-start';
+  renderWorkspaceControls();
+});
+$('selectPlanGoal').addEventListener('click', () => {
+  state.workspaceEditMode = 'plan-goal';
+  renderWorkspaceControls();
+});
+$('previewNavigationPlan').addEventListener('click', previewNavigationPlan);
 $('startGlimEditor').addEventListener('click', startGlimEditor);
 $('openGlimEditor').addEventListener('click', openGlimEditor);
 $('publishGlimEditor').addEventListener('click', publishGlimEditor);
@@ -1550,13 +1871,46 @@ $('workspaceMap').addEventListener('click', event => {
   if (!state.workspaceEditMode || !state.navigationWorkspace) return;
   const point = workspaceCanvasPoint(event);
   if (!point) return;
+  if (state.workspaceEditMode === 'plan-start') {
+    state.planStart = point.map(value => Number(value.toFixed(3)));
+    state.planPreview = null;
+    state.workspaceEditMode = null;
+    drawWorkspace(); renderWorkspaceControls();
+    return;
+  }
+  if (state.workspaceEditMode === 'plan-goal') {
+    state.planGoal = point.map(value => Number(value.toFixed(3)));
+    state.planPreview = null;
+    state.workspaceEditMode = null;
+    drawWorkspace(); renderWorkspaceControls();
+    return;
+  }
+  if (['blocked', 'clear'].includes(state.workspaceEditMode)) return;
   const key = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
   const values = state.navigationWorkspace[key];
   const last = values[values.length - 1];
   if (last && Math.hypot(point[0] - last[0], point[1] - last[1]) < 0.02) return;
   values.push(point.map(value => Number(value.toFixed(3))));
+  state.planPreview = null;
   drawWorkspace();
 });
+for (const eventName of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave']) {
+  $('workspaceMap').addEventListener(eventName, event => {
+    if (!['blocked', 'clear'].includes(state.workspaceEditMode)) return;
+    if (eventName === 'pointerdown') {
+      state.surfaceBrushDown = true;
+      snapshotSurfaceUndo();
+      $('workspaceMap').setPointerCapture?.(event.pointerId);
+    } else if (eventName === 'pointerup' || eventName === 'pointercancel' || eventName === 'pointerleave') {
+      state.surfaceBrushDown = false;
+      return;
+    }
+    if (!state.surfaceBrushDown) return;
+    event.preventDefault();
+    const point = workspaceCanvasPoint(event);
+    if (point) paintSurfaceAt(point);
+  });
+}
 async function handleMapClick(event) {
   const row = event.target.closest('[data-map-job]');
   if (!row) return;

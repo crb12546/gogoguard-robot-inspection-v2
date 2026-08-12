@@ -145,6 +145,8 @@ class RuntimeBundle:
     localization_quality: LocalizationQualityProfile
     allowed_area_mask_path: Optional[Path] = None
     allowed_area_mask_image_path: Optional[Path] = None
+    navigation_map_path: Optional[Path] = None
+    navigation_map_image_path: Optional[Path] = None
     calibration_bundle_path: Optional[Path] = None
     calibration_hash: str = ""
     robot_id: str = ""
@@ -721,6 +723,14 @@ def load_runtime_bundle(
         allowed_area_mask_path = None
         allowed_area_mask_image_path = None
     try:
+        navigation_map_path = store.resolve_artifact(version_id, "navigation_map")
+        navigation_map_image_path = store.resolve_artifact(
+            version_id, "navigation_map_image"
+        )
+    except (KeyError, OSError, ValueError):
+        navigation_map_path = None
+        navigation_map_image_path = None
+    try:
         calibration_payload = json.loads(calibration_path.read_text(encoding="utf-8"))
         calibration = ReleaseCalibrationBundle.from_dict(calibration_payload)
     except (OSError, ValueError) as exc:
@@ -757,6 +767,8 @@ def load_runtime_bundle(
         localization_quality=localization_quality,
         allowed_area_mask_path=allowed_area_mask_path,
         allowed_area_mask_image_path=allowed_area_mask_image_path,
+        navigation_map_path=navigation_map_path,
+        navigation_map_image_path=navigation_map_image_path,
         calibration_bundle_path=calibration_path,
         calibration_hash=calibration.digest,
         robot_id=calibration.robot_id,
@@ -773,11 +785,15 @@ def load_candidate_runtime_bundle(
     runtime_profile_path: Path,
     allowed_area_mask_path: Path,
     allowed_area_mask_image_path: Path,
+    navigation_map_path: Path,
+    navigation_map_image_path: Path,
     localization_map_hash: str,
     route_hash: str,
     runtime_profile_hash: str,
     allowed_area_mask_hash: str,
     allowed_area_mask_image_hash: str,
+    navigation_map_hash: str,
+    navigation_map_image_hash: str,
 ) -> RuntimeBundle:
     """Load an unactivated candidate only when all release bindings match."""
     site_id = str(site_id).strip()
@@ -790,11 +806,21 @@ def load_candidate_runtime_bundle(
         Path(runtime_profile_path),
         Path(allowed_area_mask_path),
         Path(allowed_area_mask_image_path),
+        Path(navigation_map_path),
+        Path(navigation_map_image_path),
     ]
     if any(path.is_symlink() or not path.is_file() for path in raw_paths):
         raise RuntimeContractError("CANDIDATE_ARTIFACT_UNAVAILABLE")
     paths = [path.resolve() for path in raw_paths]
-    map_path, route_path, profile_path, mask_path, mask_image_path = paths
+    (
+        map_path,
+        route_path,
+        profile_path,
+        mask_path,
+        mask_image_path,
+        navigation_path,
+        navigation_image_path,
+    ) = paths
     try:
         route_payload = json.loads(route_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -805,6 +831,8 @@ def load_candidate_runtime_bundle(
         "runtimeProfileHash": _sha256_file(profile_path),
         "allowedAreaMaskHash": _sha256_file(mask_path),
         "allowedAreaMaskImageHash": _sha256_file(mask_image_path),
+        "navigationMapHash": _sha256_file(navigation_path),
+        "navigationMapImageHash": _sha256_file(navigation_image_path),
     }
     expected = {
         "localizationMapHash": str(localization_map_hash).strip().lower(),
@@ -812,6 +840,8 @@ def load_candidate_runtime_bundle(
         "runtimeProfileHash": str(runtime_profile_hash).strip().lower(),
         "allowedAreaMaskHash": str(allowed_area_mask_hash).strip().lower(),
         "allowedAreaMaskImageHash": str(allowed_area_mask_image_hash).strip().lower(),
+        "navigationMapHash": str(navigation_map_hash).strip().lower(),
+        "navigationMapImageHash": str(navigation_map_image_hash).strip().lower(),
     }
     for name in actual:
         if len(expected[name]) != 64 or actual[name] != expected[name]:
@@ -832,6 +862,8 @@ def load_candidate_runtime_bundle(
             + actual["runtimeProfileHash"]
             + actual["allowedAreaMaskHash"]
             + actual["allowedAreaMaskImageHash"]
+            + actual["navigationMapHash"]
+            + actual["navigationMapImageHash"]
         ).encode("ascii")
     ).hexdigest()
     return RuntimeBundle(
@@ -850,6 +882,8 @@ def load_candidate_runtime_bundle(
         localization_quality=localization_quality,
         allowed_area_mask_path=mask_path,
         allowed_area_mask_image_path=mask_image_path,
+        navigation_map_path=navigation_path,
+        navigation_map_image_path=navigation_image_path,
     )
 
 

@@ -37,7 +37,9 @@ required = {
         "DETOURING", "REJOINING", "RETRYING", "RECOVERING",
         "SEARCHING_PATH", "activeController",
         "/navigation-workspace", "/glim-editor/start", "/glim-editor/publish",
-        "robotRadiusM", "allowedArea", "candidateGeneration >= 5",
+        "robotRadiusM", "allowedArea", "candidateGeneration >= 9",
+        "/navigation-surface", "/navigation-plan-preview",
+        "visibleNavigationSurfaceCells", "planPreviewResult",
         "candidate.workspace_hash === state.navigationWorkspace.workspaceHash",
         "submitGimbalTarget", "state.gimbalTarget",
     ],
@@ -46,6 +48,7 @@ required = {
         "[hidden]", "@media",
         ".incident-lab", ".incident-views",
         ".map-workbench", ".workspace-legend", ".allowed-area-swatch",
+        ".obstacle-swatch", ".preview-line", ".navigation-surface-editor",
     ],
 }
 for name, needles in required.items():

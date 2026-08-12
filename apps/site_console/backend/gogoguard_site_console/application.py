@@ -12,7 +12,7 @@ from gogoguard_device_io import SnapshotStore, Z1ProGimbal, create_camera_gatewa
 from gogoguard_evidence import DiagnosticProfileStore, EventJournal, IncidentStore
 from gogoguard_map_factory import MapJobManager
 from gogoguard_navigation import NavigationManager, NavigationSupervisorClient
-from gogoguard_route import NavigationWorkspaceStore
+from gogoguard_route import NavigationWorkspaceStore, RouteManager
 from gogoguard_transfer import EdgeArtifactExchange
 
 
@@ -55,6 +55,7 @@ class InspectionApplication:
         )
         self.exchange = EdgeArtifactExchange(data_root)
         self.navigation_workspaces = NavigationWorkspaceStore(data_root)
+        self.routes = RouteManager(data_root, site_id=site_id)
         self.navigation = (
             NavigationSupervisorClient(data_root / "navigation" / "supervisor.sock")
             if mode == "robot"
@@ -316,6 +317,21 @@ class InspectionApplication:
             ready=value["ready"],
         )
         return value
+
+    def navigation_surface_preview(self, job_id: str) -> dict:
+        if self.maps is not None:
+            self.maps.get(job_id)
+        return self.routes.navigation_surface_preview(job_id)
+
+    def navigation_plan_preview(self, job_id: str, payload: dict) -> dict:
+        if self.maps is not None:
+            self.maps.get(job_id)
+        return self.routes.plan_preview(
+            job_id,
+            start=payload.get("start"),
+            goal=payload.get("goal"),
+            workspace=payload.get("workspace"),
+        )
 
     def recording_export(self, session_id: str) -> dict:
         return self.exchange.recording_descriptor(session_id)

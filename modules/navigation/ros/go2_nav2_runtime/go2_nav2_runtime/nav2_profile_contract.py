@@ -182,10 +182,16 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if min(width, height) < 4.0:
         raise Nav2ProfileError("local costmap is too small for a short bypass")
     plugins = local.get("plugins")
-    if plugins != ["obstacle_layer", "inflation_layer"]:
+    if plugins != ["static_layer", "obstacle_layer", "inflation_layer"]:
         raise Nav2ProfileError(
-            "local costmap must use the planar obstacle layer before inflation"
+            "local costmap must use static, live obstacle and inflation layers"
         )
+    local_static = _mapping(local.get("static_layer"), "local static_layer")
+    if (
+        local_static.get("plugin") != "nav2_costmap_2d::StaticLayer"
+        or local_static.get("map_topic") != "/navigation_static_map"
+    ):
+        raise Nav2ProfileError("local MPPI must consume the reviewed static map")
     if local.get("filters") != ["keepout_filter"]:
         raise Nav2ProfileError("local MPPI must consume the allowed-area mask")
     local_keepout = _mapping(local.get("keepout_filter"), "local keepout_filter")
@@ -222,10 +228,24 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     )
     if not math.isclose(global_radius, robot_radius, rel_tol=0.0, abs_tol=1.0e-9):
         raise Nav2ProfileError("local and global costmaps must share one robot radius")
-    global_width = _positive(global_costmap.get("width"), "global_costmap.width")
-    global_height = _positive(global_costmap.get("height"), "global_costmap.height")
-    if min(global_width, global_height) < 20.0:
-        raise Nav2ProfileError("global costmap is too small to see around a 7m obstacle")
+    if global_costmap.get("rolling_window") is not False:
+        raise Nav2ProfileError(
+            "global planning must use the full reviewed static navigation map"
+        )
+    if global_costmap.get("track_unknown_space") is not True:
+        raise Nav2ProfileError("global planning must not treat unknown space as free")
+    if global_costmap.get("plugins") != [
+        "static_layer", "obstacle_layer", "inflation_layer"
+    ]:
+        raise Nav2ProfileError(
+            "global planning requires static, live obstacle and inflation layers"
+        )
+    static_layer = _mapping(global_costmap.get("static_layer"), "static_layer")
+    if (
+        static_layer.get("plugin") != "nav2_costmap_2d::StaticLayer"
+        or static_layer.get("map_topic") != "/navigation_static_map"
+    ):
+        raise Nav2ProfileError("global static layer must consume the reviewed map")
     if global_costmap.get("filters") != ["keepout_filter"]:
         raise Nav2ProfileError("global planning must consume the allowed-area mask")
     keepout = _mapping(global_costmap.get("keepout_filter"), "keepout_filter")
@@ -312,8 +332,7 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         "inflationRadiusM": inflation_radius,
         "inflationClearanceEnvelopeM": clearance_envelope,
         "inflationCostScalingFactor": inflation_cost_scaling,
-        "globalCostmapWidthM": global_width,
-        "globalCostmapHeightM": global_height,
+        "globalCostmapSource": "/navigation_static_map",
         "safetyEnvelopeRadiusM": safety_radius,
         "batchSize": batch_size,
         "iterationCount": iteration_count,

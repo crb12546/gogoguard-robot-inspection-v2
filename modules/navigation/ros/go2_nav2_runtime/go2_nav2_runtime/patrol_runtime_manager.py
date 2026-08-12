@@ -137,11 +137,15 @@ class PatrolRuntimeManager(Node):
         self.declare_parameter("candidate.runtime_profile", "")
         self.declare_parameter("candidate.allowed_area_mask", "")
         self.declare_parameter("candidate.allowed_area_mask_image", "")
+        self.declare_parameter("candidate.navigation_map", "")
+        self.declare_parameter("candidate.navigation_map_image", "")
         self.declare_parameter("candidate.localization_map_hash", "")
         self.declare_parameter("candidate.route_hash", "")
         self.declare_parameter("candidate.runtime_profile_hash", "")
         self.declare_parameter("candidate.allowed_area_mask_hash", "")
         self.declare_parameter("candidate.allowed_area_mask_image_hash", "")
+        self.declare_parameter("candidate.navigation_map_hash", "")
+        self.declare_parameter("candidate.navigation_map_image_hash", "")
         self.declare_parameter("follow_path_action", "/follow_path")
         self.declare_parameter("compute_path_action", "/compute_path_to_pose")
         self.declare_parameter("localization_status_topic", "/localization/status")
@@ -221,6 +225,8 @@ class PatrolRuntimeManager(Node):
                     "runtime_profile": self.bundle.runtime_profile_path,
                     "allowed_area_mask": self.bundle.allowed_area_mask_path,
                     "allowed_area_mask_image": self.bundle.allowed_area_mask_image_path,
+                    "navigation_map": self.bundle.navigation_map_path,
+                    "navigation_map_image": self.bundle.navigation_map_image_path,
                     "calibration_bundle": self.bundle.calibration_bundle_path,
                 }
             )
@@ -239,6 +245,12 @@ class PatrolRuntimeManager(Node):
                 "allowed_area_mask_image": self.get_parameter(
                     "candidate.allowed_area_mask_image"
                 ).value,
+                "navigation_map": self.get_parameter(
+                    "candidate.navigation_map"
+                ).value,
+                "navigation_map_image": self.get_parameter(
+                    "candidate.navigation_map_image"
+                ).value,
             }
             self.bundle = load_candidate_runtime_bundle(
                 site_id=self.site_id,
@@ -250,6 +262,8 @@ class PatrolRuntimeManager(Node):
                 allowed_area_mask_image_path=candidate_paths[
                     "allowed_area_mask_image"
                 ],
+                navigation_map_path=candidate_paths["navigation_map"],
+                navigation_map_image_path=candidate_paths["navigation_map_image"],
                 localization_map_hash=self.get_parameter(
                     "candidate.localization_map_hash"
                 ).value,
@@ -263,6 +277,12 @@ class PatrolRuntimeManager(Node):
                 allowed_area_mask_image_hash=self.get_parameter(
                     "candidate.allowed_area_mask_image_hash"
                 ).value,
+                navigation_map_hash=self.get_parameter(
+                    "candidate.navigation_map_hash"
+                ).value,
+                navigation_map_image_hash=self.get_parameter(
+                    "candidate.navigation_map_image_hash"
+                ).value,
             )
             self.runtime_guard = RuntimeArtifactGuard.capture(
                 {
@@ -271,6 +291,8 @@ class PatrolRuntimeManager(Node):
                     "runtime_profile": self.bundle.runtime_profile_path,
                     "allowed_area_mask": self.bundle.allowed_area_mask_path,
                     "allowed_area_mask_image": self.bundle.allowed_area_mask_image_path,
+                    "navigation_map": self.bundle.navigation_map_path,
+                    "navigation_map_image": self.bundle.navigation_map_image_path,
                 }
             )
         else:
@@ -512,6 +534,7 @@ class PatrolRuntimeManager(Node):
         self.detour_attempt_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
+        self.planner_completion = ""
         self.active_controller = ControllerMode.MPPI
         self.mppi_retry_count = 0
         self.recovery_pending = ""
@@ -643,7 +666,10 @@ class PatrolRuntimeManager(Node):
         self.pose_frame = message.header.frame_id
         self.pose_received_at = received
         self.motion_evidence.record_pose(received, *self.pose)
-        if self.goal_handle is not None or self.goal_request_pending or self.resume_pending:
+        if (
+            (self.goal_handle is not None or self.goal_request_pending or self.resume_pending)
+            and self.active_controller != ControllerMode.GOAL_MPPI
+        ):
             self.route_progress_index = max(
                 self.route_progress_index, self._nearest_path_index(self.pose[0], self.pose[1])
             )
@@ -815,16 +841,34 @@ class PatrolRuntimeManager(Node):
         """Return only temporally confirmed obstruction evidence."""
         return bool(self.last_route_obstructed)
 
-    def _try_global_replan(self) -> bool:
+    def _try_global_replan(self, *, forced: bool = False) -> bool:
         if (
             self.pose is None
-            or not self._route_obstructed()
+            or (not forced and not self._route_obstructed())
             or not self.planner_client.server_is_ready()
         ):
             return False
-        route_xy, rejoin_index = self._route_and_rejoin(
-            self.planner_rejoin_lookahead_m
-        )
+        if forced:
+            route_xy = [
+                (item.pose.position.x, item.pose.position.y)
+                for item in self.path.poses
+            ]
+            if not route_xy:
+                return False
+            next_checkpoint = (
+                self.mission.checkpoints[self.checkpoints.cursor]
+                if self.checkpoints.cursor < len(self.mission.checkpoints)
+                else None
+            )
+            rejoin_index = (
+                next_checkpoint.route_progress_index
+                if next_checkpoint is not None
+                else len(route_xy) - 1
+            )
+        else:
+            route_xy, rejoin_index = self._route_and_rejoin(
+                self.planner_rejoin_lookahead_m
+            )
         if rejoin_index is None:
             return False
         stamp = self.get_clock().now().to_msg()
@@ -848,8 +892,13 @@ class PatrolRuntimeManager(Node):
         self.goal_request_pending = True
         self.detour_attempt_count += 1
         self.last_rejoin_index = rejoin_index
+        self.planner_completion = "GOAL" if forced else "REJOIN"
         self.runtime_state = "REPLANNING"
-        self.runtime_reason = "NAV2_GLOBAL_PLAN_TO_ROUTE_REJOIN"
+        self.runtime_reason = (
+            "NAV2_GLOBAL_PLAN_TO_PATROL_GOAL"
+            if forced
+            else "NAV2_GLOBAL_PLAN_TO_ROUTE_REJOIN"
+        )
         self._planner_requested_at = time.monotonic()
         try:
             future = self.planner_client.send_goal_async(goal)
@@ -871,7 +920,10 @@ class PatrolRuntimeManager(Node):
             self.last_failure_class = "PLANNER_FAILED"
             if not self.runtime_reason.startswith("NAV2_GLOBAL_PLAN_TRANSPORT"):
                 self.runtime_reason = "NAV2_GLOBAL_PLAN_REJECTED"
-            self._schedule_recovery("DETOUR", self.runtime_reason)
+            self._schedule_recovery(
+                "GOAL" if self.planner_completion == "GOAL" else "DETOUR",
+                self.runtime_reason,
+            )
             return
         self.planner_goal_handle = goal_handle
         if self.stop_requested or self.gate_cancel_reason:
@@ -904,6 +956,7 @@ class PatrolRuntimeManager(Node):
                 "computeMs": self.last_detour_compute_ms,
                 "rejoinRouteIndex": self.last_rejoin_index,
                 "routeObstructed": self._route_obstructed(),
+                "planPurpose": self.planner_completion,
                 "pathPoints": len(path.poses) if path is not None else 0,
             },
             ensure_ascii=False,
@@ -926,7 +979,10 @@ class PatrolRuntimeManager(Node):
             return
         if status != GoalStatus.STATUS_SUCCEEDED or path is None or len(path.poses) < 2:
             self.last_failure_class = "PLANNER_FAILED"
-            self._schedule_recovery("DETOUR", "SEARCHING_FOR_PATH")
+            self._schedule_recovery(
+                "GOAL" if self.planner_completion == "GOAL" else "DETOUR",
+                "SEARCHING_FOR_PATH",
+            )
             return
         now = self.get_clock().now().to_msg()
         path.header.stamp = now
@@ -937,17 +993,32 @@ class PatrolRuntimeManager(Node):
         goal.controller_id = "FollowPath"
         goal.goal_checker_id = "route_goal_checker"
         self.goal_request_pending = True
-        self.active_controller = ControllerMode.DETOUR_MPPI
-        self.runtime_state = "DETOURING"
-        self.runtime_reason = "NAV2_GLOBAL_PATH_USING_MPPI"
+        self.active_controller = (
+            ControllerMode.GOAL_MPPI
+            if self.planner_completion == "GOAL"
+            else ControllerMode.DETOUR_MPPI
+        )
+        self.runtime_state = "PLANNING_TO_GOAL" if self.planner_completion == "GOAL" else "DETOURING"
+        self.runtime_reason = (
+            "NAV2_GLOBAL_PLAN_TO_PATROL_GOAL_USING_MPPI"
+            if self.planner_completion == "GOAL"
+            else "NAV2_GLOBAL_PATH_USING_MPPI"
+        )
         try:
             request = self.action_client.send_goal_async(
                 goal, feedback_callback=self._feedback_callback
             )
         except Exception as exc:
             self.goal_request_pending = False
-            self.runtime_reason = "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
-            self._schedule_recovery("DETOUR", self.runtime_reason)
+            self.runtime_reason = (
+                "NAV2_GOAL_MPPI_TRANSPORT: %s" % exc
+                if self.active_controller == ControllerMode.GOAL_MPPI
+                else "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
+            )
+            self._schedule_recovery(
+                "GOAL" if self.planner_completion == "GOAL" else "DETOUR",
+                self.runtime_reason,
+            )
             return
         request.add_done_callback(self._replan_goal_response_callback)
 
@@ -957,14 +1028,31 @@ class PatrolRuntimeManager(Node):
             goal_handle = future.result()
         except Exception as exc:
             goal_handle = None
-            self.runtime_reason = "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
+            self.runtime_reason = (
+                "NAV2_GOAL_MPPI_TRANSPORT: %s" % exc
+                if self.active_controller == ControllerMode.GOAL_MPPI
+                else "NAV2_DETOUR_MPPI_TRANSPORT: %s" % exc
+            )
         if goal_handle is None or not goal_handle.accepted:
             self.last_failure_class = "CONTROLLER_FAILED"
-            if not self.runtime_reason.startswith("NAV2_DETOUR_MPPI_TRANSPORT"):
-                self.runtime_reason = "NAV2_DETOUR_MPPI_REJECTED"
-            self._schedule_recovery("DETOUR", self.runtime_reason)
+            if "_TRANSPORT:" not in self.runtime_reason:
+                self.runtime_reason = (
+                    "NAV2_GOAL_MPPI_REJECTED"
+                    if self.active_controller == ControllerMode.GOAL_MPPI
+                    else "NAV2_DETOUR_MPPI_REJECTED"
+                )
+            self._schedule_recovery(
+                "GOAL" if self.active_controller == ControllerMode.GOAL_MPPI else "DETOUR",
+                self.runtime_reason,
+            )
             return
         self.goal_handle = goal_handle
+        if (
+            self.active_controller == ControllerMode.GOAL_MPPI
+            and self.active_start_attempt is not None
+            and self.active_start_attempt.goal_decided_at_monotonic is None
+        ):
+            self.active_start_attempt.mark_goal_decision(True, reason="OK")
         if self.stop_requested:
             self.runtime_state = "STOPPING"
             self.runtime_reason = "STOP_REQUESTED"
@@ -972,7 +1060,11 @@ class PatrolRuntimeManager(Node):
             goal_handle.get_result_async().add_done_callback(self._result_callback)
             return
         self.runtime_state = "PATROLLING"
-        self.runtime_reason = "NAV2_DETOUR_MPPI_ACCEPTED"
+        self.runtime_reason = (
+            "NAV2_GOAL_MPPI_ACCEPTED"
+            if self.active_controller == ControllerMode.GOAL_MPPI
+            else "NAV2_DETOUR_MPPI_ACCEPTED"
+        )
         goal_handle.get_result_async().add_done_callback(self._result_callback)
 
     def _request_mppi_suffix(self, reason: str) -> bool:
@@ -1029,7 +1121,7 @@ class PatrolRuntimeManager(Node):
         self.recovery_requested_at = time.monotonic()
         self.recovery_reason = str(reason)
         self._reset_costmap_refresh()
-        if mode == "DETOUR":
+        if mode in {"DETOUR", "GOAL"}:
             self.runtime_state = "SEARCHING_PATH"
             self.runtime_reason = "SEARCHING_FOR_PATH"
         else:
@@ -1289,6 +1381,7 @@ class PatrolRuntimeManager(Node):
         self.detour_attempt_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
+        self.planner_completion = ""
         self.active_controller = ControllerMode.MPPI
         self.mppi_retry_count = 0
         self.recovery_pending = ""
@@ -1304,31 +1397,18 @@ class PatrolRuntimeManager(Node):
             retention_s=max(12.0, self.progress_timeout_s + 2.0)
         )
 
-        now = self.get_clock().now().to_msg()
-        self.path.header.stamp = now
-        for pose in self.path.poses:
-            pose.header.stamp = now
-        goal = FollowPath.Goal()
-        goal.path = self.path
-        goal.controller_id = "FollowPath"
-        goal.goal_checker_id = "route_goal_checker"
         attempt.mark_goal_requested()
         self.active_start_attempt = attempt
         self.last_start_attempt = attempt
         self.goal_request_pending = True
         self.stop_requested = False
         self.runtime_state = "STARTING"
-        self.runtime_reason = "NAV2_GOAL_REQUESTED"
+        self.runtime_reason = "NAV2_GLOBAL_PLAN_REQUESTED"
         self.patrol_started_at = time.monotonic()
-        try:
-            future = self.action_client.send_goal_async(
-                goal,
-                feedback_callback=self._feedback_callback,
-            )
-        except Exception as exc:
+        if not self._try_global_replan(forced=True):
             self.goal_request_pending = False
             self.runtime_state = "FAULT"
-            self.runtime_reason = "NAV2_GOAL_TRANSPORT: %s" % exc
+            self.runtime_reason = "NAV2_INITIAL_GLOBAL_PLAN_UNAVAILABLE"
             attempt.mark_goal_decision(False, reason=self.runtime_reason)
             attempt.mark_service_response(
                 success=False,
@@ -1343,18 +1423,13 @@ class PatrolRuntimeManager(Node):
                 attempt=attempt,
             )
             return response
-        future.add_done_callback(
-            lambda completed, attempt_id=attempt.attempt_id: (
-                self._goal_response_callback(completed, attempt_id)
-            )
-        )
         attempt.mark_service_response(
             success=True,
-            reason="NAV2_GOAL_REQUESTED",
+            reason="NAV2_GLOBAL_PLAN_REQUESTED",
         )
         response.success = True
         response.message = self._response_json(
-            "NAV2_GOAL_REQUESTED",
+            "NAV2_GLOBAL_PLAN_REQUESTED",
             readiness,
             attempt=attempt,
         )
@@ -1412,7 +1487,7 @@ class PatrolRuntimeManager(Node):
 
     def _feedback_callback(self, feedback) -> None:
         self.last_feedback_distance = float(feedback.feedback.distance_to_goal)
-        if self.pose is not None:
+        if self.pose is not None and self.active_controller != ControllerMode.GOAL_MPPI:
             self.route_progress_index = max(
                 self.route_progress_index,
                 self._nearest_path_index(self.pose[0], self.pose[1]),
@@ -1452,6 +1527,15 @@ class PatrolRuntimeManager(Node):
             }
         self.goal_handle = None
         self.goal_request_pending = False
+        if (
+            completed_controller == ControllerMode.GOAL_MPPI
+            and status == GoalStatus.STATUS_SUCCEEDED
+            and self.last_rejoin_index is not None
+        ):
+            self.route_progress_index = max(
+                self.route_progress_index, self.last_rejoin_index
+            )
+            self.checkpoints.observe_progress(self.route_progress_index)
         if self.checkpoints.phase == "PAUSING":
             self.checkpoints.route_goal_cancelled()
             self.runtime_state = "CHECKPOINT_SETTLING"
@@ -1486,6 +1570,17 @@ class PatrolRuntimeManager(Node):
                     )
                 self.mppi_retry_count = 0
                 self._request_mppi_suffix("DETOUR_REJOINED_RESUMING_ROUTE")
+                return
+            if success_action == ControllerSuccessAction.COMPLETE_PLANNED_GOAL:
+                # A planned checkpoint goal is handled by the PAUSING branch
+                # above. Reaching the last goal with no checkpoint completes
+                # the mission without replaying the recorded polyline.
+                self.runtime_state = "COMPLETED"
+                self.runtime_reason = "ROUTE_COMPLETE"
+                attempt_outcome = "COMPLETED"
+                self._finish_active_start_attempt(
+                    attempt_outcome, self.runtime_reason
+                )
                 return
             self.runtime_state = "COMPLETED"
             self.runtime_reason = "ROUTE_COMPLETE"
@@ -1534,12 +1629,18 @@ class PatrolRuntimeManager(Node):
                 self._schedule_recovery("MPPI", decision.reason)
                 return
             if decision.action == RecoveryAction.START_DETOUR:
+                if completed_controller == ControllerMode.GOAL_MPPI:
+                    self._schedule_recovery("GOAL", "SEARCHING_FOR_PATH")
+                    return
                 if self._try_global_replan():
                     return
                 self._schedule_recovery("DETOUR", "SEARCHING_FOR_PATH")
                 return
             if decision.action == RecoveryAction.SEARCH_PATH:
-                self._schedule_recovery("DETOUR", decision.reason)
+                self._schedule_recovery(
+                    "GOAL" if completed_controller == ControllerMode.GOAL_MPPI else "DETOUR",
+                    decision.reason,
+                )
                 return
             self._schedule_recovery("MPPI", decision.reason)
             return
@@ -1976,6 +2077,14 @@ class PatrolRuntimeManager(Node):
     def _request_resume(self) -> None:
         if self.goal_handle is not None or self.goal_request_pending:
             return
+        if self.bundle.navigation_map_path is not None:
+            self.resume_pending = False
+            if not self._try_global_replan(forced=True):
+                self.resume_pending = True
+                self.localization_recovered_at = None
+                self.runtime_state = "HOLDING"
+                self.runtime_reason = "NAV2_NEXT_GOAL_PLAN_WAITING"
+            return
         resume_path = self._remaining_path()
         if len(resume_path.poses) < 2:
             self.resume_pending = False
@@ -2119,7 +2228,7 @@ class PatrolRuntimeManager(Node):
                 if gate.reason in RECOVERABLE_RUNTIME_GATES:
                     self.runtime_state = (
                         "SEARCHING_PATH"
-                        if self.recovery_pending == "DETOUR"
+                        if self.recovery_pending in {"DETOUR", "GOAL"}
                         else "RECOVERING"
                     )
                     self.runtime_reason = gate.reason
@@ -2135,7 +2244,13 @@ class PatrolRuntimeManager(Node):
             ):
                 mode = self.recovery_pending
                 reason = self.recovery_reason or "TRANSIENT_CONTROL_RETRY"
-                if mode == "DETOUR":
+                if mode == "GOAL":
+                    self.recovery_pending = ""
+                    self.recovery_requested_at = None
+                    self.recovery_reason = ""
+                    if not self._try_global_replan(forced=True):
+                        self._schedule_recovery("GOAL", "SEARCHING_FOR_PATH")
+                elif mode == "DETOUR":
                     if not self._route_obstructed():
                         self._schedule_recovery(
                             "MPPI", "OBSTRUCTION_CLEARED_RESUMING_ROUTE"

@@ -223,6 +223,19 @@ class FieldWorkstationApplication:
         )
         return value
 
+    def navigation_surface_preview(self, job_id: str) -> dict:
+        self.maps.get(job_id)
+        return self.routes.navigation_surface_preview(job_id)
+
+    def navigation_plan_preview(self, job_id: str, payload: dict) -> dict:
+        self.maps.get(job_id)
+        return self.routes.plan_preview(
+            job_id,
+            start=payload.get("start"),
+            goal=payload.get("goal"),
+            workspace=payload.get("workspace"),
+        )
+
     def glim_editor_status(self, job_id: str) -> dict:
         return self.glim_editor.status(job_id)
 

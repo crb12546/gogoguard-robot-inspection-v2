@@ -109,6 +109,12 @@ def _runtime_nodes(context):
             "candidate.allowed_area_mask_image": LaunchConfiguration(
                 "candidate_allowed_area_mask_image"
             ).perform(context).strip(),
+            "candidate.navigation_map": LaunchConfiguration(
+                "candidate_navigation_map"
+            ).perform(context).strip(),
+            "candidate.navigation_map_image": LaunchConfiguration(
+                "candidate_navigation_map_image"
+            ).perform(context).strip(),
             "candidate.localization_map_hash": LaunchConfiguration(
                 "localization_map_hash"
             ).perform(context).strip(),
@@ -122,6 +128,12 @@ def _runtime_nodes(context):
             "candidate.allowed_area_mask_image_hash": LaunchConfiguration(
                 "allowed_area_mask_image_hash"
             ).perform(context).strip(),
+            "candidate.navigation_map_hash": LaunchConfiguration(
+                "navigation_map_hash"
+            ).perform(context).strip(),
+            "candidate.navigation_map_image_hash": LaunchConfiguration(
+                "navigation_map_image_hash"
+            ).perform(context).strip(),
         }
         bundle = load_candidate_runtime_bundle(
             site_id=site_id,
@@ -133,6 +145,10 @@ def _runtime_nodes(context):
             allowed_area_mask_image_path=candidate_parameters[
                 "candidate.allowed_area_mask_image"
             ],
+            navigation_map_path=candidate_parameters["candidate.navigation_map"],
+            navigation_map_image_path=candidate_parameters[
+                "candidate.navigation_map_image"
+            ],
             localization_map_hash=candidate_parameters["candidate.localization_map_hash"],
             route_hash=candidate_parameters["candidate.route_hash"],
             runtime_profile_hash=candidate_parameters["candidate.runtime_profile_hash"],
@@ -141,6 +157,12 @@ def _runtime_nodes(context):
             ],
             allowed_area_mask_image_hash=candidate_parameters[
                 "candidate.allowed_area_mask_image_hash"
+            ],
+            navigation_map_hash=candidate_parameters[
+                "candidate.navigation_map_hash"
+            ],
+            navigation_map_image_hash=candidate_parameters[
+                "candidate.navigation_map_image_hash"
             ],
         )
     else:
@@ -152,6 +174,8 @@ def _runtime_nodes(context):
     validate_nav2_profile(Path(nav2_config))
     if bundle.allowed_area_mask_path is None:
         raise RuntimeError("runtime has no versioned allowed-area mask")
+    if bundle.navigation_map_path is None:
+        raise RuntimeError("runtime has no reviewed static navigation map")
     localization_config = str(
         map_manager_share / "config" / "continuous_map_localizer.yaml"
     )
@@ -412,6 +436,22 @@ def _runtime_nodes(context):
         Node(
             package="nav2_map_server",
             executable="map_server",
+            name="navigation_map_server",
+            output="screen",
+            respawn=True,
+            respawn_delay=2.0,
+            parameters=[
+                nav2_config,
+                {
+                    "yaml_filename": str(bundle.navigation_map_path),
+                    "use_sim_time": use_sim_time,
+                },
+            ],
+            remappings=common_tf_remaps + [("map", "/navigation_static_map")],
+        ),
+        Node(
+            package="nav2_map_server",
+            executable="map_server",
             name="allowed_area_mask_server",
             output="screen",
             respawn=True,
@@ -531,6 +571,7 @@ def _runtime_nodes(context):
                     "attempt_respawn_reconnection": True,
                     "use_sim_time": use_sim_time,
                     "node_names": [
+                        "navigation_map_server",
                         "allowed_area_mask_server",
                         "allowed_area_filter_info_server",
                         "planner_server",
@@ -687,11 +728,15 @@ def generate_launch_description():
             DeclareLaunchArgument("candidate_runtime_profile", default_value=""),
             DeclareLaunchArgument("candidate_allowed_area_mask", default_value=""),
             DeclareLaunchArgument("candidate_allowed_area_mask_image", default_value=""),
+            DeclareLaunchArgument("candidate_navigation_map", default_value=""),
+            DeclareLaunchArgument("candidate_navigation_map_image", default_value=""),
             DeclareLaunchArgument("localization_map_hash", default_value=""),
             DeclareLaunchArgument("route_hash", default_value=""),
             DeclareLaunchArgument("runtime_profile_hash", default_value=""),
             DeclareLaunchArgument("allowed_area_mask_hash", default_value=""),
             DeclareLaunchArgument("allowed_area_mask_image_hash", default_value=""),
+            DeclareLaunchArgument("navigation_map_hash", default_value=""),
+            DeclareLaunchArgument("navigation_map_image_hash", default_value=""),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("hardware_output_enabled", default_value="true"),
             DeclareLaunchArgument("sdk_receiver_enabled", default_value="true"),

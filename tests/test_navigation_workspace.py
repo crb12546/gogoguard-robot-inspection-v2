@@ -1,6 +1,11 @@
 import unittest
 
-from gogoguard_route import NavigationWorkspaceError, validate_workspace
+from gogoguard_route import (
+    NavigationWorkspaceError,
+    navigation_surface_cells,
+    plan_navigation_preview,
+    validate_workspace,
+)
 
 
 class NavigationWorkspaceTest(unittest.TestCase):
@@ -35,6 +40,76 @@ class NavigationWorkspaceTest(unittest.TestCase):
         value["allowedArea"] = [[-1.0, -1.0], [2.0, 1.0], [-1.0, 1.0], [2.0, -1.0]]
         with self.assertRaisesRegex(NavigationWorkspaceError, "crosses itself"):
             validate_workspace(value)
+
+    def test_new_surface_requires_explicit_review_but_v1_workspace_migrates(self):
+        fresh = self.value()
+        fresh["navigationSurface"] = {
+            "reviewed": False,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+        }
+        with self.assertRaisesRegex(NavigationWorkspaceError, "static navigation map"):
+            validate_workspace(fresh, require_ready=True)
+
+        migrated = validate_workspace(self.value(), require_ready=True)
+        self.assertTrue(migrated["navigationSurface"]["reviewed"])
+
+    def test_manual_surface_edits_override_height_slice(self):
+        value = self.value()
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [[5, 5]],
+            "manualClearCells": [[1, 0]],
+            "reviewed": True,
+        }
+        preview = navigation_surface_cells(
+            value,
+            [[0.15, 0.05, 1.0], [0.25, 0.05, 2.5]],
+        )
+        self.assertNotIn([1, 0], preview["occupiedCells"])
+        self.assertIn([5, 5], preview["occupiedCells"])
+
+    def test_surface_aggregation_drops_isolated_return_but_keeps_wall_cluster(self):
+        value = self.value()
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+            "reviewed": True,
+        }
+        preview = navigation_surface_cells(
+            value,
+            [
+                [0.15, 0.55, 1.0],  # isolated return
+                [0.75, 0.55, 1.0],
+                [0.85, 0.55, 1.0],  # adjacent cells: coherent obstacle
+            ],
+        )
+        self.assertNotIn([1, 5], preview["occupiedCells"])
+        self.assertIn([7, 5], preview["occupiedCells"])
+        self.assertIn([8, 5], preview["occupiedCells"])
+        self.assertEqual(preview["stats"]["rejectedIsolatedCellCount"], 1)
+
+    def test_preview_routes_around_static_obstacle(self):
+        value = self.value()
+        value["allowedArea"] = [[-1, -1], [4, -1], [4, 3], [-1, 3]]
+        value["route"] = [[0, 0], [3, 0]]
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+            "reviewed": True,
+        }
+        wall = [[1.5, y / 10, 1.0] for y in range(-10, 11)]
+        result = plan_navigation_preview(value, wall, [0, 0], [3, 0])
+        self.assertTrue(result["reachable"])
+        self.assertGreater(result["lengthM"], 3.0)
 
 
 if __name__ == "__main__":

@@ -168,11 +168,15 @@ class NavigationSupervisorTest(unittest.TestCase):
             "runtime_profile": "/tmp/runtime.json",
             "allowed_area_mask": "/tmp/mask.yaml",
             "allowed_area_mask_image": "/tmp/mask.pgm",
+            "navigation_map": "/tmp/navigation-map.yaml",
+            "navigation_map_image": "/tmp/navigation-map.pgm",
             "localization_map_hash": "map-hash",
             "route_hash": "route-hash",
             "runtime_profile_hash": "profile-hash",
             "allowed_area_mask_hash": "mask-hash",
             "allowed_area_mask_image_hash": "image-hash",
+            "navigation_map_hash": "navigation-hash",
+            "navigation_map_image_hash": "navigation-image-hash",
         }
         plain = NavigationManager._launch_arguments(
             candidate,

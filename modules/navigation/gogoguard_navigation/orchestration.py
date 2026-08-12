@@ -17,6 +17,7 @@ from typing import Deque, Iterable, Optional, Protocol, Sequence
 class ControllerMode(str, Enum):
     MPPI = "MPPI"
     DETOUR_MPPI = "DETOUR_MPPI"
+    GOAL_MPPI = "GOAL_MPPI"
 
 
 class FailureClass(str, Enum):
@@ -40,6 +41,7 @@ class RecoveryAction(str, Enum):
 class ControllerSuccessAction(str, Enum):
     COMPLETE_ROUTE = "COMPLETE_ROUTE"
     RESUME_MPPI_SUFFIX = "RESUME_MPPI_SUFFIX"
+    COMPLETE_PLANNED_GOAL = "COMPLETE_PLANNED_GOAL"
 
 
 @dataclass(frozen=True)
@@ -159,7 +161,7 @@ def decide_controller_failure(evidence: FailureEvidence) -> FailureDecision:
             RecoveryAction.RETRY_ACTUATION,
             "ACTUATION_RECOVERY",
         )
-    if evidence.controller == ControllerMode.DETOUR_MPPI:
+    if evidence.controller in {ControllerMode.DETOUR_MPPI, ControllerMode.GOAL_MPPI}:
         return FailureDecision(
             FailureClass.CONTROLLER_FAILED,
             RecoveryAction.SEARCH_PATH,
@@ -179,6 +181,8 @@ def controller_success_action(
 
     if controller == ControllerMode.DETOUR_MPPI:
         return ControllerSuccessAction.RESUME_MPPI_SUFFIX
+    if controller == ControllerMode.GOAL_MPPI:
+        return ControllerSuccessAction.COMPLETE_PLANNED_GOAL
     return ControllerSuccessAction.COMPLETE_ROUTE
 
 

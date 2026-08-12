@@ -74,6 +74,17 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                     self.server.application.navigation_workspace(match.group(1)),
                 )
             match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/navigation-surface",
+                path,
+            )
+            if match:
+                return self._json(
+                    200,
+                    self.server.application.navigation_surface_preview(
+                        match.group(1)
+                    ),
+                )
+            match = re.fullmatch(
                 r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/platform-bundle",
                 path,
             )
@@ -213,6 +224,17 @@ class SiteConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(
                     200,
                     self.server.application.update_navigation_workspace(
+                        match.group(1), self._body()
+                    ),
+                )
+            match = re.fullmatch(
+                r"/api/v1/map-jobs/(map-[A-Za-z0-9]{12})/navigation-plan-preview",
+                path,
+            )
+            if match:
+                return self._json(
+                    200,
+                    self.server.application.navigation_plan_preview(
                         match.group(1), self._body()
                     ),
                 )

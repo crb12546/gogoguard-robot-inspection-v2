@@ -98,19 +98,38 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .map-workbench { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); gap: 12px; margin-top: 12px; }
 .map-workbench-canvas-panel { height: 620px; position: relative; overflow: hidden; }
 .map-workbench-canvas-panel canvas { background: #07111f; cursor: crosshair; touch-action: none; }
-.workspace-legend { position: absolute; left: 18px; bottom: 16px; display: flex; gap: 18px; padding: 8px 12px; border-radius: 8px; background: #07111fdd; color: var(--muted); font-size: 12px; }
+.workspace-legend { position: absolute; left: 18px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 12px 18px; padding: 8px 12px; border-radius: 8px; background: #07111fdd; color: var(--muted); font-size: 12px; }
 .workspace-legend span { display: flex; align-items: center; gap: 6px; }
 .allowed-area-swatch { width: 18px; height: 10px; border: 2px solid var(--green); background: #4ade8038; }
+.obstacle-swatch { width: 14px; height: 10px; border: 1px solid #fb7185; background: #e11d48aa; }
+.preview-line { width: 18px; height: 3px; background: #c084fc; }
 .map-workbench-controls { height: 620px; overflow-y: auto; }
-.workbench-explanation { margin: 16px; padding: 13px 14px; border: 1px solid #285577; border-radius: 9px; background: #0b2940; color: #c9e5f5; font-size: 13px; line-height: 1.65; }
+.workbench-explanation { margin: 16px; padding: 13px 14px; display: grid; gap: 5px; border: 1px solid #285577; border-radius: 9px; background: #0b2940; color: #c9e5f5; font-size: 13px; line-height: 1.65; }
+.workbench-explanation b { color: #f8fafc; }
+.workbench-explanation small { color: #9bb9cc; line-height: 1.55; }
 .glim-editor-actions { margin: 0 18px 16px; padding: 13px; display: grid; gap: 9px; border: 1px solid var(--line); border-radius: 9px; background: #091726; }
 .glim-editor-actions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .glim-editor-actions button { width: 100%; margin: 0; padding: 10px; font-size: 12px; }
 .glim-editor-actions small { line-height: 1.55; }
+.navigation-surface-editor, .plan-preview-editor { margin: 0 18px 16px; padding: 13px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 9px; background: #091726; }
+.navigation-surface-editor small, .plan-preview-editor small { line-height: 1.55; }
+.surface-preset-actions, .surface-edit-actions, .plan-preview-editor > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.surface-preset-actions button, .surface-edit-actions button, .plan-preview-editor button { width: 100%; margin: 0; padding: 10px 8px; font-size: 12px; }
+.surface-edit-actions { grid-template-columns: 1fr 1fr 1fr; }
+.plan-preview-editor > div { grid-template-columns: 1fr 1fr 1.35fr; }
+.brush-size { display: grid; grid-template-columns: auto 1fr 58px; gap: 9px; align-items: center; color: var(--muted); font-size: 12px; }
+.brush-size input { width: 100%; }
+.brush-size b { color: var(--cyan); text-align: right; }
+.navigation-surface-editor details { border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); font-size: 12px; }
+.navigation-surface-editor summary { cursor: pointer; }
+.surface-height-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 0; }
+.surface-height-fields label { display: grid; gap: 5px; }
+.surface-height-fields input { width: 100%; padding: 8px; border: 1px solid #31506d; border-radius: 6px; background: #06101c; color: var(--text); }
 .workspace-step-title { display: block; margin: 0 18px 10px; font-size: 13px; }
 .workbench-actions { padding: 0 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .workbench-actions button { width: 100%; margin: 0; padding: 12px 10px; font-size: 13px; }
-.workbench-actions #saveWorkspace { grid-column: span 2; }
+.save-navigation-map { width: calc(100% - 36px); margin: 0 18px; }
+.surface-edit-actions button.active, .plan-preview-editor button.active { border-color: var(--cyan); background: #0e4a60; color: #e6fbff; }
 .workspace-help { margin: 16px 18px 0; padding: 12px; border-left: 3px solid var(--cyan); color: var(--muted); font-size: 12px; line-height: 1.6; background: #071421; }
 .checkpoint-audit { margin: 14px 18px 0; padding: 12px; display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 9px; background: #091726; }
 .checkpoint-audit small { line-height: 1.5; }

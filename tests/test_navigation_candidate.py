@@ -128,7 +128,7 @@ class NavigationCandidateTest(unittest.TestCase):
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 8)
+        self.assertEqual(candidate["candidate_generation"], 9)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -140,6 +140,8 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(len(candidate["workspace_hash"]), 64)
         self.assertTrue(Path(candidate["allowed_area_mask"]).is_file())
         self.assertTrue(Path(candidate["allowed_area_mask_image"]).is_file())
+        self.assertTrue(Path(candidate["navigation_map"]).is_file())
+        self.assertTrue(Path(candidate["navigation_map_image"]).is_file())
         self.assertEqual(
             Path(candidate["allowed_area_mask_image"]).read_bytes()[:2], b"P5"
         )
@@ -164,6 +166,9 @@ class NavigationCandidateTest(unittest.TestCase):
             Path(first["allowed_area_mask"]),
             Path(first["allowed_area_mask_image"]),
             Path(first["allowed_area_mask_metadata"]),
+            Path(first["navigation_map"]),
+            Path(first["navigation_map_image"]),
+            Path(first["navigation_map_metadata"]),
         ]
         before = [(path.stat().st_ino, path.stat().st_mtime_ns) for path in artifacts]
 
@@ -281,6 +286,9 @@ class NavigationCandidateTest(unittest.TestCase):
                 "execution-route.json",
                 "navigation-workspace.json",
                 "allowed-area-mask.json",
+                "navigation-map.yaml",
+                "navigation-map.pgm",
+                "navigation-map.json",
                 "checkpoints.json",
             },
         )

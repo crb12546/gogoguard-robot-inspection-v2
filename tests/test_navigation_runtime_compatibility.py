@@ -358,8 +358,9 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             "plugin: nav2_smac_planner/SmacPlanner2D",
             nav2_config,
         )
-        self.assertIn("width: 24", nav2_config)
-        self.assertIn("height: 24", nav2_config)
+        self.assertIn("rolling_window: false", nav2_config)
+        self.assertIn("track_unknown_space: true", nav2_config)
+        self.assertIn("map_topic: /navigation_static_map", nav2_config)
         self.assertGreaterEqual(nav2_config.count("filters: [keepout_filter]"), 2)
         self.assertIn("plugin: nav2_costmap_2d::KeepoutFilter", nav2_config)
         self.assertIn("robot_radius: 0.48", nav2_config)
@@ -371,7 +372,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertNotIn("FootprintApproach", nav2_config)
         self.assertIn("global_frame: map", nav2_config)
         self.assertIn("always_send_full_costmap: true", nav2_config)
-        self.assertIn("plugins: [obstacle_layer, inflation_layer]", nav2_config)
+        self.assertIn("plugins: [static_layer, obstacle_layer, inflation_layer]", nav2_config)
         self.assertIn("plugin: nav2_costmap_2d::ObstacleLayer", nav2_config)
         self.assertIn("min_obstacle_height: 0.05", nav2_config)
         self.assertIn("min_height: 0.05", nav2_config)
@@ -534,7 +535,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         receiver = Process(None, 999998)
         runtime = Process(1, 999999)
         candidate = {
-            "candidate_generation": 5,
+            "candidate_generation": 9,
             "candidate_id": "map-123456789abc",
             "map_version": "map-123456789abc",
             "localization_map": "/tmp/map.pcd",
@@ -542,11 +543,15 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             "runtime_profile": "/tmp/runtime_profile.json",
             "allowed_area_mask": "/tmp/allowed-area-mask.yaml",
             "allowed_area_mask_image": "/tmp/allowed-area-mask.pgm",
+            "navigation_map": "/tmp/navigation-map.yaml",
+            "navigation_map_image": "/tmp/navigation-map.pgm",
             "localization_map_hash": "a",
             "route_hash": "b",
             "runtime_profile_hash": "c",
             "allowed_area_mask_hash": "d",
             "allowed_area_mask_image_hash": "e",
+            "navigation_map_hash": "f",
+            "navigation_map_image_hash": "g",
         }
 
         class Routes:
@@ -601,7 +606,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         receiver = Process(999998)
         runtime = Process(999999)
         candidate = {
-            "candidate_generation": 5,
+            "candidate_generation": 9,
             "candidate_id": "map-123456789abc",
             "map_version": "map-123456789abc",
             "route_id": "route-r5",
@@ -610,11 +615,15 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             "runtime_profile": "/tmp/runtime_profile.json",
             "allowed_area_mask": "/tmp/allowed-area-mask.yaml",
             "allowed_area_mask_image": "/tmp/allowed-area-mask.pgm",
+            "navigation_map": "/tmp/navigation-map.yaml",
+            "navigation_map_image": "/tmp/navigation-map.pgm",
             "localization_map_hash": "a",
             "route_hash": "b",
             "runtime_profile_hash": "c",
             "allowed_area_mask_hash": "d",
             "allowed_area_mask_image_hash": "e",
+            "navigation_map_hash": "f",
+            "navigation_map_image_hash": "g",
         }
 
         class Routes:

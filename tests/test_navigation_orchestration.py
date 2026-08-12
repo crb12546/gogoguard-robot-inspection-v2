@@ -104,6 +104,10 @@ class NavigationOrchestrationTest(unittest.TestCase):
             controller_success_action(ControllerMode.MPPI),
             ControllerSuccessAction.COMPLETE_ROUTE,
         )
+        self.assertEqual(
+            controller_success_action(ControllerMode.GOAL_MPPI),
+            ControllerSuccessAction.COMPLETE_PLANNED_GOAL,
+        )
 
     def test_map_8dd_incident_is_actuation_stall_not_path_blocked(self):
         decision = decide_controller_failure(
