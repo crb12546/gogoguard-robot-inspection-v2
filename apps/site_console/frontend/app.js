@@ -11,6 +11,9 @@ const state = {
   savedNavigationWorkspace: null,
   workspaceEditMode: null,
   workspaceTransform: null,
+  workspaceView: {zoom: 1, centerX: null, centerY: null, panMode: false, drag: null},
+  workspaceCursorWorld: null,
+  workspaceCloudView: {yaw: 0, pitch: Math.PI / 2, zoom: 18, zoomFactor: 1, centerX: 0, centerY: 0, sliceOnly: false},
   navigationSurface: null,
   surfaceBrushDown: false,
   surfaceUndo: [],
@@ -168,6 +171,15 @@ function project(point, view, width, height) {
   const b = point[0] * sy + point[1] * cy;
   const z = point[2] || 0;
   return [width / 2 + a * view.zoom, height * 0.58 - (b * sp + z * cp) * view.zoom];
+}
+
+function projectCentered(point, view, width, height) {
+  const shifted = [
+    Number(point[0]) - Number(view.centerX || 0),
+    Number(point[1]) - Number(view.centerY || 0),
+    Number(point[2] || 0),
+  ];
+  return project(shifted, view, width, height);
 }
 
 function drawCloud(canvas, points, trajectory, view) {
@@ -616,6 +628,15 @@ async function showResult(job, {explicit = false} = {}) {
   state.checkpointAudit = null;
   state.platformUpload = null;
   state.workspaceEditMode = null;
+  state.workspaceView = {zoom: 1, centerX: null, centerY: null, panMode: false, drag: null};
+  state.workspaceCursorWorld = null;
+  state.workspaceCloudView = {yaw: 0, pitch: Math.PI / 2, zoom: 18, zoomFactor: 1, centerX: null, centerY: null, sliceOnly: false};
+  $('workspacePan').classList.remove('active');
+  $('workspaceMap').classList.remove('pan-mode');
+  $('workspace3dSlice').classList.remove('active');
+  $('workspace3dSlice').textContent = '只看高度层';
+  $('workspace3dReference').classList.remove('expanded');
+  $('workspace3dExpand').textContent = '放大3D';
   state.surfaceUndo = [];
   state.planPreview = null;
   state.planStart = state.navigationWorkspace?.route?.[0] || null;
@@ -645,19 +666,188 @@ function workspaceBounds() {
   return {minX, maxX, minY, maxY};
 }
 
+function workspaceViewBounds() {
+  const source = workspaceBounds();
+  if (!source) return null;
+  const view = state.workspaceView;
+  const spanX = Math.max(source.maxX - source.minX, 1.0);
+  const spanY = Math.max(source.maxY - source.minY, 1.0);
+  if (!Number.isFinite(view.centerX)) view.centerX = (source.minX + source.maxX) / 2;
+  if (!Number.isFinite(view.centerY)) view.centerY = (source.minY + source.maxY) / 2;
+  const zoom = Math.max(1, Math.min(16, Number(view.zoom || 1)));
+  const halfX = spanX / (2 * zoom);
+  const halfY = spanY / (2 * zoom);
+  view.centerX = Math.max(source.minX + halfX, Math.min(source.maxX - halfX, view.centerX));
+  view.centerY = Math.max(source.minY + halfY, Math.min(source.maxY - halfY, view.centerY));
+  return {
+    minX: view.centerX - halfX,
+    maxX: view.centerX + halfX,
+    minY: view.centerY - halfY,
+    maxY: view.centerY + halfY,
+    source,
+    zoom,
+  };
+}
+
+function workspaceWorldToCanvas(point) {
+  const transform = state.workspaceTransform;
+  if (!transform) return null;
+  return [
+    transform.offsetX + (point[0] - transform.bounds.minX) * transform.scale,
+    transform.height - transform.offsetY - (point[1] - transform.bounds.minY) * transform.scale,
+  ];
+}
+
+function updateWorkspaceReadout() {
+  const transform = state.workspaceTransform;
+  const zoom = transform?.bounds?.zoom || state.workspaceView.zoom || 1;
+  $('workspaceZoomLabel').textContent = `${Math.round(zoom * 100)}%`;
+  const cursor = state.workspaceCursorWorld;
+  const brush = Number($('surfaceBrushSize')?.value || 0.35);
+  if (!cursor) {
+    $('workspaceCursor').textContent = `移动鼠标查看坐标 · 刷子 ${brush.toFixed(2)} m`;
+    return;
+  }
+  const nearby = (state.mapArtifact?.points || []).filter(point => Math.hypot(
+    Number(point[0]) - cursor[0], Number(point[1]) - cursor[1],
+  ) <= Math.max(0.18, brush / 2));
+  const heights = nearby.map(point => Number(point[2] || 0)).filter(Number.isFinite);
+  const heightText = heights.length
+    ? `附近 ${heights.length} 点 · 高度 ${Math.min(...heights).toFixed(2)}~${Math.max(...heights).toFixed(2)} m`
+    : '附近没有点云';
+  $('workspaceCursor').textContent = `x ${cursor[0].toFixed(2)} m · y ${cursor[1].toFixed(2)} m · ${heightText} · 刷子 ${brush.toFixed(2)} m`;
+}
+
+function drawWorkspaceScale(context, width, height, scale) {
+  if (!Number.isFinite(scale) || scale <= 0) return;
+  const candidates = [0.25, 0.5, 1, 2, 5, 10, 20];
+  const worldLength = candidates.find(value => value * scale >= 70) || 20;
+  const pixels = worldLength * scale;
+  const startX = 24;
+  const y = height - 58;
+  context.strokeStyle = '#e8f0fa';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(startX, y); context.lineTo(startX + pixels, y);
+  context.moveTo(startX, y - 5); context.lineTo(startX, y + 5);
+  context.moveTo(startX + pixels, y - 5); context.lineTo(startX + pixels, y + 5);
+  context.stroke();
+  context.fillStyle = '#e8f0fa';
+  context.font = '11px sans-serif';
+  context.fillText(`${worldLength} m`, startX, y - 9);
+}
+
+function drawWorkspaceCloud() {
+  const canvas = $('workspaceCloud');
+  const [context, width, height] = sizeCanvas(canvas);
+  context.fillStyle = '#071421';
+  context.fillRect(0, 0, width, height);
+  const points = state.mapArtifact?.points || [];
+  const view = state.workspaceCloudView;
+  const source = workspaceBounds();
+  if (!points.length || !source) return;
+  const visible = workspaceViewBounds();
+  view.centerX = Number(state.workspaceView.centerX ?? (source.minX + source.maxX) / 2);
+  view.centerY = Number(state.workspaceView.centerY ?? (source.minY + source.maxY) / 2);
+  const spanX = Math.max((visible?.maxX || source.maxX) - (visible?.minX || source.minX), 0.5);
+  const spanY = Math.max((visible?.maxY || source.maxY) - (visible?.minY || source.minY), 0.5);
+  view.zoom = Math.max(3, Math.min(220, Math.min(width / spanX, height / spanY) * 0.72 * Number(view.zoomFactor || 1)));
+  const surface = state.navigationWorkspace?.navigationSurface || {};
+  const minimumZ = Number(surface.obstacleMinZ ?? 0.05);
+  const maximumZ = Number(surface.obstacleMaxZ ?? 1.80);
+  for (const point of points) {
+    if (view.sliceOnly && (Number(point[2]) < minimumZ || Number(point[2]) > maximumZ)) continue;
+    const [x, y] = projectCentered(point, view, width, height);
+    if (x < 0 || y < 0 || x > width || y > height) continue;
+    const z = Number(point[2] || 0);
+    context.fillStyle = `hsla(${190 + z * 20},88%,64%,.72)`;
+    context.fillRect(x, y, 1.6, 1.6);
+  }
+  if (state.workspaceCursorWorld) {
+    let samples = points.filter(point => Math.hypot(
+      Number(point[0]) - state.workspaceCursorWorld[0],
+      Number(point[1]) - state.workspaceCursorWorld[1],
+    ) <= 0.28);
+    if (!samples.length) {
+      let nearest = null;
+      let nearestDistance = Infinity;
+      for (const point of points) {
+        const distance = Math.hypot(
+          Number(point[0]) - state.workspaceCursorWorld[0],
+          Number(point[1]) - state.workspaceCursorWorld[1],
+        );
+        if (distance < nearestDistance) { nearest = point; nearestDistance = distance; }
+      }
+      if (nearest) samples = [nearest];
+    }
+    const heights = samples.map(point => Number(point[2] || 0)).filter(Number.isFinite);
+    const lowZ = heights.length ? Math.min(...heights) : 0;
+    const highZ = heights.length ? Math.max(...heights) : 1.8;
+    const centerZ = (lowZ + highZ) / 2;
+    const low = projectCentered([state.workspaceCursorWorld[0], state.workspaceCursorWorld[1], lowZ], view, width, height);
+    const high = projectCentered([state.workspaceCursorWorld[0], state.workspaceCursorWorld[1], highZ], view, width, height);
+    const [x, y] = projectCentered([state.workspaceCursorWorld[0], state.workspaceCursorWorld[1], centerZ], view, width, height);
+    context.strokeStyle = '#facc15'; context.lineWidth = 3;
+    context.beginPath(); context.moveTo(...low); context.lineTo(...high); context.stroke();
+    context.beginPath(); context.arc(x, y, 10, 0, Math.PI * 2); context.stroke();
+  }
+}
+
+function setWorkspaceView(bounds, zoom = 1) {
+  if (!bounds) return;
+  state.workspaceView.centerX = (bounds.minX + bounds.maxX) / 2;
+  state.workspaceView.centerY = (bounds.minY + bounds.maxY) / 2;
+  const source = workspaceBounds();
+  const sourceSpanX = Math.max((source?.maxX || 1) - (source?.minX || 0), 1);
+  const sourceSpanY = Math.max((source?.maxY || 1) - (source?.minY || 0), 1);
+  const wantedSpanX = Math.max(bounds.maxX - bounds.minX, 0.5);
+  const wantedSpanY = Math.max(bounds.maxY - bounds.minY, 0.5);
+  state.workspaceView.zoom = Math.max(1, Math.min(16, zoom * Math.min(
+    sourceSpanX / wantedSpanX,
+    sourceSpanY / wantedSpanY,
+  )));
+  drawWorkspace();
+}
+
+function zoomWorkspace(factor, anchor = state.workspaceCursorWorld) {
+  const previousTransform = state.workspaceTransform;
+  const anchorCanvas = anchor && previousTransform ? workspaceWorldToCanvas(anchor) : null;
+  const previous = Number(state.workspaceView.zoom || 1);
+  state.workspaceView.zoom = Math.max(1, Math.min(16, previous * factor));
+  if (anchor && anchorCanvas && previousTransform) {
+    const nextBounds = workspaceViewBounds();
+    const canvas = $('workspaceMap');
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    const padding = 42;
+    const spanX = Math.max(nextBounds.maxX - nextBounds.minX, 0.1);
+    const spanY = Math.max(nextBounds.maxY - nextBounds.minY, 0.1);
+    const nextScale = Math.min((width - 2 * padding) / spanX, (height - 2 * padding) / spanY);
+    const nextOffsetX = (width - spanX * nextScale) / 2;
+    const nextOffsetY = (height - spanY * nextScale) / 2;
+    const worldAtAnchorCanvas = [
+      nextBounds.minX + (anchorCanvas[0] - nextOffsetX) / nextScale,
+      nextBounds.minY + (height - nextOffsetY - anchorCanvas[1]) / nextScale,
+    ];
+    state.workspaceView.centerX += anchor[0] - worldAtAnchorCanvas[0];
+    state.workspaceView.centerY += anchor[1] - worldAtAnchorCanvas[1];
+  }
+  drawWorkspace();
+}
+
 function drawWorkspace() {
   const canvas = $('workspaceMap');
   const [context, width, height] = sizeCanvas(canvas);
   context.fillStyle = '#07111f';
   context.fillRect(0, 0, width, height);
-  const bounds = workspaceBounds();
+  const bounds = workspaceViewBounds();
   if (!bounds) {
     state.workspaceTransform = null;
     return;
   }
   const padding = 42;
-  const spanX = Math.max(bounds.maxX - bounds.minX, 1.0);
-  const spanY = Math.max(bounds.maxY - bounds.minY, 1.0);
+  const spanX = Math.max(bounds.maxX - bounds.minX, 0.1);
+  const spanY = Math.max(bounds.maxY - bounds.minY, 0.1);
   const scale = Math.min((width - 2 * padding) / spanX, (height - 2 * padding) / spanY);
   const offsetX = (width - spanX * scale) / 2;
   const offsetY = (height - spanY * scale) / 2;
@@ -667,7 +857,7 @@ function drawWorkspace() {
   ];
   state.workspaceTransform = {bounds, scale, offsetX, offsetY, height};
   const area = state.navigationWorkspace?.allowedArea || [];
-  if (area.length >= 2) {
+  if ($('showWorkspaceArea').checked && area.length >= 2) {
     context.beginPath();
     area.forEach((point, index) => {
       const value = worldToCanvas(point);
@@ -684,26 +874,30 @@ function drawWorkspace() {
   const resolution = Number(surface.resolutionM || 0.10);
   const maximumZ = Number(surface.obstacleMaxZ ?? 1.80);
   const occupied = visibleNavigationSurfaceCells(surface);
-  context.fillStyle = '#e11d4899';
-  for (const key of occupied) {
-    const cell = key.split(',').map(Number);
-    const topLeft = worldToCanvas([cell[0] * resolution, (cell[1] + 1) * resolution]);
-    context.fillRect(
-      topLeft[0],
-      topLeft[1],
-      Math.max(1.5, resolution * scale + 0.4),
-      Math.max(1.5, resolution * scale + 0.4),
-    );
+  if ($('showWorkspaceSurface').checked) {
+    context.fillStyle = '#e11d4899';
+    for (const key of occupied) {
+      const cell = key.split(',').map(Number);
+      const topLeft = worldToCanvas([cell[0] * resolution, (cell[1] + 1) * resolution]);
+      context.fillRect(
+        topLeft[0],
+        topLeft[1],
+        Math.max(1.5, resolution * scale + 0.4),
+        Math.max(1.5, resolution * scale + 0.4),
+      );
+    }
   }
   context.fillStyle = '#cbd5e171';
   const points = state.mapArtifact?.points || [];
-  for (let index = 0; index < points.length; index += 1) {
-    if (Number(points[index][2]) > maximumZ + 0.4) continue;
-    const point = worldToCanvas(points[index]);
-    context.fillRect(point[0], point[1], 1.2, 1.2);
+  if ($('showWorkspacePoints').checked) {
+    for (let index = 0; index < points.length; index += 1) {
+      if (Number(points[index][2]) > maximumZ + 0.4) continue;
+      const point = worldToCanvas(points[index]);
+      context.fillRect(point[0], point[1], Math.max(1.2, Math.min(2.4, scale * 0.015)), Math.max(1.2, Math.min(2.4, scale * 0.015)));
+    }
   }
   const route = state.navigationWorkspace?.route || [];
-  if (route.length) {
+  if ($('showWorkspaceRoute').checked && route.length) {
     context.strokeStyle = '#22d3ee';
     context.lineWidth = 3;
     context.beginPath();
@@ -741,7 +935,7 @@ function drawWorkspace() {
     context.fillStyle = '#07111f'; context.font = 'bold 10px sans-serif';
     context.fillText(label, value[0] - 5, value[1] + 3.5);
   }
-  for (const checkpoint of state.checkpointAudit?.checkpoints || []) {
+  for (const checkpoint of $('showWorkspaceRoute').checked ? (state.checkpointAudit?.checkpoints || []) : []) {
     const point = checkpoint.position ? [checkpoint.position.x, checkpoint.position.y] : null;
     if (!point) continue;
     const value = worldToCanvas(point);
@@ -750,6 +944,23 @@ function drawWorkspace() {
     context.fillStyle = '#ffffff'; context.font = '10px sans-serif';
     context.fillText(checkpoint.checkpointId, value[0] + 9, value[1] - 7);
   }
+  if (state.workspaceCursorWorld) {
+    const value = worldToCanvas(state.workspaceCursorWorld);
+    context.strokeStyle = '#facc15'; context.lineWidth = 1.5;
+    context.setLineDash([5, 5]);
+    context.beginPath(); context.moveTo(value[0], 0); context.lineTo(value[0], height);
+    context.moveTo(0, value[1]); context.lineTo(width, value[1]); context.stroke();
+    context.setLineDash([]);
+    const brushRadius = Number($('surfaceBrushSize').value || 0.35) / 2;
+    if (['blocked', 'clear'].includes(state.workspaceEditMode)) {
+      context.strokeStyle = state.workspaceEditMode === 'blocked' ? '#fb7185' : '#e8f0fa';
+      context.lineWidth = 2;
+      context.beginPath(); context.arc(value[0], value[1], brushRadius * scale, 0, Math.PI * 2); context.stroke();
+    }
+  }
+  drawWorkspaceScale(context, width, height, scale);
+  updateWorkspaceReadout();
+  drawWorkspaceCloud();
 }
 
 function recordedWorkspaceRoute() {
@@ -779,9 +990,9 @@ function renderWorkspaceControls() {
     : state.workspaceEditMode === 'area'
       ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。蓝线与边界至少留出 0.48 m。'
       : state.workspaceEditMode === 'blocked'
-        ? '按住鼠标在图上涂红：墙、柱子、固定柜子等不允许穿过。'
+        ? '请先放大到 200% 以上；按住鼠标涂红，表示这里固定不可走。'
         : state.workspaceEditMode === 'clear'
-          ? '按住鼠标擦掉误判的红色；只擦确认是空地的地方。'
+          ? '请先放大到 200% 以上；按住鼠标擦掉误判占用，只擦确认能走的地方。'
           : state.workspaceEditMode === 'plan-start'
             ? '在绿色区域里点一下作为预演起点。'
             : state.workspaceEditMode === 'plan-goal'
@@ -798,6 +1009,9 @@ function renderWorkspaceControls() {
   if (state.workspaceEditMode === 'clear') $('paintClear').classList.add('active');
   if (state.workspaceEditMode === 'plan-start') $('selectPlanStart').classList.add('active');
   if (state.workspaceEditMode === 'plan-goal') $('selectPlanGoal').classList.add('active');
+  for (const id of ['workspaceZoomOut', 'workspaceZoomIn', 'workspaceFit', 'workspaceFocusRoute', 'workspacePan', 'workspaceFullscreen', 'workspace3dSlice', 'workspace3dTop', 'workspace3dAngle', 'workspace3dExpand']) {
+    $(id).disabled = !workspace;
+  }
   const editor = state.glimEditor || {state: 'not_started'};
   const editorActive = editor.state === 'active';
   $('startGlimEditor').hidden = editorActive;
@@ -957,6 +1171,12 @@ function workspaceCanvasPoint(event) {
   ];
 }
 
+function requireWorkspaceEditZoom() {
+  if (Number(state.workspaceView.zoom || 1) >= 2) return true;
+  $('workspaceError').textContent = '为避免误改，请先用滚轮或“＋”把地图放大到 200% 以上再涂改。';
+  return false;
+}
+
 function ensureNavigationSurface() {
   if (!state.navigationWorkspace) return null;
   if (!state.navigationWorkspace.navigationSurface) {
@@ -981,7 +1201,7 @@ function syncSurfaceControls() {
   const automatic = visibleNavigationSurfaceCells(surface);
   const clear = new Set((surface.manualClearCells || []).map(surfaceCellKey));
   const blocked = new Set((surface.manualBlockedCells || []).map(surfaceCellKey));
-  $('surfaceStats').textContent = `当前显示 ${automatic.size} 个固定障碍小格 · 手加 ${blocked.size} · 手擦 ${clear.size}。红色基本贴着墙/柱子就可以。`;
+  $('surfaceStats').textContent = `当前显示 ${automatic.size} 个不可走候选小格 · 手加 ${blocked.size} · 手擦 ${clear.size}。红色来自点云高度切片，不代表物体语义识别。`;
 }
 
 function surfaceCellKey(cell) { return `${cell[0]},${cell[1]}`; }
@@ -1036,6 +1256,7 @@ function visibleNavigationSurfaceCells(surface) {
 function paintSurfaceAt(point) {
   const surface = ensureNavigationSurface();
   if (!surface || !['blocked', 'clear'].includes(state.workspaceEditMode)) return;
+  if (!requireWorkspaceEditZoom()) return;
   const resolution = Number(surface.resolutionM || 0.10);
   const brushRadius = Number($('surfaceBrushSize').value || 0.35) / 2;
   const center = [Math.floor(point[0] / resolution), Math.floor(point[1] / resolution)];
@@ -1736,6 +1957,32 @@ function attachCloudControls(canvas, view, redraw) {
   }, {passive: false});
 }
 
+function attachWorkspaceCloudControls() {
+  const canvas = $('workspaceCloud');
+  let drag = null;
+  canvas.addEventListener('pointerdown', event => {
+    drag = [event.clientX, event.clientY];
+    canvas.setPointerCapture?.(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (!drag) return;
+    state.workspaceCloudView.yaw += (event.clientX - drag[0]) * 0.008;
+    state.workspaceCloudView.pitch = Math.max(0.05, Math.min(1.55,
+      state.workspaceCloudView.pitch + (event.clientY - drag[1]) * 0.006));
+    drag = [event.clientX, event.clientY];
+    drawWorkspaceCloud();
+  });
+  for (const eventName of ['pointerup', 'pointercancel', 'pointerleave']) {
+    canvas.addEventListener(eventName, () => { drag = null; });
+  }
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    state.workspaceCloudView.zoomFactor = Math.max(0.5, Math.min(6,
+      Number(state.workspaceCloudView.zoomFactor || 1) * (event.deltaY > 0 ? 0.88 : 1.14)));
+    drawWorkspaceCloud();
+  }, {passive: false});
+}
+
 attachCloudControls(
   $('cloud'), state.views.live,
   () => drawCloud($('cloud'), state.live?.points, null, state.views.live),
@@ -1747,6 +1994,69 @@ $('resetMapView').addEventListener('click', () => {
   Object.assign(state.views.result, {yaw: 0.7, pitch: 0.55, zoom: 18});
   redrawResult();
 });
+for (const id of ['showWorkspacePoints', 'showWorkspaceSurface', 'showWorkspaceRoute', 'showWorkspaceArea']) {
+  $(id).addEventListener('change', drawWorkspace);
+}
+$('workspaceZoomIn').addEventListener('click', () => zoomWorkspace(1.35));
+$('workspaceZoomOut').addEventListener('click', () => zoomWorkspace(1 / 1.35));
+$('workspaceFit').addEventListener('click', () => {
+  const bounds = workspaceBounds();
+  if (!bounds) return;
+  state.workspaceView = {...state.workspaceView, zoom: 1, centerX: (bounds.minX + bounds.maxX) / 2, centerY: (bounds.minY + bounds.maxY) / 2, drag: null};
+  drawWorkspace();
+});
+$('workspaceFocusRoute').addEventListener('click', () => {
+  const route = state.navigationWorkspace?.route || [];
+  if (!route.length) return;
+  const margin = 1.5;
+  setWorkspaceView({
+    minX: Math.min(...route.map(point => point[0])) - margin,
+    maxX: Math.max(...route.map(point => point[0])) + margin,
+    minY: Math.min(...route.map(point => point[1])) - margin,
+    maxY: Math.max(...route.map(point => point[1])) + margin,
+  });
+});
+$('workspacePan').addEventListener('click', () => {
+  state.workspaceView.panMode = !state.workspaceView.panMode;
+  $('workspacePan').classList.toggle('active', state.workspaceView.panMode);
+  $('workspaceMap').classList.toggle('pan-mode', state.workspaceView.panMode);
+  $('workspaceHelp').textContent = state.workspaceView.panMode
+    ? '拖动地图查看局部；再次点击“拖动地图”退出。滚轮始终可以缩放。'
+    : '已退出拖动模式；现在可以继续标记。';
+});
+$('workspaceFullscreen').addEventListener('click', async () => {
+  const panel = $('workspaceEditorPanel');
+  try {
+    if (document.fullscreenElement === panel) await document.exitFullscreen();
+    else await panel.requestFullscreen();
+  } catch (error) {
+    $('workspaceError').textContent = `无法进入全屏：${friendlyError(error)}`;
+  }
+});
+document.addEventListener('fullscreenchange', () => {
+  $('workspaceFullscreen').textContent = document.fullscreenElement === $('workspaceEditorPanel') ? '退出全屏' : '全屏编辑';
+  requestAnimationFrame(drawWorkspace);
+});
+$('workspace3dTop').addEventListener('click', () => {
+  Object.assign(state.workspaceCloudView, {yaw: 0, pitch: Math.PI / 2});
+  drawWorkspaceCloud();
+});
+$('workspace3dAngle').addEventListener('click', () => {
+  Object.assign(state.workspaceCloudView, {yaw: 0.72, pitch: 0.62});
+  drawWorkspaceCloud();
+});
+$('workspace3dSlice').addEventListener('click', () => {
+  state.workspaceCloudView.sliceOnly = !state.workspaceCloudView.sliceOnly;
+  $('workspace3dSlice').classList.toggle('active', state.workspaceCloudView.sliceOnly);
+  $('workspace3dSlice').textContent = state.workspaceCloudView.sliceOnly ? '显示全部高度' : '只看高度层';
+  drawWorkspaceCloud();
+});
+$('workspace3dExpand').addEventListener('click', () => {
+  const expanded = $('workspace3dReference').classList.toggle('expanded');
+  $('workspace3dExpand').textContent = expanded ? '缩小3D' : '放大3D';
+  requestAnimationFrame(drawWorkspaceCloud);
+});
+attachWorkspaceCloudControls();
 $('editRoute').addEventListener('click', () => {
   if (!state.navigationWorkspace) return;
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
@@ -1811,12 +2121,14 @@ $('saveWorkspace').addEventListener('click', saveNavigationWorkspace);
 $('indoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 1.80));
 $('outdoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 2.50));
 $('paintBlocked').addEventListener('click', () => {
+  if (!requireWorkspaceEditZoom()) return;
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
   state.workspaceEditMode = 'blocked';
   $('workspaceError').textContent = '';
   renderWorkspaceControls();
 });
 $('paintClear').addEventListener('click', () => {
+  if (!requireWorkspaceEditZoom()) return;
   state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
   state.workspaceEditMode = 'clear';
   $('workspaceError').textContent = '';
@@ -1835,6 +2147,8 @@ $('clearSurfaceEdits').addEventListener('click', () => {
 });
 $('surfaceBrushSize').addEventListener('input', () => {
   $('surfaceBrushSizeValue').textContent = `${Number($('surfaceBrushSize').value).toFixed(2)} m`;
+  updateWorkspaceReadout();
+  drawWorkspace();
 });
 for (const id of ['obstacleMinZ', 'obstacleMaxZ']) $(id).addEventListener('change', () => {
   const surface = ensureNavigationSurface();
@@ -1868,7 +2182,7 @@ $('openGlimEditor').addEventListener('click', openGlimEditor);
 $('publishGlimEditor').addEventListener('click', publishGlimEditor);
 $('stopGlimEditor').addEventListener('click', stopGlimEditor);
 $('workspaceMap').addEventListener('click', event => {
-  if (!state.workspaceEditMode || !state.navigationWorkspace) return;
+  if (state.workspaceView.panMode || !state.workspaceEditMode || !state.navigationWorkspace) return;
   const point = workspaceCanvasPoint(event);
   if (!point) return;
   if (state.workspaceEditMode === 'plan-start') {
@@ -1894,10 +2208,42 @@ $('workspaceMap').addEventListener('click', event => {
   state.planPreview = null;
   drawWorkspace();
 });
+$('workspaceMap').addEventListener('wheel', event => {
+  event.preventDefault();
+  const point = workspaceCanvasPoint(event);
+  if (point) state.workspaceCursorWorld = point;
+  zoomWorkspace(event.deltaY > 0 ? 0.86 : 1.16, point);
+}, {passive: false});
+$('workspaceMap').addEventListener('pointermove', event => {
+  const point = workspaceCanvasPoint(event);
+  if (point) state.workspaceCursorWorld = point;
+  if (state.workspaceView.panMode && state.workspaceView.drag && state.workspaceTransform) {
+    const dx = event.clientX - state.workspaceView.drag[0];
+    const dy = event.clientY - state.workspaceView.drag[1];
+    state.workspaceView.centerX -= dx / state.workspaceTransform.scale;
+    state.workspaceView.centerY += dy / state.workspaceTransform.scale;
+    state.workspaceView.drag = [event.clientX, event.clientY];
+  }
+  drawWorkspace();
+});
+$('workspaceMap').addEventListener('pointerleave', () => {
+  if (!state.workspaceView.drag) state.workspaceCursorWorld = null;
+  drawWorkspace();
+});
 for (const eventName of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave']) {
   $('workspaceMap').addEventListener(eventName, event => {
+    if (state.workspaceView.panMode) {
+      if (eventName === 'pointerdown') {
+        state.workspaceView.drag = [event.clientX, event.clientY];
+        $('workspaceMap').setPointerCapture?.(event.pointerId);
+      } else if (eventName === 'pointerup' || eventName === 'pointercancel' || eventName === 'pointerleave') {
+        state.workspaceView.drag = null;
+      }
+      return;
+    }
     if (!['blocked', 'clear'].includes(state.workspaceEditMode)) return;
     if (eventName === 'pointerdown') {
+      if (!requireWorkspaceEditZoom()) return;
       state.surfaceBrushDown = true;
       snapshotSurfaceUndo();
       $('workspaceMap').setPointerCapture?.(event.pointerId);

@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## New-task handoff — start here
 
@@ -57,8 +57,12 @@ navigation candidate**. It leaves the localization PCD immutable, derives a
 reviewable 0.10 m static occupancy map from a height slice, rejects isolated
 cell returns, clears the physically recorded body corridor, applies operator
 block/clear edits and publishes checksummed PGM/YAML artifacts. The workstation
-now presents one plain-language red-obstacle / green-area / blue-intent /
-purple-preview editor. Runtime composition adds Nav2 StaticLayer to both
+now presents a fullscreen, zoomable and pannable 2D editor synchronized with a
+rotatable 3D point-cloud reference. Red cells are explicitly described as
+non-semantic occupancy candidates rather than recognized walls, columns or
+cabinets; the cursor exposes world coordinates, nearby point count and height
+range, and brush editing is blocked below 200% zoom. Runtime composition adds
+Nav2 StaticLayer to both
 costmaps and changes execution to current trusted map pose -> next checkpoint
 or final endpoint through SmacPlanner2D -> the existing MPPI controller. A real
 Mac map produced a reachable approximately 9.0 m preview. This is **not**
@@ -73,10 +77,10 @@ user explicitly requests a later deployment. Operator instructions are in
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active. Z1Pro command feedback now uses the protocol-correct mixed frames on the robot | Physically verify one fine manual adjustment; long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The local generation-9 workbench also derives a separate reviewed static navigation map with red obstacles, green boundary, blue intent and purple preview; it never rewrites localization PCD | Operator acceptance of editing, generation-9 robot deployment and physical planning receipts remain pending; deployed map remains generation 8 revision 6 |
+| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The local generation-9 workbench derives a separate reviewed static navigation map and now offers precise 2D zoom/pan/fullscreen editing with a synchronized 3D PCD reference; it never rewrites localization PCD | Operator acceptance of editing, generation-9 robot deployment and physical planning receipts remain pending; deployed map remains generation 8 revision 6 |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes on the deployed V6 baseline. The local generation-9 candidate composes a reviewed StaticLayer map, full-map Smac point-goal planning, the same MPPI controller, one 0.48 m safety circle and the green KeepoutFilter | Deploy only by explicit request, then verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and now includes a plain-language generation-9 navigation-map editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. Final local browser regression loaded the real map, displayed 631 aggregated fixed-obstacle cells and returned a reachable approximately 9.0 m preview without console errors. The current process has the platform token only in memory | Get operator usability acceptance; after restart securely reinject the token because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. A 2026-08-13 real-map browser audit verified 100-to-246-percent zoom, pan-mode state, synchronized 3D expansion/height-slice controls and the under-200-percent brush guard; no map edit was persisted and the real map remained at 631 candidates, 0 manual block and 0 manual clear. The current process has the platform token only in memory | Get operator usability acceptance; full-screen behavior still needs operator confirmation in the app; after restart securely reinject the token because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |

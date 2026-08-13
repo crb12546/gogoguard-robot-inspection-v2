@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GoGoGuard 现场交付工作台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260812-navmap2">
+  <link rel="stylesheet" href="/styles.css?v=20260813-navmap3">
 </head>
 <body>
   <header><div><small>GOGOGUARD · FIELD WORKSTATION</small><h1>现场交付工作台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
@@ -42,15 +42,20 @@
       <article class="panel result-panel"><div class="panel-title"><div><span>当前选中地图</span><small id="resultMeta">还没有结果</small></div><div class="layer-switches"><label><input id="showMapPoints" type="checkbox" checked>点云</label><label><input id="showMapRoute" type="checkbox" checked>GLIM 轨迹</label><button id="resetMapView" class="mini-button">重置 3D</button></div></div><div id="resultEmpty" class="empty">选择一张历史地图后，这里同时显示 2D 概览和可旋转、缩放的 3D 点云。</div><div class="map-review"><figure><figcaption>2D 俯视概览</figcaption><img id="overview" alt="地图概览"></figure><figure><figcaption>3D 点云 · 拖动旋转 · 滚轮缩放</figcaption><canvas id="resultCloud"></canvas></figure></div></article>
       <article class="panel history"><div class="panel-title"><div><span>现场资产历史</span><small>录制、地图与路线按版本保留</small></div></div><h3>可用地图版本</h3><div id="maps"></div><h3>建图处理任务</h3><div id="mapTasks"></div><h3>录制包</h3><div id="sessions"></div></article>
     </section>
-    <section class="map-workbench">
-      <article class="panel map-workbench-canvas-panel">
-        <div class="panel-title"><div><span>巡检地图工作台</span><small>绿色可走·红色固定障碍·蓝色录制路线·紫色规划预演</small></div><b id="workspaceBadge">请先选地图</b></div>
-        <canvas id="workspaceMap"></canvas>
-        <div class="workspace-legend"><span><i class="map-dot"></i>点云</span><span><i class="obstacle-swatch"></i>固定障碍</span><span><i class="route-line"></i>录制路线</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
+    <section class="map-workbench" id="mapWorkbenchSection">
+      <article class="panel map-workbench-canvas-panel" id="workspaceEditorPanel">
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>滚轮缩放 · 拖动平移 · 2D/3D 对照后再标记</small></div><div class="workspace-title-actions"><b id="workspaceBadge">请先选地图</b><button id="workspaceZoomOut" class="mini-button" title="缩小地图">－</button><button id="workspaceZoomIn" class="mini-button" title="放大地图">＋</button><button id="workspaceFit" class="mini-button">适应全图</button><button id="workspaceFocusRoute" class="mini-button">看路线</button><button id="workspacePan" class="mini-button">拖动地图</button><button id="workspaceFullscreen" class="mini-button">全屏编辑</button></div></div>
+        <div class="workspace-viewport" id="workspaceViewport">
+          <canvas id="workspaceMap" aria-label="二维巡检导航地图"></canvas>
+          <div class="workspace-layer-switches"><label><input id="showWorkspacePoints" type="checkbox" checked>原始点</label><label><input id="showWorkspaceSurface" type="checkbox" checked>红色占用</label><label><input id="showWorkspaceRoute" type="checkbox" checked>路线/点位</label><label><input id="showWorkspaceArea" type="checkbox" checked>绿色范围</label></div>
+          <div class="workspace-coordinate"><b id="workspaceZoomLabel">100%</b><span id="workspaceCursor">移动鼠标查看坐标</span></div>
+          <aside class="workspace-3d-reference" id="workspace3dReference"><div><strong>同步 3D 参考</strong><small>黄色圈与2D鼠标对应</small><button id="workspace3dSlice" class="mini-button">只看高度层</button><button id="workspace3dTop" class="mini-button">俯视</button><button id="workspace3dAngle" class="mini-button">斜视</button><button id="workspace3dExpand" class="mini-button">放大3D</button></div><canvas id="workspaceCloud" aria-label="同步三维点云参考"></canvas></aside>
+          <div class="workspace-legend"><span><i class="map-dot"></i>原始点</span><span><i class="obstacle-swatch"></i>不可走占用候选</span><span><i class="route-line"></i>巡检顺序</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
+        </div>
       </article>
       <article class="panel map-workbench-controls">
         <div class="panel-title"><div><span>准备巡检材料</span><small>日常只做三件事：选地图、画绿圈、预演并保存</small></div></div>
-        <div class="workbench-explanation"><b>最简单用法</b><span>1. 左边历史里选地图　2. 红色大致是墙和柱子就别改　3. 画绿色可走外圈　4. 点“预演自动路线”，能到就保存。</span><small>这里编辑的是“狗哪里能走”，不会改坏用于定位的原始 PCD 点云。</small></div>
+        <div class="workbench-explanation"><b>最简单用法</b><span>1. 选地图　2. 点“全屏编辑”并放大辨认　3. 只修明显错误的红色占用　4. 画绿圈、预演并保存。</span><small>红色不是“识别出的墙或柜子”，只是点云高度切片形成的不可走候选。请结合右上角3D参考判断这里到底能不能走。</small></div>
         <div class="glim-editor-actions">
           <strong>1. 可选：清掉建图时的临时人车</strong>
           <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
@@ -58,10 +63,10 @@
           <small id="glimEditorState">需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。</small>
         </div>
         <div class="navigation-surface-editor">
-          <strong>2. 确认红色固定障碍</strong>
+          <strong>2. 确认红色不可走占用</strong>
           <div class="surface-preset-actions"><button id="indoorSurfacePreset" class="secondary">自动隐藏屋顶（推荐）</button><button id="outdoorSurfacePreset" class="secondary">室外高障碍</button></div>
-          <small id="surfaceStats">选择地图后自动识别。红色不对时才需要涂改。</small>
-          <div class="surface-edit-actions"><button id="paintBlocked" class="secondary">刷成固定障碍</button><button id="paintClear" class="secondary">擦掉误判障碍</button><button id="clearSurfaceEdits" class="secondary">清空手动涂改</button></div>
+          <small id="surfaceStats">选择地图后自动投影。放大到200%以上再涂改。</small>
+          <div class="surface-edit-actions"><button id="paintBlocked" class="secondary">刷成不可走</button><button id="paintClear" class="secondary">擦掉误判占用</button><button id="clearSurfaceEdits" class="secondary">清空手动涂改</button></div>
           <label class="brush-size">刷子大小 <input id="surfaceBrushSize" type="range" min="0.15" max="1.00" step="0.05" value="0.35"><b id="surfaceBrushSizeValue">0.35 m</b></label>
           <details><summary>识别高度不对时再调</summary><div class="surface-height-fields"><label>从地面上方 <input id="obstacleMinZ" type="number" min="-2" max="4" step="0.05"></label><label>到这个高度 <input id="obstacleMaxZ" type="number" min="-1" max="6" step="0.05"></label></div><small>单位是米。一般不用改；室内默认 0.05 到 1.80，地面和屋顶都不参与导航。</small></details>
         </div>
@@ -203,6 +208,6 @@
       </article>
     </section>
   </main>
-  <script src="/app.js?v=20260812-navmap2"></script>
+  <script src="/app.js?v=20260813-navmap3"></script>
 </body>
 </html>
