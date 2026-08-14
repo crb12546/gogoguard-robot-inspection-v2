@@ -44,18 +44,19 @@
     </section>
     <section class="map-workbench" id="mapWorkbenchSection">
       <article class="panel map-workbench-canvas-panel" id="workspaceEditorPanel">
-        <div class="panel-title"><div><span>巡检地图工作台</span><small>滚轮缩放 · 拖动平移 · 2D/3D 对照后再标记</small></div><div class="workspace-title-actions"><b id="workspaceBadge">请先选地图</b><button id="workspaceZoomOut" class="mini-button" title="缩小地图">－</button><button id="workspaceZoomIn" class="mini-button" title="放大地图">＋</button><button id="workspaceFit" class="mini-button">适应全图</button><button id="workspaceFocusRoute" class="mini-button">看路线</button><button id="workspacePan" class="mini-button">拖动地图</button><button id="workspaceFullscreen" class="mini-button">全屏编辑</button></div></div>
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>滚轮缩放 · 拖动平移 · 2D/3D 对照后再标记</small></div><div class="workspace-title-actions"><b id="workspaceBadge">请先选地图</b><button id="workspaceZoomOut" class="mini-button" title="缩小地图">－</button><button id="workspaceZoomIn" class="mini-button" title="放大地图">＋</button><button id="workspaceFit" class="mini-button">适应全图</button><button id="workspaceFocusRoute" class="mini-button">看路线</button><button id="workspacePan" class="mini-button">拖动地图</button><button id="workspaceFullscreen" class="mini-button">全屏编辑（含工具）</button></div></div>
         <div class="workspace-viewport" id="workspaceViewport">
           <canvas id="workspaceMap" aria-label="二维巡检导航地图"></canvas>
           <div class="workspace-layer-switches"><label><input id="showWorkspacePoints" type="checkbox" checked>原始点</label><label><input id="showWorkspaceSurface" type="checkbox" checked>红色占用</label><label><input id="showWorkspaceRoute" type="checkbox" checked>路线/点位</label><label><input id="showWorkspaceArea" type="checkbox" checked>绿色范围</label></div>
+          <div class="workspace-mode-banner" id="workspaceModeBanner"><b id="workspaceModeTitle">查看地图</b><span id="workspaceModeHint">选择右侧工具后，在这里直接操作</span><button id="finishWorkspaceEdit" class="mini-button" hidden>完成当前绘制</button></div>
           <div class="workspace-coordinate"><b id="workspaceZoomLabel">100%</b><span id="workspaceCursor">移动鼠标查看坐标</span></div>
-          <aside class="workspace-3d-reference" id="workspace3dReference"><div><strong>同步 3D 参考</strong><small>黄色圈与2D鼠标对应</small><button id="workspace3dSlice" class="mini-button">只看高度层</button><button id="workspace3dTop" class="mini-button">俯视</button><button id="workspace3dAngle" class="mini-button">斜视</button><button id="workspace3dExpand" class="mini-button">放大3D</button></div><canvas id="workspaceCloud" aria-label="同步三维点云参考"></canvas></aside>
-          <div class="workspace-legend"><span><i class="map-dot"></i>原始点</span><span><i class="obstacle-swatch"></i>不可走占用候选</span><span><i class="route-line"></i>巡检顺序</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
+          <aside class="workspace-3d-reference" id="workspace3dReference"><div><strong>同步 3D 参考</strong><small>黄色圈与2D鼠标对应</small><button id="workspace3dSlice" class="mini-button">只看高度层</button><button id="workspace3dTop" class="mini-button">俯视</button><button id="workspace3dAngle" class="mini-button">斜视</button><button id="workspace3dExpand" class="mini-button">放大3D</button><button id="workspace3dHide" class="mini-button">隐藏3D</button></div><canvas id="workspaceCloud" aria-label="同步三维点云参考"></canvas></aside>
+          <div class="workspace-legend"><span><i class="map-dot"></i>原始点</span><span><i class="obstacle-swatch"></i>红色不可走</span><span><i class="clear-swatch"></i>擦除标记</span><span><i class="route-line"></i>巡检顺序</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
         </div>
       </article>
       <article class="panel map-workbench-controls">
         <div class="panel-title"><div><span>准备巡检材料</span><small>日常只做三件事：选地图、画绿圈、预演并保存</small></div></div>
-        <div class="workbench-explanation"><b>最简单用法</b><span>1. 选地图　2. 点“全屏编辑”并放大辨认　3. 只修明显错误的红色占用　4. 画绿圈、预演并保存。</span><small>红色不是“识别出的墙或柜子”，只是点云高度切片形成的不可走候选。请结合右上角3D参考判断这里到底能不能走。</small></div>
+        <div class="workbench-explanation"><b>最简单用法</b><span>1. 选地图　2. 点“擦除红色”并在左图按住拖动　3. 画绿圈　4. 预演并保存。</span><small>红色不是“识别出的墙或柜子”，只是点云高度切片形成的不可走候选。工具会自动放大到安全倍率；不确定时再结合 3D 判断。</small></div>
         <div class="glim-editor-actions">
           <strong>1. 可选：清掉建图时的临时人车</strong>
           <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
@@ -65,8 +66,9 @@
         <div class="navigation-surface-editor">
           <strong>2. 确认红色不可走占用</strong>
           <div class="surface-preset-actions"><button id="indoorSurfacePreset" class="secondary">自动隐藏屋顶（推荐）</button><button id="outdoorSurfacePreset" class="secondary">室外高障碍</button></div>
-          <small id="surfaceStats">选择地图后自动投影。放大到200%以上再涂改。</small>
-          <div class="surface-edit-actions"><button id="paintBlocked" class="secondary">刷成不可走</button><button id="paintClear" class="secondary">擦掉误判占用</button><button id="clearSurfaceEdits" class="secondary">清空手动涂改</button></div>
+          <small id="surfaceStats">选择地图后自动投影。</small>
+          <div class="surface-edit-guide"><b>要清除红色：</b><span>点下面的“擦除红色”，然后在左图按住鼠标拖动。系统会自动放大，不需要先找其他按钮。</span></div>
+          <div class="surface-edit-actions"><button id="paintClear" class="surface-primary">擦除红色（常用）</button><button id="paintBlocked" class="secondary">补画红色</button><button id="clearSurfaceEdits" class="secondary" title="放弃这张图上所有手工补画和擦除，恢复自动投影结果">恢复自动结果</button></div>
           <label class="brush-size">刷子大小 <input id="surfaceBrushSize" type="range" min="0.15" max="1.00" step="0.05" value="0.35"><b id="surfaceBrushSizeValue">0.35 m</b></label>
           <details><summary>识别高度不对时再调</summary><div class="surface-height-fields"><label>从地面上方 <input id="obstacleMinZ" type="number" min="-2" max="4" step="0.05"></label><label>到这个高度 <input id="obstacleMaxZ" type="number" min="-1" max="6" step="0.05"></label></div><small>单位是米。一般不用改；室内默认 0.05 到 1.80，地面和屋顶都不参与导航。</small></details>
         </div>
@@ -75,8 +77,8 @@
           <button id="editRoute" class="secondary">重画蓝色推荐路线</button>
           <button id="restoreRecordedRoute" class="secondary">恢复录制路线</button>
           <button id="editAllowedArea" class="secondary">绘制绿色可走外圈</button>
-          <button id="undoWorkspacePoint" class="secondary">撤销上一步</button>
-          <button id="cancelWorkspaceEdit" class="secondary">取消本次编辑</button>
+          <button id="undoWorkspacePoint" class="secondary">撤销上一笔</button>
+          <button id="cancelWorkspaceEdit" class="secondary">放弃当前绘制</button>
         </div>
         <div id="workspaceHelp" class="workspace-help">选择已完成的地图后，录制轨迹会自动成为蓝色路线。</div>
         <div class="plan-preview-editor">

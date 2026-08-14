@@ -107,6 +107,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .map-workbench-canvas-panel canvas.pan-mode:active { cursor: grabbing; }
 .workspace-layer-switches { position: absolute; left: 16px; top: 14px; z-index: 3; display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 7px 10px; border: 1px solid #203147; border-radius: 8px; background: #07111fdd; color: var(--muted); font-size: 11px; }
 .workspace-layer-switches label { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+.workspace-mode-banner { position: absolute; left: 16px; top: 56px; z-index: 5; max-width: min(48%, 520px); display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #31506d; border-radius: 8px; background: #07111ff2; box-shadow: 0 8px 20px #0005; color: var(--muted); font-size: 11px; }
+.workspace-mode-banner b { flex: 0 0 auto; color: var(--cyan); }
+.workspace-mode-banner span { line-height: 1.35; }
+.workspace-mode-banner .mini-button { flex: 0 0 auto; margin: 0; padding: 5px 7px; white-space: nowrap; }
+.workspace-mode-banner.editing { border-color: #67e8f9; background: #0b2940f2; }
+.workspace-mode-banner.clear-mode b { color: #a5f3fc; }
+.workspace-mode-banner.blocked-mode b { color: #fb7185; }
 .workspace-coordinate { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: flex; gap: 10px; max-width: calc(100% - 32px); padding: 7px 10px; border-radius: 8px; background: #07111fee; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .workspace-coordinate span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-coordinate b { color: var(--cyan); }
@@ -118,16 +125,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .workspace-3d-reference canvas { width: 100%; height: 100%; cursor: grab; }
 .workspace-3d-reference canvas:active { cursor: grabbing; }
 .workspace-3d-reference.expanded { width: min(72%, 860px); height: min(82%, 680px); z-index: 6; }
+.workspace-3d-reference.collapsed { width: auto; height: 42px; grid-template-rows: 1fr; }
+.workspace-3d-reference.collapsed > div { border-bottom: 0; }
+.workspace-3d-reference.collapsed canvas, .workspace-3d-reference.collapsed button:not(#workspace3dHide) { display: none; }
 .workspace-legend { position: absolute; left: 18px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 12px 18px; padding: 8px 12px; border-radius: 8px; background: #07111fdd; color: var(--muted); font-size: 12px; }
 .workspace-legend span { display: flex; align-items: center; gap: 6px; }
 .allowed-area-swatch { width: 18px; height: 10px; border: 2px solid var(--green); background: #4ade8038; }
 .obstacle-swatch { width: 14px; height: 10px; border: 1px solid #fb7185; background: #e11d48aa; }
+.clear-swatch { width: 14px; height: 10px; border: 1px solid #67e8f9; background: #67e8f933; }
 .preview-line { width: 18px; height: 3px; background: #c084fc; }
 .map-workbench-controls { height: 720px; overflow-y: auto; }
-.map-workbench-canvas-panel:fullscreen { width: 100vw; height: 100vh; border: 0; border-radius: 0; background: #07111f; }
-.map-workbench-canvas-panel:fullscreen .workspace-viewport { height: calc(100vh - 60px); }
-.map-workbench-canvas-panel:fullscreen .workspace-3d-reference { width: min(30vw, 440px); height: min(36vh, 340px); }
-.map-workbench-canvas-panel:fullscreen .workspace-legend { bottom: 18px; }
 .workbench-explanation { margin: 16px; padding: 13px 14px; display: grid; gap: 5px; border: 1px solid #285577; border-radius: 9px; background: #0b2940; color: #c9e5f5; font-size: 13px; line-height: 1.65; }
 .workbench-explanation b { color: #f8fafc; }
 .workbench-explanation small { color: #9bb9cc; line-height: 1.55; }
@@ -137,9 +144,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .glim-editor-actions small { line-height: 1.55; }
 .navigation-surface-editor, .plan-preview-editor { margin: 0 18px 16px; padding: 13px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 9px; background: #091726; }
 .navigation-surface-editor small, .plan-preview-editor small { line-height: 1.55; }
+.surface-edit-guide { padding: 10px 11px; display: grid; gap: 4px; border: 1px solid #285577; border-radius: 8px; background: #0b2940; color: #c9e5f5; font-size: 12px; line-height: 1.5; }
+.surface-edit-guide b { color: #f8fafc; }
 .surface-preset-actions, .surface-edit-actions, .plan-preview-editor > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .surface-preset-actions button, .surface-edit-actions button, .plan-preview-editor button { width: 100%; margin: 0; padding: 10px 8px; font-size: 12px; }
 .surface-edit-actions { grid-template-columns: 1fr 1fr 1fr; }
+.surface-edit-actions .surface-primary { background: #67e8f9; color: #04202c; }
 .plan-preview-editor > div { grid-template-columns: 1fr 1fr 1.35fr; }
 .brush-size { display: grid; grid-template-columns: auto 1fr 58px; gap: 9px; align-items: center; color: var(--muted); font-size: 12px; }
 .brush-size input { width: 100%; }
@@ -289,4 +299,20 @@ button.incident-row:hover, button.incident-row.selected { background: #17304a; }
   .parameter-grid { grid-template-columns: 1fr; }
   .diagnostic-profile-form, .incident-views { grid-template-columns: 1fr; }
   .incident-views { height: 1000px; }
+}
+
+/* Fullscreen owns the complete workbench, including the controls. Keeping only
+   the canvas fullscreen made the brush buttons disappear during editing. */
+#mapWorkbenchSection:fullscreen { width: 100vw; height: 100vh; margin: 0; padding: 12px; grid-template-columns: minmax(0, 2fr) minmax(330px, 1fr); gap: 12px; background: #07111f; }
+#mapWorkbenchSection:fullscreen .map-workbench-canvas-panel,
+#mapWorkbenchSection:fullscreen .map-workbench-controls { height: calc(100vh - 24px); max-height: none; }
+#mapWorkbenchSection:fullscreen .workspace-viewport { height: calc(100vh - 60px); }
+#mapWorkbenchSection:fullscreen .workspace-3d-reference:not(.collapsed) { width: min(32%, 440px); height: min(38%, 340px); }
+#mapWorkbenchSection:fullscreen .workspace-legend { bottom: 18px; }
+
+@media (max-width: 900px) {
+  .workspace-mode-banner { max-width: calc(100% - 32px); top: 56px; }
+  #mapWorkbenchSection:fullscreen { overflow-y: auto; grid-template-columns: 1fr; }
+  #mapWorkbenchSection:fullscreen .map-workbench-canvas-panel { height: 68vh; min-height: 520px; }
+  #mapWorkbenchSection:fullscreen .map-workbench-controls { height: auto; min-height: 32vh; }
 }

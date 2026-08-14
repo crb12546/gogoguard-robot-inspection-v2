@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## New-task handoff — start here
 
@@ -58,10 +58,12 @@ reviewable 0.10 m static occupancy map from a height slice, rejects isolated
 cell returns, clears the physically recorded body corridor, applies operator
 block/clear edits and publishes checksummed PGM/YAML artifacts. The workstation
 now presents a fullscreen, zoomable and pannable 2D editor synchronized with a
-rotatable 3D point-cloud reference. Red cells are explicitly described as
-non-semantic occupancy candidates rather than recognized walls, columns or
-cabinets; the cursor exposes world coordinates, nearby point count and height
-range, and brush editing is blocked below 200% zoom. Runtime composition adds
+rotatable and collapsible 3D point-cloud reference. Red cells are explicitly
+described as non-semantic occupancy candidates rather than recognized walls,
+columns or cabinets; the cursor exposes world coordinates, nearby point count
+and height range. Erase/block tools enter at 220% automatically, show their
+active mode and brush path on the map, and expose per-stroke undo plus explicit
+finish/cancel controls. Runtime composition adds
 Nav2 StaticLayer to both
 costmaps and changes execution to current trusted map pose -> next checkpoint
 or final endpoint through SmacPlanner2D -> the existing MPPI controller. A real
@@ -80,7 +82,7 @@ therefore remains the operator-accepted mobility baseline. Operator instructions
 | Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map, offers precise 2D zoom/pan/fullscreen editing with a synchronized 3D PCD reference and has published the real revision-1 candidate to the robot; it never rewrites localization PCD | Operator editing acceptance and physical planning receipts remain pending |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes on the V6 baseline. Generation 9 is now installed and statically verified with a reviewed StaticLayer map, full-map Smac point-goal planning, the same MPPI controller, one 0.48 m safety circle and the green KeepoutFilter | Verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release before calling generation 9 motion-accepted |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. A 2026-08-13 real-map browser audit verified 100-to-246-percent zoom, pan-mode state, synchronized 3D expansion/height-slice controls and the under-200-percent brush guard; the reviewed map remained at 631 candidates, 0 manual block and 0 manual clear and was subsequently published to the robot. The current process was restarted without a platform token | Get operator usability acceptance; full-screen behavior still needs operator confirmation in the app; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. A 2026-08-14 real-map browser regression verified one-click 220% erase entry, visible brush/clear trace, exact per-stroke undo, finish/cancel, collapsible 3D and full-workbench fullscreen while leaving the saved map at 631 candidates, 0 manual block and 0 manual clear. The current process was restarted without a platform token | Get operator usability acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |
@@ -2701,3 +2703,29 @@ authorization before localization, Nav2 or physical motion.
   did not repair or reclassify it. Next acceptance must explicitly stand the
   dog, start localization, then exercise one clear complete patrol before
   moving-person and mapped-wide-obstacle cases.
+
+## 2026-08-14 navigation-map editor usability correction (Mac browser verified)
+
+- The operator correctly rejected the former editor UX as incomplete: the
+  fullscreen action hid the right-side brush tools, the brush guard required a
+  zoom step without keeping its failure message in view, brush state/feedback
+  was easy to miss and the overlaid 3D reference could not be moved out of the
+  way. The underlying manual-clear data path existed, but its operation was not
+  self-explanatory.
+- `site_console` now makes the common operation direct: click `擦除红色（常用）`
+  once, enter 220% automatically, hold and drag on the 2D map, and read the
+  persistent `正在擦除红色` banner. Light-cyan grid traces expose the current
+  erase mask. Per-stroke undo, explicit finish, cancel-to-session-baseline and
+  undoable `恢复自动结果` are visible in the same workflow.
+- Fullscreen now owns the complete workbench instead of only the canvas, so the
+  map and controls remain side by side. The synchronized 3D reference can be
+  hidden and restored without discarding the 2D view.
+- A real-map browser regression used `map-62d8cec9a1dc` revision 1. Entry moved
+  from 100% to 220% automatically; a real drag temporarily changed the display
+  from 631 occupied / 0 clear to 630 occupied / 81 clear-mask cells, and one
+  undo restored exactly 631 / 0. Finish, 3D hide/show and full-workbench
+  fullscreen were also exercised. No save or publish action was clicked, so
+  the persisted workspace and deployed navigation map were not changed.
+- This is a local Mac-workstation UX receipt, not robot motion acceptance. The
+  robot was offline and no localization, Nav2, motion, camera, platform upload
+  or deployment operation occurred.

@@ -19,7 +19,9 @@ required = {
         "gimbalPanTarget", "gimbalTiltTarget", "gimbalApplyTarget",
         "workspaceZoomIn", "workspaceFit", "workspaceFocusRoute",
         "workspacePan", "workspaceFullscreen", "workspaceCloud",
-        "workspace3dSlice", "workspace3dExpand", "workspaceZoomLabel",
+        "workspace3dSlice", "workspace3dExpand", "workspace3dHide",
+        "workspaceZoomLabel", "workspaceModeBanner", "finishWorkspaceEdit",
+        "擦除红色（常用）", "全屏编辑（含工具）",
     ],
     "app.js": [
         "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
@@ -46,7 +48,8 @@ required = {
         "candidate.workspace_hash === state.navigationWorkspace.workspaceHash",
         "submitGimbalTarget", "state.gimbalTarget",
         "workspaceViewBounds", "zoomWorkspace", "drawWorkspaceCloud",
-        "requireWorkspaceEditZoom", "附近没有点云",
+        "requireWorkspaceEditZoom", "startSurfaceEdit",
+        "finishWorkspaceEditing", "mapWorkbenchSection", "附近没有点云",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",
@@ -55,7 +58,8 @@ required = {
         ".map-workbench", ".workspace-legend", ".allowed-area-swatch",
         ".obstacle-swatch", ".preview-line", ".navigation-surface-editor",
         ".workspace-3d-reference", ".workspace-coordinate",
-        ".map-workbench-canvas-panel:fullscreen", ".pan-mode",
+        "#mapWorkbenchSection:fullscreen", ".workspace-mode-banner",
+        ".clear-swatch", ".surface-edit-guide", ".pan-mode",
     ],
 }
 for name, needles in required.items():

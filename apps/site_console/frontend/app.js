@@ -636,7 +636,9 @@ async function showResult(job, {explicit = false} = {}) {
   $('workspace3dSlice').classList.remove('active');
   $('workspace3dSlice').textContent = '只看高度层';
   $('workspace3dReference').classList.remove('expanded');
+  $('workspace3dReference').classList.remove('collapsed');
   $('workspace3dExpand').textContent = '放大3D';
+  $('workspace3dHide').textContent = '隐藏3D';
   state.surfaceUndo = [];
   state.planPreview = null;
   state.planStart = state.navigationWorkspace?.route?.[0] || null;
@@ -802,7 +804,8 @@ function setWorkspaceView(bounds, zoom = 1) {
   const sourceSpanY = Math.max((source?.maxY || 1) - (source?.minY || 0), 1);
   const wantedSpanX = Math.max(bounds.maxX - bounds.minX, 0.5);
   const wantedSpanY = Math.max(bounds.maxY - bounds.minY, 0.5);
-  state.workspaceView.zoom = Math.max(1, Math.min(16, zoom * Math.min(
+  const minimumZoom = ['blocked', 'clear'].includes(state.workspaceEditMode) ? 2 : 1;
+  state.workspaceView.zoom = Math.max(minimumZoom, Math.min(16, zoom * Math.min(
     sourceSpanX / wantedSpanX,
     sourceSpanY / wantedSpanY,
   )));
@@ -813,7 +816,8 @@ function zoomWorkspace(factor, anchor = state.workspaceCursorWorld) {
   const previousTransform = state.workspaceTransform;
   const anchorCanvas = anchor && previousTransform ? workspaceWorldToCanvas(anchor) : null;
   const previous = Number(state.workspaceView.zoom || 1);
-  state.workspaceView.zoom = Math.max(1, Math.min(16, previous * factor));
+  const minimumZoom = ['blocked', 'clear'].includes(state.workspaceEditMode) ? 2 : 1;
+  state.workspaceView.zoom = Math.max(minimumZoom, Math.min(16, previous * factor));
   if (anchor && anchorCanvas && previousTransform) {
     const nextBounds = workspaceViewBounds();
     const canvas = $('workspaceMap');
@@ -885,6 +889,17 @@ function drawWorkspace() {
         Math.max(1.5, resolution * scale + 0.4),
         Math.max(1.5, resolution * scale + 0.4),
       );
+    }
+    if (state.workspaceEditMode === 'clear') {
+      context.fillStyle = '#67e8f929';
+      context.strokeStyle = '#67e8f9aa';
+      context.lineWidth = 1;
+      for (const cell of surface.manualClearCells || []) {
+        const topLeft = worldToCanvas([cell[0] * resolution, (cell[1] + 1) * resolution]);
+        const size = Math.max(1.5, resolution * scale + 0.4);
+        context.fillRect(topLeft[0], topLeft[1], size, size);
+        context.strokeRect(topLeft[0], topLeft[1], size, size);
+      }
     }
   }
   context.fillStyle = '#cbd5e171';
@@ -980,19 +995,39 @@ function recordedWorkspaceRoute() {
 function renderWorkspaceControls() {
   const workspace = state.navigationWorkspace;
   const editing = Boolean(state.workspaceEditMode);
+  const surfaceEditing = ['blocked', 'clear'].includes(state.workspaceEditMode);
   $('workspaceBadge').textContent = !workspace
     ? '请先选地图'
     : workspace.ready ? `可发布 · 版本 ${workspace.revision}`
       : workspace.allowedArea?.length >= 3 ? '等待确认导航地图' : '等待绿色可走外圈';
   $('workspaceBadge').className = workspace?.ready ? 'online' : '';
+  const mode = state.workspaceEditMode;
+  const modeTitle = mode === 'clear' ? '正在擦除红色'
+    : mode === 'blocked' ? '正在补画红色'
+      : mode === 'area' ? '正在画绿色外圈'
+        : mode === 'route' ? '正在画蓝色路线'
+          : mode === 'plan-start' ? '正在选择起点'
+            : mode === 'plan-goal' ? '正在选择目标'
+              : '查看地图';
+  const modeHint = mode === 'clear' ? '在地图上按住鼠标拖动；浅蓝格表示擦除标记。'
+    : mode === 'blocked' ? '在地图上按住鼠标拖动，把确认不可走的位置补成红色。'
+      : mode === 'area' ? '沿可走区域外边界依次点击，保存时自动闭合。'
+        : mode === 'route' ? '按巡检顺序依次点击路线点。'
+          : mode === 'plan-start' ? '在绿色区域内点击预演起点。'
+            : mode === 'plan-goal' ? '在绿色区域内点击预演目标。'
+              : workspace ? '选择右侧工具后，在这里直接操作。' : '先从上方历史中选择地图。';
+  $('workspaceModeTitle').textContent = modeTitle;
+  $('workspaceModeHint').textContent = modeHint;
+  $('workspaceModeBanner').className = `workspace-mode-banner${editing ? ' editing' : ''}${mode === 'clear' ? ' clear-mode' : ''}${mode === 'blocked' ? ' blocked-mode' : ''}`;
+  $('finishWorkspaceEdit').hidden = !editing;
   $('workspaceHelp').textContent = state.workspaceEditMode === 'route'
       ? '请在地图上依次点击推荐路线点；蓝线保留巡检顺序，狗端由 Nav2 规划实际可走路径。'
     : state.workspaceEditMode === 'area'
       ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。蓝线与边界至少留出 0.48 m。'
       : state.workspaceEditMode === 'blocked'
-        ? '请先放大到 200% 以上；按住鼠标涂红，表示这里固定不可走。'
+        ? '已进入补画模式：在地图上按住鼠标拖动，表示这里固定不可走。'
         : state.workspaceEditMode === 'clear'
-          ? '请先放大到 200% 以上；按住鼠标擦掉误判占用，只擦确认能走的地方。'
+          ? '已进入擦除模式：在地图上按住鼠标拖动，只擦确认能走的地方。'
           : state.workspaceEditMode === 'plan-start'
             ? '在绿色区域里点一下作为预演起点。'
             : state.workspaceEditMode === 'plan-goal'
@@ -1000,16 +1035,28 @@ function renderWorkspaceControls() {
       : workspace?.ready
         ? '已准备好：静态导航地图、推荐路线和绿色区域会一起发布。'
         : '先确认红色障碍，再画绿色可走外圈，最后预演和保存。';
-  for (const id of ['editRoute', 'restoreRecordedRoute', 'editAllowedArea', 'indoorSurfacePreset', 'outdoorSurfacePreset', 'paintBlocked', 'paintClear', 'clearSurfaceEdits', 'selectPlanStart', 'selectPlanGoal', 'previewNavigationPlan']) $(id).disabled = !workspace || (editing && !['blocked', 'clear'].includes(state.workspaceEditMode));
-  $('undoWorkspacePoint').disabled = !editing;
+  for (const id of ['editRoute', 'restoreRecordedRoute', 'editAllowedArea', 'indoorSurfacePreset', 'outdoorSurfacePreset', 'selectPlanStart', 'selectPlanGoal', 'previewNavigationPlan']) {
+    $(id).disabled = !workspace || editing;
+  }
+  for (const id of ['paintBlocked', 'paintClear', 'clearSurfaceEdits']) {
+    $(id).disabled = !workspace || (editing && !surfaceEditing);
+  }
+  const pointEditing = ['route', 'area'].includes(state.workspaceEditMode);
+  const pointKey = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
+  const canUndo = surfaceEditing
+    ? state.surfaceUndo.length > 0
+    : pointEditing && Boolean(workspace?.[pointKey]?.length);
+  $('undoWorkspacePoint').textContent = surfaceEditing ? '撤销上一笔' : '撤销上一个点';
+  $('undoWorkspacePoint').disabled = !canUndo;
   $('cancelWorkspaceEdit').disabled = !editing;
-  $('saveWorkspace').disabled = !workspace;
+  $('finishWorkspaceEdit').disabled = !editing;
+  $('saveWorkspace').disabled = !workspace || editing;
   for (const id of ['paintBlocked', 'paintClear', 'selectPlanStart', 'selectPlanGoal']) $(id).classList.remove('active');
   if (state.workspaceEditMode === 'blocked') $('paintBlocked').classList.add('active');
   if (state.workspaceEditMode === 'clear') $('paintClear').classList.add('active');
   if (state.workspaceEditMode === 'plan-start') $('selectPlanStart').classList.add('active');
   if (state.workspaceEditMode === 'plan-goal') $('selectPlanGoal').classList.add('active');
-  for (const id of ['workspaceZoomOut', 'workspaceZoomIn', 'workspaceFit', 'workspaceFocusRoute', 'workspacePan', 'workspaceFullscreen', 'workspace3dSlice', 'workspace3dTop', 'workspace3dAngle', 'workspace3dExpand']) {
+  for (const id of ['workspaceZoomOut', 'workspaceZoomIn', 'workspaceFit', 'workspaceFocusRoute', 'workspacePan', 'workspaceFullscreen', 'workspace3dSlice', 'workspace3dTop', 'workspace3dAngle', 'workspace3dExpand', 'workspace3dHide']) {
     $(id).disabled = !workspace;
   }
   const editor = state.glimEditor || {state: 'not_started'};
@@ -1173,8 +1220,37 @@ function workspaceCanvasPoint(event) {
 
 function requireWorkspaceEditZoom() {
   if (Number(state.workspaceView.zoom || 1) >= 2) return true;
-  $('workspaceError').textContent = '为避免误改，请先用滚轮或“＋”把地图放大到 200% 以上再涂改。';
-  return false;
+  state.workspaceView.zoom = 2.2;
+  $('workspaceError').textContent = '';
+  drawWorkspace();
+  return true;
+}
+
+function startSurfaceEdit(mode) {
+  if (!state.navigationWorkspace || !['blocked', 'clear'].includes(mode)) return;
+  if (!['blocked', 'clear'].includes(state.workspaceEditMode)) {
+    state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
+    state.surfaceUndo = [];
+  }
+  state.workspaceEditMode = mode;
+  state.workspaceView.panMode = false;
+  state.workspaceView.drag = null;
+  $('workspacePan').classList.remove('active');
+  $('workspaceMap').classList.remove('pan-mode');
+  requireWorkspaceEditZoom();
+  $('workspaceError').textContent = '';
+  drawWorkspace();
+  renderWorkspaceControls();
+}
+
+function finishWorkspaceEditing() {
+  if (!state.workspaceEditMode) return;
+  state.surfaceBrushDown = false;
+  state.workspaceEditMode = null;
+  $('workspaceError').textContent = '';
+  drawWorkspace();
+  renderWorkspaceControls();
+  $('workspaceHelp').textContent = '当前修改已保留在页面中，尚未保存。可以继续编辑；全部确认后再点“确认并保存这张导航地图”。';
 }
 
 function ensureNavigationSurface() {
@@ -1201,7 +1277,7 @@ function syncSurfaceControls() {
   const automatic = visibleNavigationSurfaceCells(surface);
   const clear = new Set((surface.manualClearCells || []).map(surfaceCellKey));
   const blocked = new Set((surface.manualBlockedCells || []).map(surfaceCellKey));
-  $('surfaceStats').textContent = `当前显示 ${automatic.size} 个不可走候选小格 · 手加 ${blocked.size} · 手擦 ${clear.size}。红色来自点云高度切片，不代表物体语义识别。`;
+  $('surfaceStats').textContent = `当前红色 ${automatic.size} 格 · 手工补画 ${blocked.size} 格 · 擦除标记 ${clear.size} 格。红色来自点云高度切片，不代表物体语义识别。`;
 }
 
 function surfaceCellKey(cell) { return `${cell[0]},${cell[1]}`; }
@@ -2002,7 +2078,8 @@ $('workspaceZoomOut').addEventListener('click', () => zoomWorkspace(1 / 1.35));
 $('workspaceFit').addEventListener('click', () => {
   const bounds = workspaceBounds();
   if (!bounds) return;
-  state.workspaceView = {...state.workspaceView, zoom: 1, centerX: (bounds.minX + bounds.maxX) / 2, centerY: (bounds.minY + bounds.maxY) / 2, drag: null};
+  const zoom = ['blocked', 'clear'].includes(state.workspaceEditMode) ? 2.2 : 1;
+  state.workspaceView = {...state.workspaceView, zoom, centerX: (bounds.minX + bounds.maxX) / 2, centerY: (bounds.minY + bounds.maxY) / 2, drag: null};
   drawWorkspace();
 });
 $('workspaceFocusRoute').addEventListener('click', () => {
@@ -2025,7 +2102,7 @@ $('workspacePan').addEventListener('click', () => {
     : '已退出拖动模式；现在可以继续标记。';
 });
 $('workspaceFullscreen').addEventListener('click', async () => {
-  const panel = $('workspaceEditorPanel');
+  const panel = $('mapWorkbenchSection');
   try {
     if (document.fullscreenElement === panel) await document.exitFullscreen();
     else await panel.requestFullscreen();
@@ -2034,7 +2111,7 @@ $('workspaceFullscreen').addEventListener('click', async () => {
   }
 });
 document.addEventListener('fullscreenchange', () => {
-  $('workspaceFullscreen').textContent = document.fullscreenElement === $('workspaceEditorPanel') ? '退出全屏' : '全屏编辑';
+  $('workspaceFullscreen').textContent = document.fullscreenElement === $('mapWorkbenchSection') ? '退出全屏' : '全屏编辑（含工具）';
   requestAnimationFrame(drawWorkspace);
 });
 $('workspace3dTop').addEventListener('click', () => {
@@ -2055,6 +2132,16 @@ $('workspace3dExpand').addEventListener('click', () => {
   const expanded = $('workspace3dReference').classList.toggle('expanded');
   $('workspace3dExpand').textContent = expanded ? '缩小3D' : '放大3D';
   requestAnimationFrame(drawWorkspaceCloud);
+});
+$('workspace3dHide').addEventListener('click', () => {
+  const reference = $('workspace3dReference');
+  const collapsed = reference.classList.toggle('collapsed');
+  if (collapsed) {
+    reference.classList.remove('expanded');
+    $('workspace3dExpand').textContent = '放大3D';
+  }
+  $('workspace3dHide').textContent = collapsed ? '显示3D' : '隐藏3D';
+  if (!collapsed) requestAnimationFrame(drawWorkspaceCloud);
 });
 attachWorkspaceCloudControls();
 $('editRoute').addEventListener('click', () => {
@@ -2102,6 +2189,7 @@ $('undoWorkspacePoint').addEventListener('click', () => {
       surface.reviewed = false;
       syncSurfaceControls();
       drawWorkspace();
+      renderWorkspaceControls();
     }
     return;
   }
@@ -2109,34 +2197,35 @@ $('undoWorkspacePoint').addEventListener('click', () => {
   const key = state.workspaceEditMode === 'route' ? 'route' : 'allowedArea';
   state.navigationWorkspace[key].pop();
   drawWorkspace();
+  renderWorkspaceControls();
 });
 $('cancelWorkspaceEdit').addEventListener('click', () => {
-  if (!state.savedNavigationWorkspace) return;
-  state.navigationWorkspace = structuredClone(state.savedNavigationWorkspace);
+  if (!state.workspaceEditMode) return;
+  if (!['plan-start', 'plan-goal'].includes(state.workspaceEditMode) && state.savedNavigationWorkspace) {
+    state.navigationWorkspace = structuredClone(state.savedNavigationWorkspace);
+  }
+  state.surfaceBrushDown = false;
+  state.surfaceUndo = [];
   state.workspaceEditMode = null;
   $('workspaceError').textContent = '';
+  syncSurfaceControls();
   drawWorkspace(); renderWorkspaceControls();
+  $('workspaceHelp').textContent = '已放弃本次绘制，地图恢复到进入该工具之前的状态。';
 });
+$('finishWorkspaceEdit').addEventListener('click', finishWorkspaceEditing);
 $('saveWorkspace').addEventListener('click', saveNavigationWorkspace);
 $('indoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 1.80));
 $('outdoorSurfacePreset').addEventListener('click', () => applySurfacePreset(0.05, 2.50));
 $('paintBlocked').addEventListener('click', () => {
-  if (!requireWorkspaceEditZoom()) return;
-  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
-  state.workspaceEditMode = 'blocked';
-  $('workspaceError').textContent = '';
-  renderWorkspaceControls();
+  startSurfaceEdit('blocked');
 });
 $('paintClear').addEventListener('click', () => {
-  if (!requireWorkspaceEditZoom()) return;
-  state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
-  state.workspaceEditMode = 'clear';
-  $('workspaceError').textContent = '';
-  renderWorkspaceControls();
+  startSurfaceEdit('clear');
 });
 $('clearSurfaceEdits').addEventListener('click', () => {
   const surface = ensureNavigationSurface();
   if (!surface) return;
+  if (!['blocked', 'clear'].includes(state.workspaceEditMode)) startSurfaceEdit('clear');
   snapshotSurfaceUndo();
   surface.manualBlockedCells = [];
   surface.manualClearCells = [];
@@ -2144,6 +2233,8 @@ $('clearSurfaceEdits').addEventListener('click', () => {
   state.planPreview = null;
   syncSurfaceControls();
   drawWorkspace();
+  renderWorkspaceControls();
+  $('workspaceHelp').textContent = '已暂时清空所有手工补画和擦除标记；可点“撤销上一笔”恢复，未保存前不会改动已发布地图。';
 });
 $('surfaceBrushSize').addEventListener('input', () => {
   $('surfaceBrushSizeValue').textContent = `${Number($('surfaceBrushSize').value).toFixed(2)} m`;
@@ -2246,6 +2337,7 @@ for (const eventName of ['pointerdown', 'pointermove', 'pointerup', 'pointercanc
       if (!requireWorkspaceEditZoom()) return;
       state.surfaceBrushDown = true;
       snapshotSurfaceUndo();
+      renderWorkspaceControls();
       $('workspaceMap').setPointerCapture?.(event.pointerId);
     } else if (eventName === 'pointerup' || eventName === 'pointercancel' || eventName === 'pointerleave') {
       state.surfaceBrushDown = false;
