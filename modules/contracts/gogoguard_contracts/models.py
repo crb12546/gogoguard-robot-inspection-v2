@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import math
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,49 @@ class MapJobState(str, Enum):
     PROCESSING = "processing"
     ARTIFACTS = "artifacts"
     COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class DiagnosticMode(str, Enum):
+    """Resource envelope for the temporary field-development recorder."""
+
+    DEVELOPMENT = "development"
+    ACCEPTANCE = "acceptance"
+    PRODUCTION = "production"
+
+
+class IncidentState(str, Enum):
+    CAPTURING = "capturing"
+    SEALING = "sealing"
+    SEALED = "sealed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class InteractionSessionState(str, Enum):
+    IDLE = "idle"
+    CONNECTING = "connecting"
+    LIVE = "live"
+    DEGRADED = "degraded"
+    STOPPING = "stopping"
+    FAILED = "failed"
+
+
+class ConversationWakeState(str, Enum):
+    SLEEPING = "sleeping"
+    AWAKE = "awake"
+
+
+class MissionState(str, Enum):
+    IDLE = "idle"
+    TRAVELING = "traveling"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+    INSPECTING = "inspecting"
+    WAITING_CONTINUE = "waiting_continue"
+    RESUMING = "resuming"
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
     FAILED = "failed"
 
 
@@ -60,6 +104,162 @@ class CameraStreamStatus:
     level: str | None = None
     message: str = "camera stream is not configured"
     observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InteractionCapabilities:
+    """Robot media-terminal capabilities; cloud AI is deliberately excluded."""
+
+    schema: str = "gogoguard.interaction_capabilities.v1"
+    video_uplink: bool = False
+    audio_uplink: bool = False
+    audio_downlink: bool = False
+    data_channel: bool = False
+    echo_control: str = "half_duplex"
+
+
+@dataclass(frozen=True)
+class RealtimeMediaSessionRequest:
+    """Validated connection request. The ephemeral token must never be logged."""
+
+    command_id: int | str
+    robot_id: str
+    url: str
+    room: str
+    token: str = field(repr=False, compare=False)
+    token_expires_at: str = ""
+    publish_video: bool = True
+    publish_audio: bool = True
+    subscribe_audio: bool = True
+    publish_data: bool = True
+
+
+@dataclass(frozen=True)
+class MediaConnectionReceipt:
+    participant_id: str
+    video_published: bool
+    audio_published: bool
+    audio_subscribed: bool
+    data_connected: bool
+
+
+@dataclass
+class InteractionSessionStatus:
+    """Public session state. Endpoint URLs and access tokens are excluded."""
+
+    schema: str = "gogoguard.interaction_session_status.v1"
+    robot_id: str = "go2-unconfigured"
+    room: str = ""
+    state: InteractionSessionState = InteractionSessionState.IDLE
+    desired_live: bool = False
+    participant_id: str = ""
+    video_published: bool = False
+    audio_published: bool = False
+    audio_subscribed: bool = False
+    data_connected: bool = False
+    microphone_muted: bool = False
+    token_expires_at: str | None = None
+    degraded_reason: str | None = None
+    last_error_code: str | None = None
+    last_error: str | None = None
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class ConversationWakeStatus:
+    schema: str = "gogoguard.conversation_wake_status.v1"
+    state: ConversationWakeState = ConversationWakeState.SLEEPING
+    wake_phrase: str = "小玖小玖"
+    wake_sequence: int = 0
+    awakened_at: str | None = None
+    last_activity_at: str | None = None
+    sleep_reason: str | None = None
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InspectionViewPlan:
+    """One camera direction, with the Z1Pro's mixed angle frames made explicit."""
+
+    view_id: str
+    pan_body_deg: float = 0.0
+    tilt_euler_deg: float = 0.0
+    roll_euler_deg: float = 0.0
+    settle_s: float = 0.5
+
+
+@dataclass(frozen=True)
+class CheckpointPlan:
+    checkpoint_id: str
+    route_progress_index: int
+    views: tuple[InspectionViewPlan, ...] = ()
+    spin: bool = True
+    dwell_s: float = 3.0
+
+
+@dataclass(frozen=True)
+class MissionPlan:
+    schema: str = "gogoguard.mission_plan.v1"
+    mission_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    offline_continue_after_evidence: bool = False
+    checkpoints: tuple[CheckpointPlan, ...] = ()
+    verdict_timeout_s: int = 15
+    max_retake_attempts: int = 2
+
+
+@dataclass(frozen=True)
+class NavigationStopReceipt:
+    """Proof of a stopped command chain, not acknowledgement of a request."""
+
+    schema: str = "gogoguard.navigation_stop_receipt.v1"
+    mission_id: str = ""
+    checkpoint_id: str = ""
+    pause_request_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    route_progress_index: int = 0
+    stopped: bool = False
+    motion_authorized: bool = False
+    linear_speed_mps: float = 0.0
+    angular_speed_rps: float = 0.0
+    stable_for_s: float = 0.0
+    observed_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class InspectionFrame:
+    schema: str = "gogoguard.inspection_frame.v1"
+    frame_id: str = ""
+    mission_id: str = ""
+    checkpoint_id: str = ""
+    view_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    captured_at: str = field(default_factory=utc_now)
+    pose: dict[str, float] = field(default_factory=dict)
+    localization_quality: dict[str, Any] = field(default_factory=dict)
+    content_type: str = "image/jpeg"
+    sha256: str = ""
+    byte_count: int = 0
+
+
+@dataclass
+class MissionStatus:
+    schema: str = "gogoguard.mission_status.v1"
+    mission_id: str = ""
+    map_version: str = ""
+    route_id: str = ""
+    state: MissionState = MissionState.IDLE
+    checkpoint_index: int = 0
+    active_checkpoint_id: str | None = None
+    pause_request_id: str | None = None
+    route_progress_index: int = 0
+    resume_route_progress_index: int = 0
+    reason: str = "IDLE"
+    resumable: bool = False
+    updated_at: str = field(default_factory=utc_now)
 
 
 @dataclass
@@ -98,6 +298,7 @@ class MapJob:
     session_id: str = ""
     state: MapJobState = MapJobState.QUEUED
     progress: int = 0
+    stage: str = "queued"
     message: str = "queued"
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
@@ -105,6 +306,52 @@ class MapJob:
     overview_url: str | None = None
     point_cloud_url: str | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
+    bytes_transferred: int = 0
+    bytes_total: int = 0
+    transfer_rate_bps: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class DiagnosticProfile:
+    schema: str = "gogoguard.diagnostic_profile.v1"
+    revision: int = 1
+    mode: DiagnosticMode = DiagnosticMode.PRODUCTION
+    pre_trigger_s: float = 15.0
+    post_trigger_s: float = 5.0
+    point_cloud_hz: float = 0.0
+    record_camera: bool = False
+    record_costmap: bool = False
+    record_planner_detail: bool = False
+    expires_at: str | None = None
+    remaining_patrols: int | None = None
+    max_incidents: int = 20
+    max_storage_bytes: int = 2 * 1024 * 1024 * 1024
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class IncidentBundle:
+    schema: str = "gogoguard.incident_bundle.v1"
+    incident_id: str = ""
+    state: IncidentState = IncidentState.CAPTURING
+    trigger: str = "manual"
+    triggered_at: str = field(default_factory=utc_now)
+    started_at: str | None = None
+    ended_at: str | None = None
+    site_id: str = ""
+    robot_id: str = ""
+    sensor_id: str = ""
+    map_version: str | None = None
+    route_id: str | None = None
+    navigation_profile_revision: int | None = None
+    diagnostic_profile_revision: int = 1
+    diagnostic_mode: DiagnosticMode = DiagnosticMode.PRODUCTION
+    root: str = ""
+    files: list[dict[str, Any]] = field(default_factory=list)
+    evidence_present: list[str] = field(default_factory=list)
+    evidence_missing: list[str] = field(default_factory=list)
+    summary: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -119,4 +366,6 @@ def json_ready(value: Any) -> Any:
         return {str(key): json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [json_ready(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     return value

@@ -5,8 +5,8 @@
   "policy": "selective capability migration; no wholesale application copy",
   "localSnapshot": {
     "root": "third_party/locked_stack",
-    "fileCount": 406,
-    "aggregateSha256": "52b14cabfebe83460102641a3fab9098aa3e1e2e0284544396d03e1e5f2e28ca",
+    "fileCount": 469,
+    "aggregateSha256": "a73711358591814522c2ba64b1c0250779d882c20b47e10c5560e7c7cef2f3d6",
     "digestAlgorithm": "sha256(relative_posix_path + NUL + sha256(file_bytes) + NUL) in sorted path order"
   },
   "firstRealSlice": {
@@ -40,6 +40,24 @@
   "laterSlices": {
     "localization": "small_gicp@8a2d3734f699c042db74ae61d295b0b928163526",
     "motion": "ROS 2 Humble Nav2 FollowPath + MPPI + Collision Monitor",
-    "robotControl": "unitree_sdk2@5ea10f3230e41c6ab62aa79f49f84afa685d84aa"
+    "robotControl": "unitree_sdk2@5ea10f3230e41c6ab62aa79f49f84afa685d84aa",
+    "sourceTrees": {
+      "src/go2_map_manager": "3a512028378552e8d15e24aecbf426fe12f3e00f",
+      "src/go2_cmd_vel_bridge": "db5778b46ef7b67a57b3b3cfc88244f1bee4415b",
+      "src/go2_nav2_interfaces": "295bd5396fc5e5d842bbf7c8a9724a069e90d697",
+      "src/go2_nav2_runtime": "f2a8c21bd98ba96774b7e03ae9f8dcdbd279e548",
+      "src/unitree_api": "b324e0f16a8b467ba3e12f834ef68b526a65fd88",
+      "src/go2_fastlio_patrol": "cb2027f649393c55096c33a20df9afa11f5615b3"
+    },
+    "compatibilityFixes": [
+      "runtime_trace_recorder uses _trace_handle because rclpy.Node.handle is read-only in the deployed Humble runtime",
+      "unitree_safe_cmd_node subscribes to PointCloud2 with sensor-data QoS so the BEST_EFFORT Livox stream reaches the safety gate",
+      "the site navigation manager owns the Unitree SDK receiver as a separately supervised process and rejects patrol start when that bridge is unavailable",
+      "startup VGICP uses a 0.65 m coarse scan leaf to preserve at least the unchanged 250-point quality evidence gate on the commissioned MID-360 scene",
+      "the Livox no-sync timestamp mapper rebases one common LiDAR/IMU epoch when the host realtime clock steps after driver startup",
+      "the commissioned Go2 navigation profile samples forward gait at or above 0.20 m/s while retaining zero stop and downstream collision slowdown",
+      "the first moving patrol receipt narrows SlowZone to the body plus 0.35 m lateral clearance and raises slowdown to 70 percent so passable walls do not force a sub-gait command",
+      "the 2026-08-07 delivery candidate assigns obstacle ownership to Collision Monitor, narrows the configurable SlowZone default to +/-0.30 m at 85 percent, adds bounded local-costmap A* to a future route anchor, localization dropout hysteresis and unfinished-route suffix recovery; robot acceptance is pending"
+    ]
   }
 }

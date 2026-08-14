@@ -1,0 +1,12 @@
+{
+  "id": "transfer",
+  "responsibility": "Immutable map artifact and revisioned navigation/checkpoint exchange across robot, workstation and cloud boundaries",
+  "runtime": ["robot", "workstation"],
+  "status": "immutable_map_plus_mutable_navigation_workspace_and_route_bound_checkpoints_republish_field_verified",
+  "codeRoots": ["modules/transfer"],
+  "entrypoints": ["gogoguard_transfer.edge:EdgeArtifactExchange", "gogoguard_field_workstation.robot_client:RobotClient"],
+  "dependsOn": ["contracts", "evidence"],
+  "consumes": ["sealed RecordingBundle", "cloud GLIM map artifacts", "operator navigation workspace"],
+  "produces": ["verified workstation recording", "immutable robot map version", "atomically replaceable robot navigation workspace and route-bound checkpoints"],
+  "sourceProvenance": ["V2 three-end transfer contract designed from the 2026-08-05 field transfer receipt", "2026-08-10 v6-r2 preserves committed GLIM artifacts while allowing the separately stored navigation-workspace revision to advance; repeated map-799f6f04e11d publication passed on the robot"]
+}

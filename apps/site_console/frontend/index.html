@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GoGoGuard 现场建图</title>
-  <link rel="stylesheet" href="/styles.css">
+  <title>GoGoGuard 现场交付工作台</title>
+  <link rel="stylesheet" href="/styles.css?v=20260812-gimbal1">
 </head>
 <body>
-  <header><div><small>GOGOGUARD · ROBOT INSPECTION V2</small><h1>现场建图控制台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
+  <header><div><small>GOGOGUARD · FIELD WORKSTATION</small><h1>现场交付工作台</h1></div><div id="modeBadge" class="badge">连接中</div></header>
   <main>
     <section class="status-row">
       <article><span>机器狗</span><strong id="robotState">等待数据</strong><small id="robotId">—</small></article>
@@ -17,7 +17,7 @@
     </section>
     <section class="workspace">
       <div class="visual-stack">
-        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe></article>
+        <article class="panel camera-panel"><div class="panel-title"><div><span>Z1Pro 实时画面</span><small id="cameraMessage">正在检查视频网关</small></div><b id="cameraState">连接中</b></div><iframe id="cameraFrame" title="Z1Pro 实时视频" allow="autoplay; fullscreen; picture-in-picture" loading="eager"></iframe><div class="gimbal-bar"><span>实际角度 <b id="gimbalAngles">左右 0° · 上下 0°</b></span><div class="gimbal-controls"><div class="gimbal-buttons"><button id="gimbalLeft" class="mini-button">左 1°</button><button id="gimbalRight" class="mini-button">右 1°</button><button id="gimbalUp" class="mini-button">上 1°</button><button id="gimbalDown" class="mini-button">下 1°</button><button id="gimbalCenter" class="mini-button">回中</button></div><form id="gimbalTargetForm" class="gimbal-target-form"><label>左右目标 <input id="gimbalPanTarget" type="number" min="-140" max="140" step="0.1" inputmode="decimal"><span>°</span></label><label>上下目标 <input id="gimbalTiltTarget" type="number" min="-110" max="120" step="0.1" inputmode="decimal"><span>°</span></label><button id="gimbalApplyTarget" class="mini-button" type="submit">转到这个角度</button></form><small id="gimbalControlMessage">目标角度可直接输入；正数为右/上</small></div></div></article>
         <article class="panel compact-map-panel"><div class="panel-title"><div><span>实时轨迹</span><small>俯视图 · 米</small></div><b id="pose">0.00, 0.00</b></div><canvas id="trajectory"></canvas></article>
       </div>
       <article class="panel map-panel"><div class="panel-title"><div><span>实时点云</span><small>拖动旋转 · 滚轮缩放</small></div><b id="pointCount">0 点</b></div><canvas id="cloud"></canvas></article>
@@ -25,17 +25,170 @@
         <div class="panel-title"><div><span>录制与建图</span><small>人工遥控机器狗移动</small></div></div>
         <div class="step active"><i>1</i><div><strong>确认数据</strong><small>轨迹与点云持续更新</small></div></div>
         <div class="step"><i>2</i><div><strong>录制现场</strong><small id="recordInfo">等待开始</small></div></div>
-        <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">停止录制后自动提交</small></div></div>
+        <div class="step"><i>3</i><div><strong>封存并建图</strong><small id="jobMessage">狗 → Mac → 阿里云 GLIM</small></div></div>
         <div class="progress"><div id="jobProgress"></div></div>
+        <small id="transferDetail" class="transfer-detail">尚未传输</small>
+        <div id="checkpointRecorder" class="checkpoint-recorder" hidden>
+          <strong>巡检点记录</strong>
+          <input id="checkpointNote" maxlength="200" placeholder="可选：例如配电间门口">
+          <button id="markCheckpoint">停在这里：记录点位并拍样张</button>
+          <div id="recordingCheckpoints" class="checkpoint-list">尚未标记</div>
+        </div>
         <button id="recordButton">开始录制地图</button>
         <div id="error" class="error"></div>
       </aside>
     </section>
     <section class="results">
-      <article class="panel result-panel"><div class="panel-title"><div><span>最近建图结果</span><small id="resultMeta">还没有结果</small></div></div><div id="resultEmpty" class="empty">完成一次录制后，这里会显示云端 GLIM 返回的二维概览和三维点云。当前本机演示会明确标记为模拟结果。</div><img id="overview" alt="地图概览"><canvas id="resultCloud"></canvas></article>
-      <article class="panel history"><div class="panel-title"><div><span>录制历史</span><small>本机封存证据</small></div></div><div id="sessions"></div></article>
+      <article class="panel result-panel"><div class="panel-title"><div><span>当前选中地图</span><small id="resultMeta">还没有结果</small></div><div class="layer-switches"><label><input id="showMapPoints" type="checkbox" checked>点云</label><label><input id="showMapRoute" type="checkbox" checked>GLIM 轨迹</label><button id="resetMapView" class="mini-button">重置 3D</button></div></div><div id="resultEmpty" class="empty">选择一张历史地图后，这里同时显示 2D 概览和可旋转、缩放的 3D 点云。</div><div class="map-review"><figure><figcaption>2D 俯视概览</figcaption><img id="overview" alt="地图概览"></figure><figure><figcaption>3D 点云 · 拖动旋转 · 滚轮缩放</figcaption><canvas id="resultCloud"></canvas></figure></div></article>
+      <article class="panel history"><div class="panel-title"><div><span>现场资产历史</span><small>录制、地图与路线按版本保留</small></div></div><h3>可用地图版本</h3><div id="maps"></div><h3>建图处理任务</h3><div id="mapTasks"></div><h3>录制包</h3><div id="sessions"></div></article>
+    </section>
+    <section class="map-workbench">
+      <article class="panel map-workbench-canvas-panel">
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>灰色是地图，蓝色是要走的路，绿色是允许进入的范围</small></div><b id="workspaceBadge">请先选地图</b></div>
+        <canvas id="workspaceMap"></canvas>
+        <div class="workspace-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>巡检路线</span><span><i class="allowed-area-swatch"></i>允许范围</span></div>
+      </article>
+      <article class="panel map-workbench-controls">
+        <div class="panel-title"><div><span>准备巡检材料</span><small>只需要确认一条路线和一块允许范围</small></div></div>
+        <div class="workbench-explanation">地图上偶然的人和车由 3D 清理工具处理。这里不再叠加多套“安全形状”，绿色边界是唯一的业务禁入线，机器狗自身半径为 0.48 m。</div>
+        <div class="glim-editor-actions">
+          <strong>1. 需要时先清理 3D 地图</strong>
+          <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
+          <div><button id="publishGlimEditor" hidden>已保存，生成新地图版本</button><button id="stopGlimEditor" class="secondary" hidden>关闭清图会话</button></div>
+          <small id="glimEditorState">需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。</small>
+        </div>
+        <strong class="workspace-step-title">2. 确认蓝色路线和绿色允许范围</strong>
+        <div class="workbench-actions">
+          <button id="editRoute" class="secondary">重画蓝色巡检路线</button>
+          <button id="restoreRecordedRoute" class="secondary">恢复录制路线</button>
+          <button id="editAllowedArea" class="secondary">绘制绿色允许范围</button>
+          <button id="undoWorkspacePoint" class="secondary">撤销上一个点</button>
+          <button id="cancelWorkspaceEdit" class="secondary">取消本次编辑</button>
+          <button id="saveWorkspace">保存路线与允许范围</button>
+        </div>
+        <div id="workspaceHelp" class="workspace-help">选择已完成的地图后，录制轨迹会自动成为蓝色路线。</div>
+        <div class="checkpoint-audit">
+          <strong>3. 复核巡检点</strong>
+          <small id="checkpointAudit">保存路线和绿色区域后，这里会显示录制时标记的点位。</small>
+          <div id="checkpointAuditList" class="checkpoint-list"></div>
+        </div>
+        <div id="workspaceError" class="error"></div>
+      </article>
+    </section>
+    <section class="navigation-lab">
+      <article class="panel navigation-map-panel">
+        <div class="panel-title"><div><span>地图定位与巡检路线</span><small>GLIM 地图 · 固定路线 · 实时定位</small></div><b id="localizationBadge">尚未启动</b></div>
+        <canvas id="navigationMap"></canvas>
+        <div class="map-legend"><span><i class="map-dot"></i>地图</span><span><i class="route-line"></i>巡检路线</span><span><i class="allowed-area-swatch"></i>允许范围</span><span><i class="robot-dot"></i>机器狗</span></div>
+      </article>
+      <article class="panel navigation-control-panel">
+        <div class="panel-title"><div><span>巡检操作向导</span><small id="navigationCandidate">等待地图</small></div><b id="runtimeBadge">未准备</b></div>
+        <div class="workflow-message" id="workflowMessage">请从右上方历史中选择一张可用地图。页面会只突出当前需要的下一步。</div>
+        <div class="guided-flow">
+          <div class="guided-step" id="assetStep"><i>1</i><div><strong>地图与路线</strong><small id="assetStepHelp">更换地图，或修改蓝线、绿色区域、巡检点后，都需重新发布到机器狗</small></div><b id="assetStepState">未选择</b></div>
+          <div class="guided-step" id="runtimeStep"><i>2</i><div><strong>定位与 Nav2</strong><small id="runtimeStepHelp">启动后等待“定位可用”，不用重复点击</small></div><b id="runtimeStepState">未启动</b></div>
+          <div class="guided-step" id="patrolStep"><i>3</i><div><strong>开始巡检</strong><small id="patrolStepHelp">机器狗站稳且定位可用后，按记录路线行走</small></div><b id="patrolStepState">等待</b></div>
+        </div>
+        <div class="nav-metrics">
+          <div><span>固定地图定位</span><strong id="localizationState">—</strong><small id="localizationDetail">等待 VGICP</small></div>
+          <div><span>路线</span><strong id="routeLength">—</strong><small id="routePoints">尚未生成</small></div>
+          <div><span>任务状态</span><strong id="patrolState">—</strong><small id="patrolReason">尚未启动</small></div>
+          <div><span>实际下发速度</span><strong id="finalVelocity">0.00 m/s</strong><small id="motionAuthority">运动权关闭</small></div>
+          <div><span>路线进度</span><strong id="routeProgress">0%</strong><small id="remainingRoute">尚未开始</small></div>
+          <div><span>最近操作</span><strong id="operationState">无</strong><small id="operationMessage">点击后会在这里持续显示结果</small></div>
+        </div>
+        <div class="nav-actions">
+          <button id="prepareNavigation">发布所选地图与路线到机器狗</button>
+          <small id="prepareNavigationHelp" class="action-help">更换地图，或修改蓝线、绿色区域、巡检点后都需要；每次保存会生成一个可追溯的新版本。</small>
+          <a id="downloadPlatformBundle" class="button-link secondary" download hidden>导出给平台的地图与路线包</a>
+          <small id="downloadPlatformBundleHelp" class="action-help" hidden>包含 PCD、可编辑路线、真实执行路线、绿色允许区和校验清单，供平台展示和标点。</small>
+          <button id="uploadPlatformBundle" class="secondary" hidden>导出并上传到 GoGoGuard 平台</button>
+          <div id="platformUpload" class="upload-status" hidden><div><i id="platformUploadProgress"></i></div><small id="platformUploadMessage">尚未上传</small></div>
+          <button id="startRuntime" class="secondary">启动定位与 Nav2</button>
+          <small id="startRuntimeHelp" class="action-help">会启动 FAST-LIO 地图定位、Nav2/MPPI 和运动桥；启动后等待定位可用。</small>
+          <button id="resetLocalization" class="secondary">机器狗位置不对：重新定位</button>
+          <button id="recoverRuntime" class="secondary">运行异常：自动清理并恢复</button>
+          <button id="startPatrol">开始巡检</button>
+          <button id="stopPatrol" class="stop">停止巡检并释放遥控权</button>
+          <small id="stopPatrolHelp" class="action-help">任何运行、故障或卡住状态都可以使用；会关闭 Nav2 速度链和 SDK 运动接收器，之后遥控器可直接控制机器狗。</small>
+        </div>
+        <div id="navigationError" class="error"></div>
+      </article>
+    </section>
+    <section id="checkpointValidation" class="checkpoint-validation panel" hidden>
+      <div class="panel-title"><div><span>本地巡检点验收</span><small id="checkpointValidationHint">机器狗到点真实停车后，对比录制样张与当前画面</small></div><b id="checkpointValidationState">等待到点</b></div>
+      <div class="checkpoint-comparison">
+        <figure><figcaption>录制时的参考照片</figcaption><img id="checkpointReference" alt="录制时的巡检点参考照片"></figure>
+        <figure><figcaption>当前 Z1Pro 实时画面</figcaption><iframe id="checkpointCameraFrame" title="巡检点 Z1Pro 实时画面" allow="autoplay; fullscreen; picture-in-picture"></iframe></figure>
+      </div>
+      <div class="checkpoint-validation-footer">
+        <div><strong id="checkpointValidationTitle">等待巡检点</strong><small id="checkpointValidationMeta">到点后会自动调整机身和镜头，并保持停车等您确认。</small><small>如需人工微调，可使用页面顶部的“左右/上下目标”直接输入角度。</small></div>
+        <div id="checkpointVerdictActions" class="checkpoint-verdict-actions" hidden>
+          <button id="checkpointContinue">通过并到下一点</button>
+          <button id="checkpointRetake" class="secondary">重新对准并再看一次</button>
+          <button id="checkpointSkip" class="secondary">跳过本点并继续</button>
+        </div>
+      </div>
+    </section>
+    <section class="engineering-grid">
+      <details class="panel engineering-panel" id="parameterPanel">
+        <summary><span>参数中心</span><small>速度、定位与 MPPI；保存前会校验，可回滚</small></summary>
+        <div class="parameter-note">日常只调整下面的常用参数。保存后需重启“定位与 Nav2”生效，正在巡检时不允许修改。</div>
+        <div class="parameter-grid">
+          <label>MPPI前进速度上限 (m/s)<input id="straightSpeed" type="number" min="0.4" max="0.9" step="0.05"></label>
+          <label>接收链路硬上限 (m/s)<input id="maxForwardSpeed" type="number" min="0.6" max="0.9" step="0.05"></label>
+          <label>加速度 (m/s²)<input id="acceleration" type="number" min="0.5" max="4" step="0.1"></label>
+          <label>减速度 (m/s²)<input id="deceleration" type="number" min="0.5" max="5" step="0.1"></label>
+          <label>转弯角速度 (rad/s)<input id="turnSpeed" type="number" min="0.1" max="0.6" step="0.05"></label>
+          <label>侧向避障速度 (m/s)<input id="lateralSpeed" type="number" min="0.05" max="0.2" step="0.05"></label>
+          <label>无运动进展超时 (秒)<input id="progressTimeout" type="number" min="2" max="12" step="0.5"></label>
+          <label>定位断流容忍 (秒)<input id="dropoutGrace" type="number" min="0.2" max="5" step="0.1"></label>
+          <label>路线阻塞检查前视 (m)<input id="rejoinLookahead" type="number" min="0.5" max="6" step="0.25"></label>
+        </div>
+        <details class="advanced-parameters"><summary>工程参数（一般不需要改）</summary><div class="parameter-grid">
+          <label>定位消息超时 (秒)<input id="localizationTimeout" type="number" min="0.2" max="2" step="0.1"></label>
+          <label>定位恢复稳定 (秒)<input id="recoveryStable" type="number" min="0.2" max="3" step="0.1"></label>
+          <label>MPPI 频率 (Hz)<input id="controllerFrequency" type="number" min="10" max="30" step="1"></label>
+          <label>MPPI 时域步数<input id="mppiTimeSteps" type="number" min="20" max="80" step="1"></label>
+          <label>MPPI 样本数<input id="mppiBatchSize" type="number" min="200" max="2000" step="50"></label>
+          <label>持续重规划间隔 (秒)<input id="replanInterval" type="number" min="0.25" max="3" step="0.05"></label>
+          <label>路线障碍代价阈值<input id="obstructionCost" type="number" min="1" max="100" step="1"></label>
+          <label>路线障碍连续样本<input id="obstructionSamples" type="number" min="1" max="10" step="1"></label>
+          <label>路线障碍持续确认 (秒)<input id="obstructionConfirmation" type="number" min="0.2" max="2" step="0.1"></label>
+        </div></details>
+        <div class="inline-actions"><button id="saveProfile">保存新参数</button><button id="rollbackProfile" class="secondary">回滚上一版</button><small id="profileMessage">正在读取参数</small></div>
+      </details>
+      <details class="panel engineering-panel" id="diagnosticPanel">
+        <summary><span>诊断中心</span><small>一次看清定位、Nav2、避障和运动桥是哪一层出问题</small></summary>
+        <div class="inline-actions"><button id="refreshDiagnostics" class="secondary">立即分析当前运行状态</button><small id="diagnosticSummary">尚未分析</small></div>
+        <div id="diagnosticChecks" class="diagnostic-checks"></div>
+        <details class="log-details"><summary>查看最近错误摘要</summary><pre id="diagnosticLogs">暂无</pre></details>
+      </details>
+    </section>
+    <section class="incident-lab">
+      <article class="panel incident-control">
+        <div class="panel-title"><div><span>研发事故记录</span><small>完整采集只在研发期间开启，到期自动回到生产模式</small></div><b id="diagnosticModeBadge">读取中</b></div>
+        <div class="diagnostic-profile-form">
+          <label>诊断档位<select id="diagnosticMode"><option value="development">研发：完整点云+视频+规划过程</option><option value="acceptance">验收：低频点云+代价地图</option><option value="production">生产：仅轻量状态日志</option></select></label>
+          <label>自动恢复<select id="diagnosticLifetime"><option value="next1">仅接下来 1 次巡检</option><option value="next3">接下来 3 次巡检</option><option value="60m">60 分钟后</option><option value="manual">手动关闭</option></select></label>
+        </div>
+        <div class="profile-explanation" id="diagnosticProfileHelp">研发模式会记录故障前 15 秒与后 5 秒；数据停车后同步到 Mac。</div>
+        <div class="inline-actions"><button id="saveDiagnosticMode">应用诊断档位</button><button id="captureIncident" class="secondary">手动保存当前现场</button><small id="diagnosticProfileMessage">正在读取</small></div>
+        <h3>事故历史</h3><div id="incidents" class="incident-list"><div class="asset-empty">暂无事故记录</div></div>
+      </article>
+      <article class="panel incident-replay">
+        <div class="panel-title"><div><span>同步现场回放</span><small id="incidentReplayMeta">选择一条事故，同时看现实、传感、规划与执行</small></div><b id="incidentReplayState">未选择</b></div>
+        <div id="incidentTruth" class="incident-truth">事故包会明确标记已有和缺失的证据，不会把推测写成现场事实。</div>
+        <div class="incident-views">
+          <figure><figcaption>摄像头现场</figcaption><video id="incidentVideo" controls muted playsinline></video><div id="incidentVideoMissing" class="incident-missing">没有同步视频</div></figure>
+          <figure><figcaption>3D 点云</figcaption><canvas id="incidentCloud"></canvas></figure>
+          <figure><figcaption>代价地图、原路线与 Nav2 规划</figcaption><canvas id="incidentPlan"></canvas></figure>
+          <figure><figcaption>当时状态与决策</figcaption><pre id="incidentDecision">暂无数据</pre></figure>
+        </div>
+        <div class="incident-timeline"><span id="incidentTimeLabel">0.0 s</span><input id="incidentTimeline" type="range" min="0" max="0" step="0.1" value="0"></div>
+      </article>
     </section>
   </main>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260812-gimbal1"></script>
 </body>
 </html>

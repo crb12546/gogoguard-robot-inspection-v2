@@ -10,12 +10,18 @@
     "source": "z1pro",
     "stream_path": "z1pro",
     "webrtc_port": 8889,
-    "status_url": "http://127.0.0.1:9997/v3/paths/get/z1pro"
+    "status_url": "http://127.0.0.1:9997/v3/paths/get/z1pro",
+    "capture_url": "rtsp://192.168.144.108/",
+    "capture_timeout_s": 8
   },
-  "cloud": {
-    "host": "39.96.72.215",
-    "user": "root",
-    "remote_root": "/opt/go2/jobs",
-    "remote_command": "/opt/go2/bin/gogoguard-map-job"
+  "gimbal": {
+    "host": "192.168.144.108",
+    "port": 2332,
+    "timeout_s": 1.5,
+    "command_hz": 40,
+    "move_timeout_s": 3.0,
+    "angle_tolerance_deg": 2.0,
+    "confirmation_samples": 3,
+    "commissioned": true
   }
 }

@@ -22,6 +22,8 @@ for required_file in \
   "$STAGING_DIRECTORY/release.env" \
   "$STAGING_DIRECTORY/runtime.json" \
   "$STAGING_DIRECTORY/run-edge" \
+  "$STAGING_DIRECTORY/configure-combined-joint-test" \
+  "$STAGING_DIRECTORY/wait-clock-sync" \
   "$STAGING_DIRECTORY/gogoguard-edge.service"; do
   if [[ ! -f $required_file ]]; then
     echo "missing staged release file: $required_file" >&2
@@ -46,7 +48,27 @@ docker load --input "$IMAGE_ARCHIVE"
 
 install -d -m 0755 /opt/gogoguard/bin /etc/gogoguard /var/lib/gogoguard
 install -m 0755 "$STAGING_DIRECTORY/run-edge" /opt/gogoguard/bin/run-edge
-install -m 0644 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
+install -m 0755 "$STAGING_DIRECTORY/configure-combined-joint-test" \
+  /opt/gogoguard/bin/configure-combined-joint-test
+install -m 0755 "$STAGING_DIRECTORY/wait-clock-sync" \
+  /opt/gogoguard/bin/wait-clock-sync
+if [[ -f /etc/gogoguard/runtime.env ]]; then
+  runtime_temporary=$(mktemp /etc/gogoguard/.runtime.env.install.XXXXXX)
+  cp /etc/gogoguard/runtime.env "$runtime_temporary"
+  while IFS= read -r runtime_line; do
+    if [[ $runtime_line =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]]; then
+      runtime_key=${BASH_REMATCH[1]}
+      if ! grep -q "^${runtime_key}=" "$runtime_temporary"; then
+        printf '%s\n' "$runtime_line" >> "$runtime_temporary"
+      fi
+    fi
+  done < "$STAGING_DIRECTORY/runtime.env"
+  install -m 0600 "$runtime_temporary" /etc/gogoguard/runtime.env
+  rm -f "$runtime_temporary"
+  echo "Preserved commissioned runtime values and added missing release defaults."
+else
+  install -m 0600 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
+fi
 install -m 0644 "$STAGING_DIRECTORY/release.env" /etc/gogoguard/release.env
 install -m 0644 "$STAGING_DIRECTORY/runtime.json" /etc/gogoguard/runtime.json
 install -m 0644 "$STAGING_DIRECTORY/gogoguard-edge.service" \

@@ -1,0 +1,364 @@
+--- a/go2_map_manager/config/continuous_map_localizer.yaml
++++ b/go2_map_manager/config/continuous_map_localizer.yaml
+@@ -4,7 +4,7 @@
+     map_file: ""
+     map_version: ""
+     # The immutable runtime profile selects this exact reviewed parameter set.
+-    quality.profile_id: go2-vgicp-orin-v1
++    quality.profile_id: go2-vgicp-orin-v2
+     registration.type: VGICP
+
+     cloud_topic: /navigation/cloud_body
+@@ -19,7 +19,7 @@
+     max_odom_cloud_skew_s: 0.08
+     min_scan_z: -1.5
+     max_scan_z: 2.5
+-    max_scan_range: 35.0
++    max_scan_range: 24.0
+     tracking_scan_leaf: 0.25
+     # Keep enough startup geometry on the commissioned MID-360 scene to meet
+     # the unchanged 250-point quality gate after a controlled reset.
+@@ -27,10 +27,10 @@
+     tracking_map_leaf: 0.30
+     coarse_map_leaf: 0.80
+     registration_threads: 4
+-    # Full maps are indexed once; registrations only see this nearby target.
+-    # 45m covers the 35m scan, 6m start/recovery envelope and 3m coarse gate.
+-    local_map.radius_m: 45.0
+-    local_map.refresh_distance_m: 5.0
++    # Full maps are indexed once; registrations see a bounded nearby target.
++    # 32 m exactly covers 24 m scan + 5 m start/recovery + 3 m coarse gate.
++    local_map.radius_m: 32.0
++    local_map.refresh_distance_m: 4.0
+
+     # This is a broad, map-versioned physical start zone, not a manually
+     # entered pose and not a promise that the dog was placed precisely.
+@@ -69,6 +69,12 @@
+     # pose. It never sends a mid-route robot back to the startup zone.
+     recovery.xy_radius: 4.0
+     recovery.yaw_radius_deg: 45.0
++    # A LOST recovery may inspect the broad search window, but one good-looking
++    # match is never allowed to replace the last trusted pose.  The accepted
++    # map->odom correction must remain close to FAST-LIO and repeat three times.
++    recovery.confirmation_count: 3
++    recovery.consistency_translation_m: 0.30
++    recovery.consistency_rotation_deg: 6.0
+
+     tracking.max_correspondence_m: 1.2
+     tracking.max_iterations: 30
+@@ -78,7 +84,7 @@
+     tracking.usable_timeout_s: 1.0
+     tracking.lost_timeout_s: 2.5
+
+-    # Exact go2-vgicp-orin-v1 values. The node rejects a matching profile ID
++    # Exact go2-vgicp-orin-v2 values. The node rejects a matching profile ID
+     # paired with different thresholds, so map binding cannot be cosmetic.
+     quality.min_input_points: 250
+     quality.min_inlier_ratio: 0.20
+--- a/go2_map_manager/src/continuous_map_localizer.cpp
++++ b/go2_map_manager/src/continuous_map_localizer.cpp
+@@ -276,15 +276,15 @@
+     max_odom_cloud_skew_s_ = declare_parameter<double>("max_odom_cloud_skew_s", 0.08);
+     min_scan_z_ = declare_parameter<double>("min_scan_z", -1.5);
+     max_scan_z_ = declare_parameter<double>("max_scan_z", 2.5);
+-    max_scan_range_ = declare_parameter<double>("max_scan_range", 35.0);
++    max_scan_range_ = declare_parameter<double>("max_scan_range", 24.0);
+     tracking_scan_leaf_ = declare_parameter<double>("tracking_scan_leaf", 0.25);
+     coarse_scan_leaf_ = declare_parameter<double>("coarse_scan_leaf", 0.65);
+     tracking_map_leaf_ = declare_parameter<double>("tracking_map_leaf", 0.30);
+     coarse_map_leaf_ = declare_parameter<double>("coarse_map_leaf", 0.80);
+     registration_threads_ = declare_parameter<int>("registration_threads", 4);
+-    local_map_radius_m_ = declare_parameter<double>("local_map.radius_m", 45.0);
++    local_map_radius_m_ = declare_parameter<double>("local_map.radius_m", 32.0);
+     local_map_refresh_distance_m_ = declare_parameter<double>(
+-      "local_map.refresh_distance_m", 5.0);
++      "local_map.refresh_distance_m", 4.0);
+     initial_x_ = declare_parameter<double>("initialization.center_x", 0.0);
+     initial_y_ = declare_parameter<double>("initialization.center_y", 0.0);
+     initial_z_ = declare_parameter<double>("initialization.center_z", 0.0);
+@@ -301,6 +301,11 @@
+       "initialization.result_yaw_margin_deg", 5.0);
+     recovery_xy_radius_ = declare_parameter<double>("recovery.xy_radius", 4.0);
+     recovery_yaw_radius_deg_ = declare_parameter<double>("recovery.yaw_radius_deg", 45.0);
++    recovery_confirmation_count_ = declare_parameter<int>("recovery.confirmation_count", 3);
++    recovery_consistency_translation_m_ = declare_parameter<double>(
++      "recovery.consistency_translation_m", 0.30);
++    recovery_consistency_rotation_deg_ = declare_parameter<double>(
++      "recovery.consistency_rotation_deg", 6.0);
+     initial_accumulation_window_s_ = declare_parameter<double>(
+       "initialization.accumulation_window_s", 2.5);
+     initial_min_duration_s_ = declare_parameter<double>(
+@@ -382,8 +387,13 @@
+     odom_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+       odom_topic_, rclcpp::SensorDataQoS(),
+       std::bind(&ContinuousMapLocalizer::odom_callback, this, std::placeholders::_1));
++    auto cloud_qos = rclcpp::SensorDataQoS();
++    // VGICP can take longer than the LiDAR period on a large recovery map.
++    // Retain only the newest unprocessed cloud instead of replaying a stale
++    // DDS backlog after each synchronous registration.
++    cloud_qos.keep_last(1);
+     cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+-      cloud_topic_, rclcpp::SensorDataQoS(),
++      cloud_topic_, cloud_qos,
+       std::bind(&ContinuousMapLocalizer::cloud_callback, this, std::placeholders::_1));
+     tf_timer_ = create_wall_timer(
+       std::chrono::milliseconds(50), std::bind(&ContinuousMapLocalizer::publish_transform, this));
+@@ -426,14 +436,20 @@
+     if (map_version_.empty()) {
+       throw std::runtime_error("map_version is required; unversioned maps are forbidden");
+     }
+-    if (quality_profile_id_ != "go2-vgicp-orin-v1") {
++    const bool quality_v1 = quality_profile_id_ == "go2-vgicp-orin-v1";
++    const bool quality_v2 = quality_profile_id_ == "go2-vgicp-orin-v2";
++    if (!quality_v1 && !quality_v2) {
+       throw std::runtime_error("unsupported or missing sealed localization quality profile");
+     }
+     if (registration_type_ != "VGICP") {
+       throw std::runtime_error("production localization registration.type must be VGICP");
+     }
+-    if (!near(local_map_radius_m_, 45.0) ||
+-      !near(local_map_refresh_distance_m_, 5.0) || !near(max_scan_range_, 35.0) ||
++    const double expected_local_radius = quality_v2 ? 32.0 : 45.0;
++    const double expected_refresh_distance = quality_v2 ? 4.0 : 5.0;
++    const double expected_scan_range = quality_v2 ? 24.0 : 35.0;
++    if (!near(local_map_radius_m_, expected_local_radius) ||
++      !near(local_map_refresh_distance_m_, expected_refresh_distance) ||
++      !near(max_scan_range_, expected_scan_range) ||
+       !near(tracking_scan_leaf_, 0.25) || !near(coarse_scan_leaf_, 0.65) ||
+       !near(tracking_map_leaf_, 0.30) || !near(coarse_map_leaf_, 0.80) ||
+       registration_threads_ != 4 || !near(coarse_correspondence_m_, 3.0) ||
+@@ -446,10 +462,13 @@
+       !near(thresholds_.max_hessian_condition, 1.0e8) ||
+       !near(thresholds_.max_correction_translation_m, 0.75) ||
+       !near(thresholds_.max_correction_rotation_deg, 15.0) ||
+-      !near(thresholds_.max_input_age_s, 0.35))
++      !near(thresholds_.max_input_age_s, 0.35) ||
++      recovery_confirmation_count_ != 3 ||
++      !near(recovery_consistency_translation_m_, 0.30) ||
++      !near(recovery_consistency_rotation_deg_, 6.0))
+     {
+       throw std::runtime_error(
+-              "ROS parameters do not match sealed quality profile go2-vgicp-orin-v1");
++              "ROS parameters do not match the selected sealed quality profile");
+     }
+     if (map_frame_ != "map" || odom_frame_ != "odom" || base_frame_ != "base_link") {
+       throw std::runtime_error("frame contract must remain map -> odom -> base_link");
+@@ -563,6 +582,8 @@
+     last_assessment_ = RegistrationAssessment{};
+     last_assessment_.reason = "controlled_reset";
+     recovery_search_active_ = false;
++    recovery_confirmation_count_seen_ = 0;
++    pending_recovery_map_from_odom_ = Eigen::Isometry3d::Identity();
+     recovery_center_map_from_base_ = Eigen::Isometry3d::Identity();
+     local_map_center_valid_ = false;
+     state_machine_.begin_search();
+@@ -792,6 +813,7 @@
+     if (!has_trusted_transform_) {
+       recovery_search_active_ = false;
+       has_transform_ = false;
++      recovery_confirmation_count_seen_ = 0;
+       initial_scans_.clear();
+       state_machine_.begin_search();
+       RCLCPP_WARN(
+@@ -811,6 +833,8 @@
+     }
+     recovery_search_active_ = true;
+     has_transform_ = false;
++    recovery_confirmation_count_seen_ = 0;
++    pending_recovery_map_from_odom_ = Eigen::Isometry3d::Identity();
+     initial_scans_.clear();
+     state_machine_.mark_lost();
+     RCLCPP_WARN(
+@@ -855,6 +879,25 @@
+     return recovery_search_active_ ? recovery_yaw_radius_deg_ : initial_yaw_radius_deg_;
+   }
+
++  bool confirm_recovery_candidate(const Eigen::Isometry3d & candidate_map_from_odom)
++  {
++    const bool begins_cluster = recovery_confirmation_count_seen_ == 0;
++    const bool agrees_with_cluster = !begins_cluster &&
++      (candidate_map_from_odom.translation() -
++      pending_recovery_map_from_odom_.translation()).norm() <=
++      recovery_consistency_translation_m_ &&
++      degrees(rotation_distance(
++          pending_recovery_map_from_odom_, candidate_map_from_odom)) <=
++      recovery_consistency_rotation_deg_;
++    if (begins_cluster || !agrees_with_cluster) {
++      pending_recovery_map_from_odom_ = candidate_map_from_odom;
++      recovery_confirmation_count_seen_ = 1;
++    } else {
++      ++recovery_confirmation_count_seen_;
++    }
++    return recovery_confirmation_count_seen_ >= recovery_confirmation_count_;
++  }
++
+   void record_registration_timing(
+     const std::chrono::steady_clock::time_point & started,
+     bool tracking_deadline_applies)
+@@ -884,6 +927,19 @@
+       return;
+     }
+     const double cloud_stamp = stamp_seconds(message->header.stamp);
++    const double queued_input_age_s = std::max(0.0, now().seconds() - cloud_stamp);
++    if (queued_input_age_s > thresholds_.max_input_age_s) {
++      // Input freshness is a scheduling property, not geometric evidence.
++      // Ignore this frame without clearing an otherwise consistent recovery
++      // cluster or advancing the localization state machine toward LOST.
++      ++stale_input_discard_count_;
++      last_metrics_ = RegistrationMetrics{};
++      last_metrics_.input_age_s = queued_input_age_s;
++      last_assessment_ = RegistrationAssessment{};
++      last_assessment_.reason = "stale_input";
++      publish_status();
++      return;
++    }
+     OdomSample odom;
+     if (!matching_odometry(cloud_stamp, odom)) {
+       publish_rejection("missing_time_aligned_odometry");
+@@ -960,7 +1015,18 @@
+         rotation_distance(map_from_odom_, candidate_map_from_odom));
+     }
+
+-    const bool enforce_jump_limit = has_transform_;
++    Eigen::Isometry3d candidate_map_from_odom =
++      run.map_from_base * odom.odom_from_base.inverse();
++    if (recovery_search_active_) {
++      // Recovery still owns the last trusted map->odom transform.  Express the
++      // candidate as a correction to that immutable anchor so the normal jump
++      // gates remain active even while map TF publication is paused.
++      run.metrics.correction_translation_m =
++        (candidate_map_from_odom.translation() - map_from_odom_.translation()).norm();
++      run.metrics.correction_rotation_deg = degrees(
++        rotation_distance(map_from_odom_, candidate_map_from_odom));
++    }
++    const bool enforce_jump_limit = has_transform_ || recovery_search_active_;
+     const RegistrationAssessment assessment = go2_map_manager::assess_registration(
+       run.metrics, thresholds_, enforce_jump_limit);
+     last_metrics_ = run.metrics;
+@@ -981,6 +1047,9 @@
+     }
+
+     if (!assessment.accepted) {
++      if (recovery_search_active_) {
++        recovery_confirmation_count_seen_ = 0;
++      }
+       if (state_machine_.observe(false) == LocalizationState::kLost) {
+         begin_recovery_search(&odom);
+       }
+@@ -989,7 +1058,13 @@
+       return;
+     }
+
+-    Eigen::Isometry3d candidate_map_from_odom = run.map_from_base * odom.odom_from_base.inverse();
++    if (recovery_search_active_ && !confirm_recovery_candidate(candidate_map_from_odom)) {
++      last_assessment_.accepted = false;
++      last_assessment_.reason = "recovery_confirmation_pending";
++      record_registration_timing(registration_started, tracking_update);
++      publish_status();
++      return;
++    }
+     if (has_transform_) {
+       map_from_odom_ = blend_transform(
+         map_from_odom_, candidate_map_from_odom, smoothing_alpha_,
+@@ -999,6 +1074,12 @@
+       has_transform_ = true;
+       has_trusted_transform_ = true;
+       initial_scans_.clear();
++      if (recovery_search_active_) {
++        // mark_lost() intentionally blocks publication during search.  Start
++        // the normal two-good-sample acquisition only after the independent
++        // three-candidate recovery confirmation has succeeded.
++        state_machine_.begin_search();
++      }
+     }
+     last_accepted_time_ = steady_now;
+     last_map_from_base_ = map_from_odom_ * odom.odom_from_base;
+@@ -1231,6 +1312,9 @@
+          << ",\"searchCenterX\":" << json_number(search_center_x())
+          << ",\"searchCenterY\":" << json_number(search_center_y())
+          << ",\"searchRadiusM\":" << json_number(search_xy_radius())
++         << ",\"recoveryConfirmations\":" << recovery_confirmation_count_seen_
++         << ",\"recoveryConfirmationsRequired\":" << recovery_confirmation_count_
++         << ",\"staleInputDiscardCount\":" << stale_input_discard_count_
+          << ",\"registrationMs\":" << json_number(last_registration_ms_)
+          << ",\"registrationMode\":\"" << last_registration_mode_ << "\""
+          << ",\"maximumRegistrationMs\":" << json_number(maximum_registration_ms_)
+@@ -1309,14 +1393,14 @@
+   double max_odom_cloud_skew_s_ = 0.08;
+   double min_scan_z_ = -1.5;
+   double max_scan_z_ = 2.5;
+-  double max_scan_range_ = 35.0;
++  double max_scan_range_ = 24.0;
+   double tracking_scan_leaf_ = 0.25;
+   double coarse_scan_leaf_ = 0.65;
+   double tracking_map_leaf_ = 0.30;
+   double coarse_map_leaf_ = 0.80;
+   int registration_threads_ = 4;
+-  double local_map_radius_m_ = 45.0;
+-  double local_map_refresh_distance_m_ = 5.0;
++  double local_map_radius_m_ = 32.0;
++  double local_map_refresh_distance_m_ = 4.0;
+   double initial_x_ = 0.0;
+   double initial_y_ = 0.0;
+   double initial_z_ = 0.0;
+@@ -1329,6 +1413,9 @@
+   double initial_result_yaw_margin_deg_ = 5.0;
+   double recovery_xy_radius_ = 4.0;
+   double recovery_yaw_radius_deg_ = 45.0;
++  int recovery_confirmation_count_ = 3;
++  double recovery_consistency_translation_m_ = 0.30;
++  double recovery_consistency_rotation_deg_ = 6.0;
+   double initial_accumulation_window_s_ = 2.5;
+   double initial_min_duration_s_ = 2.0;
+   double initial_accumulation_leaf_ = 0.18;
+@@ -1375,6 +1462,9 @@
+   Eigen::Isometry3d map_from_odom_ = Eigen::Isometry3d::Identity();
+   Eigen::Isometry3d last_map_from_base_ = Eigen::Isometry3d::Identity();
+   Eigen::Isometry3d recovery_center_map_from_base_ = Eigen::Isometry3d::Identity();
++  Eigen::Isometry3d pending_recovery_map_from_odom_ = Eigen::Isometry3d::Identity();
++  int recovery_confirmation_count_seen_ = 0;
++  std::size_t stale_input_discard_count_ = 0;
+   Eigen::Vector3d local_map_center_ = Eigen::Vector3d::Zero();
+   double last_registration_ms_ = 0.0;
+   std::string last_registration_mode_ = "NONE";
+--- a/go2_site_ops/go2_site_ops/localization_quality.py
++++ b/go2_site_ops/go2_site_ops/localization_quality.py
+@@ -101,6 +101,38 @@
+     maximum_input_age_s=0.35,
+ )
+
++# Tracking receipts showed the 45 m target growing to 144k points and one
++# registration taking 526 ms. V2 keeps the unchanged quality gates while
++# bounding both source and target geometry to the indoor range actually needed
++# by the 5 m startup/recovery search: 24 m scan + 5 m search + 3 m coarse gate.
++GO2_VGICP_ORIN_V2 = LocalizationQualityProfile(
++    profile_id="go2-vgicp-orin-v2",
++    registration_type="VGICP",
++    local_map_radius_m=32.0,
++    local_map_refresh_distance_m=4.0,
++    max_scan_range_m=24.0,
++    tracking_scan_leaf_m=0.25,
++    coarse_scan_leaf_m=0.65,
++    tracking_map_leaf_m=0.30,
++    coarse_map_leaf_m=0.80,
++    registration_threads=4,
++    coarse_correspondence_m=3.0,
++    screening_iterations=5,
++    screening_min_inlier_ratio=0.05,
++    coarse_iterations=15,
++    tracking_correspondence_m=1.2,
++    tracking_iterations=30,
++    minimum_input_points=250,
++    minimum_inlier_ratio=0.20,
++    maximum_fitness_mse=0.20,
++    minimum_hessian_eigenvalue=1.0e-6,
++    maximum_hessian_condition=1.0e8,
++    maximum_correction_translation_m=0.75,
++    maximum_correction_rotation_deg=15.0,
++    maximum_input_age_s=0.35,
++)
++
+ SUPPORTED_LOCALIZATION_QUALITY_PROFILES = {
+     GO2_VGICP_ORIN_V1.profile_id: GO2_VGICP_ORIN_V1,
++    GO2_VGICP_ORIN_V2.profile_id: GO2_VGICP_ORIN_V2,
+ }

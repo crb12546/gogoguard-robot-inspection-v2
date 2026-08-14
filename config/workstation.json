@@ -1,0 +1,20 @@
+{
+  "schema": "gogoguard.workstation_config.v1",
+  "site_id": "local-first-site",
+  "robot": {
+    "base_url": "http://192.168.123.18:8080",
+    "timeout_s": 3
+  },
+  "cloud": {
+    "host": "39.96.72.215",
+    "user": "root",
+    "remote_root": "/opt/go2/jobs",
+    "remote_command": "/opt/go2/bin/gogoguard-map-job"
+  },
+  "platform": {
+    "base_url": "http://39.96.37.187/api/v1",
+    "allow_insecure_http": true,
+    "device_token_env": "GOGOGUARD_DEVICE_TOKEN",
+    "timeout_s": 30
+  }
+}

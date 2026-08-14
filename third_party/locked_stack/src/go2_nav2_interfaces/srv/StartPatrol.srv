@@ -1,0 +1,7 @@
+# Empty values mean "use the single active release". Non-empty values are
+# compared atomically before any Nav2 goal is created.
+string expected_map_version
+string expected_route_id
+---
+bool success
+string message

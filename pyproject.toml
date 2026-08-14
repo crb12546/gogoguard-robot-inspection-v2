@@ -10,17 +10,34 @@ requires-python = ">=3.9"
 
 [project.scripts]
 gogoguard-site-console = "gogoguard_site_console.__main__:main"
+gogoguard-field-workstation = "gogoguard_field_workstation.__main__:main"
 gogoguard-mount-tf = "gogoguard_calibration.mount_tf_publisher:main"
+gogoguard-navigation-observer = "gogoguard_navigation.observer:main"
+gogoguard-navigation-supervisor = "gogoguard_navigation.supervisor:main"
+gogoguard-incident-recorder = "gogoguard_evidence.incident_recorder:main"
+gogoguard-interaction-edge = "gogoguard_interaction_edge.__main__:main"
+gogoguard-platform-edge = "gogoguard_platform_edge.__main__:main"
+gogoguard-platform-pose-stream = "gogoguard_platform_edge.pose_stream:main"
+gogoguard-battery-observer = "gogoguard_device_io.battery_status:main"
 
 [tool.setuptools.packages.find]
 where = [
   "modules/contracts",
   "modules/calibration",
   "modules/device_io",
+  "modules/interaction",
+  "modules/inspection",
+  "modules/mission",
   "modules/data_capture",
   "modules/evidence",
+  "modules/transfer",
+  "modules/route",
+  "modules/navigation",
   "services/map_factory",
+  "services/interaction_edge",
+  "services/platform_edge",
   "apps/site_console/backend",
+  "apps/field_workstation/backend",
 ]
 include = ["gogoguard_*"]
 

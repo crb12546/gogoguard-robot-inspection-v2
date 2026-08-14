@@ -1,12 +1,12 @@
 {
   "id": "evidence",
-  "responsibility": "Append-only runtime events and receipts; no product decision logic",
+  "responsibility": "Append-only runtime events, bounded passive incident capture and immutable receipts; no product decision logic or motion gating",
   "runtime": ["robot", "cloud", "workstation"],
-  "status": "implemented_offline",
+  "status": "runtime_trace_with_map_pose_and_gimbal_event_evidence_deployed_runtime_exercise_pending",
   "codeRoots": ["modules/evidence"],
-  "entrypoints": ["gogoguard_evidence.journal:EventJournal"],
+  "entrypoints": ["gogoguard_evidence.journal:EventJournal", "gogoguard_evidence.incident_recorder:main"],
   "dependsOn": ["contracts"],
-  "consumes": ["module events"],
-  "produces": ["gogoguard.event.v1 JSONL"],
-  "sourceProvenance": ["V2 product infrastructure"]
+  "consumes": ["module events including gimbal target/actual convergence", "navigation diagnostic streams", "bounded ROS sensor, map-frame pose and command windows"],
+  "produces": ["gogoguard.event.v1 JSONL", "bounded map-frame localization pose/covariance runtime trace", "DiagnosticProfile", "IncidentBundle", "MCAP sensor evidence", "synchronized replay preview"],
+  "sourceProvenance": ["V2 product infrastructure", "2026-08-08 temporary field-development recorder with production-mode fallback", "2026-08-08 release evidence-detour-r3 deployed the dormant recorder on the robot and enabled the full development preset for three patrols through the Mac workstation; first real IncidentBundle capture and resource receipt remain pending", "2026-08-09 orchestration-r2 deploys the contract that keeps DETOURING, REJOINING and RETRYING inside active capture and recognizes COMPLETED as terminal; first new-state patrol bundle pending", "2026-08-09 continuous-r1 deploys a bounded 15 s pre/5 s post lightweight odometry, localization, command-chain and decision ring; HOLDING, RECOVERING and SEARCHING_PATH seal incidents, recorder health is removed from motion readiness, and the static robot startup receipt passed; patrol incident receipt pending"]
 }

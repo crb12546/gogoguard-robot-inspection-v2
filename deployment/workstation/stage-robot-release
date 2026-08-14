@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+  echo "usage: stage-robot-release PREPARED_DIRECTORY ROBOT_SSH_TARGET REMOTE_STAGING_DIRECTORY" >&2
+  echo "example: stage-robot-release release-cache/edge-20260806 unitree@192.168.123.18 /home/unitree/gogoguard-release" >&2
+  exit 2
+fi
+
+readonly PREPARED_DIRECTORY=$1
+readonly ROBOT_TARGET=$2
+readonly REMOTE_STAGING=$3
+
+if [[ ! $ROBOT_TARGET =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$ ]]; then
+  echo "ROBOT_SSH_TARGET must be user@host" >&2
+  exit 3
+fi
+if [[ ! $REMOTE_STAGING =~ ^/[A-Za-z0-9._/-]+$ || $REMOTE_STAGING == "/" ]]; then
+  echo "REMOTE_STAGING_DIRECTORY must be a specific absolute path" >&2
+  exit 3
+fi
+
+command -v ssh >/dev/null
+command -v rsync >/dev/null
+
+for required in gogoguard-edge-image.tar gogoguard-edge-image.tar.sha256 \
+  runtime.env release.env runtime.json run-edge configure-combined-joint-test wait-clock-sync \
+  gogoguard-edge.service install-release; do
+  if [[ ! -f $PREPARED_DIRECTORY/$required ]]; then
+    echo "prepared release is missing: $required" >&2
+    exit 4
+  fi
+done
+
+ssh "$ROBOT_TARGET" mkdir -p "$REMOTE_STAGING"
+rsync -a --partial --progress "$PREPARED_DIRECTORY/" "$ROBOT_TARGET:$REMOTE_STAGING/"
+
+echo "Release staged at $ROBOT_TARGET:$REMOTE_STAGING"
+echo "Activation remains explicit: ssh -t $ROBOT_TARGET sudo $REMOTE_STAGING/install-release $REMOTE_STAGING"
+echo "Combined joint-test setup remains explicit: sudo /opt/gogoguard/bin/configure-combined-joint-test"

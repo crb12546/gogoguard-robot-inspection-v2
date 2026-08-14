@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 027
+
+readonly COMMAND=${1:-}
+readonly SESSION_ID=${2:-}
+readonly SESSION_ROOT="/opt/go2/map-editor-sessions/${SESSION_ID}"
+readonly GLIM_WORKSPACE=/opt/go2/glim_jazzy_ws
+readonly GLIM_DEPENDENCIES=/opt/go2/glim_jazzy_deps
+readonly MAPPING_PYTHON=/opt/go2/mapping-python-jazzy/bin/python
+readonly EDITOR_BIN="$GLIM_WORKSPACE/install/lib/glim_ros/map_editor"
+readonly VIEWER_BIN="$GLIM_WORKSPACE/install/lib/glim_ros/offline_viewer"
+readonly EXPORTER=/opt/go2/bin/gogoguard-export-glim-artifact
+
+fail() {
+  echo "$*" >&2
+  exit 78
+}
+
+require_session_id() {
+  [[ $SESSION_ID =~ ^edit-[A-Za-z0-9]{12}$ ]] || fail "invalid GLIM editor session id"
+}
+
+tree_hash() {
+  local root=$1
+  (
+    cd "$root"
+    find . -type f -print0 | sort -z | xargs -0 sha256sum
+  ) | sha256sum | awk '{print $1}'
+}
+
+run_session() {
+  local display_number=$3
+  local vnc_port=$4
+  local web_port=$5
+  [[ $(id -un) == go2mapping ]] || fail "GLIM editor runtime must be unprivileged"
+  [[ $display_number =~ ^[0-9]{2,3}$ ]] || fail "invalid display number"
+  [[ $vnc_port =~ ^[0-9]{4,5}$ ]] || fail "invalid VNC port"
+  [[ $web_port =~ ^[0-9]{4,5}$ ]] || fail "invalid web port"
+  [[ -d $SESSION_ROOT/working-map && ! -L $SESSION_ROOT/working-map ]] \
+    || fail "working map is missing"
+
+  export HOME="$SESSION_ROOT/home"
+  export XDG_RUNTIME_DIR="$SESSION_ROOT/runtime"
+  export DISPLAY=":${display_number}"
+  mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
+  chmod 0700 "$XDG_RUNTIME_DIR"
+
+  cleanup() {
+    local pid
+    for pid in ${EDITOR_PID:-} ${OPENBOX_PID:-} ${WEBSOCKIFY_PID:-} ${VNC_PID:-} ${XVFB_PID:-}; do
+      kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
+
+  /usr/bin/Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp \
+    >"$SESSION_ROOT/xvfb.log" 2>&1 &
+  XVFB_PID=$!
+  for _ in $(seq 1 50); do
+    [[ -S "/tmp/.X11-unix/X${display_number}" ]] && break
+    sleep 0.1
+  done
+  [[ -S "/tmp/.X11-unix/X${display_number}" ]] || fail "Xvfb did not start"
+
+  /usr/bin/openbox-session >"$SESSION_ROOT/openbox.log" 2>&1 &
+  OPENBOX_PID=$!
+  /usr/bin/x11vnc -display "$DISPLAY" -localhost -forever -shared -nopw \
+    -rfbport "$vnc_port" >"$SESSION_ROOT/x11vnc.log" 2>&1 &
+  VNC_PID=$!
+  /usr/bin/websockify --web=/usr/share/novnc "127.0.0.1:${web_port}" \
+    "127.0.0.1:${vnc_port}" >"$SESSION_ROOT/websockify.log" 2>&1 &
+  WEBSOCKIFY_PID=$!
+
+  set +u
+  # shellcheck disable=SC1091
+  source /opt/ros/jazzy/setup.bash
+  # shellcheck disable=SC1091
+  source "$GLIM_WORKSPACE/install/setup.bash"
+  set -u
+  export LD_LIBRARY_PATH="$GLIM_DEPENDENCIES/lib:${LD_LIBRARY_PATH:-}"
+  "$EDITOR_BIN" "$SESSION_ROOT/working-map" >"$SESSION_ROOT/map-editor.log" 2>&1 &
+  EDITOR_PID=$!
+  wait "$EDITOR_PID"
+}
+
+require_session_id
+case "$COMMAND" in
+  start)
+    [[ ${EUID} -eq 0 ]] || fail "start must run as root"
+    readonly JOB_ROOT=${3:-}
+    readonly SLOT=${4:-}
+    [[ $JOB_ROOT =~ ^/opt/go2/jobs/map-[A-Za-z0-9]{12}$ ]] \
+      || fail "invalid source map job"
+    [[ $SLOT =~ ^[0-9]{1,3}$ ]] || fail "invalid editor slot"
+    (( SLOT >= 0 && SLOT <= 399 )) || fail "editor slot is out of range"
+    [[ ! -e $SESSION_ROOT ]] || fail "editor session already exists"
+    readonly JOB_ID=${JOB_ROOT##*/}
+    readonly SOURCE_MAP="$JOB_ROOT/work/sessions/$JOB_ID/dump"
+    [[ -f $SOURCE_MAP/graph.txt && ! -L $SOURCE_MAP ]] \
+      || fail "source GLIM dump is unavailable"
+    readonly DISPLAY_NUMBER=$((100 + SLOT))
+    readonly VNC_PORT=$((15100 + SLOT))
+    readonly WEB_PORT=$((16100 + SLOT))
+    if ss -ltn | awk '{print $4}' | grep -Eq ":(${VNC_PORT}|${WEB_PORT})$"; then
+      fail "editor slot is already in use"
+    fi
+    install -d -o go2mapping -g go2mapping -m 0750 "$SESSION_ROOT"
+    cp -a "$SOURCE_MAP" "$SESSION_ROOT/working-map"
+    install -d -o go2mapping -g go2mapping -m 0750 \
+      "$SESSION_ROOT/SAVED_MAP" "$SESSION_ROOT/home" "$SESSION_ROOT/runtime"
+    chown -R go2mapping:go2mapping "$SESSION_ROOT"
+    tree_hash "$SESSION_ROOT/working-map" >"$SESSION_ROOT/source.sha256"
+    printf '%s\n' "$JOB_ID" >"$SESSION_ROOT/source-job-id"
+    chown go2mapping:go2mapping "$SESSION_ROOT/source.sha256" "$SESSION_ROOT/source-job-id"
+    systemd-run --quiet --collect --unit="gogoguard-${SESSION_ID}" \
+      --property=User=go2mapping --property=Group=go2mapping \
+      /opt/go2/bin/gogoguard-glim-editor run "$SESSION_ID" \
+      "$DISPLAY_NUMBER" "$VNC_PORT" "$WEB_PORT"
+    printf '{"schema":"gogoguard.glim_editor_session.v1","sessionId":"%s","sourceJobId":"%s","state":"active","webPort":%s,"saveDirectory":"%s/SAVED_MAP"}\n' \
+      "$SESSION_ID" "$JOB_ID" "$WEB_PORT" "$SESSION_ROOT"
+    ;;
+  run)
+    run_session "$@"
+    ;;
+  status)
+    [[ -d $SESSION_ROOT ]] || fail "editor session does not exist"
+    state=closed
+    systemctl is-active --quiet "gogoguard-${SESSION_ID}.service" && state=active
+    source_job=$(<"$SESSION_ROOT/source-job-id")
+    printf '{"schema":"gogoguard.glim_editor_session.v1","sessionId":"%s","sourceJobId":"%s","state":"%s"}\n' \
+      "$SESSION_ID" "$source_job" "$state"
+    ;;
+  export)
+    [[ ${EUID} -eq 0 ]] || fail "export must run as root"
+    [[ -d $SESSION_ROOT ]] || fail "editor session does not exist"
+    systemctl stop "gogoguard-${SESSION_ID}.service" >/dev/null 2>&1 || true
+    readonly SOURCE_HASH=$(<"$SESSION_ROOT/source.sha256")
+    map_root="$SESSION_ROOT/working-map"
+    if [[ -f $SESSION_ROOT/SAVED_MAP/graph.txt ]]; then
+      map_root="$SESSION_ROOT/SAVED_MAP"
+    fi
+    [[ -f $map_root/graph.txt ]] || fail "click File -> Save map and select SAVED_MAP first"
+    readonly EDITED_HASH=$(tree_hash "$map_root")
+    [[ $EDITED_HASH != "$SOURCE_HASH" ]] \
+      || fail "no saved point-cloud change was detected"
+    readonly OUTPUT_STAGING="$SESSION_ROOT/.output-staging"
+    readonly OUTPUT_ROOT="$SESSION_ROOT/output"
+    [[ ! -e $OUTPUT_ROOT && ! -e $OUTPUT_STAGING ]] \
+      || fail "this editor session was already exported"
+    install -d -o go2mapping -g go2mapping -m 0750 "$OUTPUT_STAGING"
+    /usr/sbin/runuser -u go2mapping -- /usr/bin/xvfb-run -a bash -lc \
+      'set +u; source /opt/ros/jazzy/setup.bash; source /opt/go2/glim_jazzy_ws/install/setup.bash; set -u; export LD_LIBRARY_PATH=/opt/go2/glim_jazzy_deps/lib:${LD_LIBRARY_PATH:-}; exec /opt/go2/glim_jazzy_ws/install/lib/glim_ros/offline_viewer --map_path "$1" --export_path "$2"' \
+      _ "$map_root" "$OUTPUT_STAGING/exported-map.ply"
+    source_job=$(<"$SESSION_ROOT/source-job-id")
+    /usr/sbin/runuser -u go2mapping -- "$MAPPING_PYTHON" "$EXPORTER" \
+      --ply "$OUTPUT_STAGING/exported-map.ply" \
+      --trajectory "$map_root/traj_lidar.txt" \
+      --output "$OUTPUT_STAGING" \
+      --source-job "$source_job" \
+      --editor-session "$SESSION_ID"
+    rm "$OUTPUT_STAGING/exported-map.ply"
+    chmod -R a-w "$OUTPUT_STAGING"
+    mv "$OUTPUT_STAGING" "$OUTPUT_ROOT"
+    printf '{"schema":"gogoguard.glim_editor_export.v1","sessionId":"%s","sourceJobId":"%s","state":"exported","output":"%s"}\n' \
+      "$SESSION_ID" "$source_job" "$OUTPUT_ROOT"
+    ;;
+  stop)
+    [[ ${EUID} -eq 0 ]] || fail "stop must run as root"
+    systemctl stop "gogoguard-${SESSION_ID}.service" >/dev/null 2>&1 || true
+    printf '{"schema":"gogoguard.glim_editor_session.v1","sessionId":"%s","state":"closed"}\n' "$SESSION_ID"
+    ;;
+  *)
+    fail "usage: gogoguard-glim-editor {start|run|status|export|stop} ..."
+    ;;
+esac

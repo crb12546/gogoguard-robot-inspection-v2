@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "configure-combined-joint-test must run as root" >&2
+  exit 1
+fi
+
+profile=secure
+if [[ $# -gt 1 ]]; then
+  echo "usage: configure-combined-joint-test [--temporary-icp-fallback]" >&2
+  exit 2
+fi
+if [[ $# -eq 1 ]]; then
+  if [[ $1 != "--temporary-icp-fallback" ]]; then
+    echo "unknown joint-test profile: $1" >&2
+    exit 2
+  fi
+  profile=temporary-icp-fallback
+fi
+
+readonly RUNTIME_ENV=/etc/gogoguard/runtime.env
+if [[ ! -f $RUNTIME_ENV ]]; then
+  echo "missing commissioned runtime environment: $RUNTIME_ENV" >&2
+  exit 2
+fi
+
+unitree_key=$(sed -n 's/^UNITREE_AES_128_KEY=//p' "$RUNTIME_ENV" | tail -n 1)
+if [[ -z $unitree_key ]]; then
+  echo "UNITREE_AES_128_KEY is not provisioned in $RUNTIME_ENV" >&2
+  echo "provision the robot-local key before enabling realtime interaction" >&2
+  exit 3
+fi
+unset unitree_key
+
+readonly TEMPORARY_ENV=$(mktemp /etc/gogoguard/.runtime.env.joint-test.XXXXXX)
+cleanup() {
+  rm -f "$TEMPORARY_ENV"
+}
+trap cleanup EXIT
+
+cp "$RUNTIME_ENV" "$TEMPORARY_ENV"
+
+upsert() {
+  local key=$1
+  local value=$2
+  local replacement
+  replacement=$(mktemp /etc/gogoguard/.runtime.env.upsert.XXXXXX)
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ ("^" key "=") {
+      if (!replaced) {
+        print key "=" value
+        replaced = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!replaced) print key "=" value
+    }
+  ' "$TEMPORARY_ENV" > "$replacement"
+  mv "$replacement" "$TEMPORARY_ENV"
+}
+
+upsert GOGOGUARD_INTERACTION_ENABLED 1
+upsert GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED 1
+upsert GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S 5
+upsert GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER ""
+if [[ $profile == temporary-icp-fallback ]]; then
+  # Temporary 2026-08 field profile frozen with the platform team. Alibaba
+  # Cloud's ICP interception blocks the public domain on the robot network, so
+  # robot traffic uses the fixed IP. LiveKit remains command-supplied and is
+  # never hard-coded here.
+  upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 1
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL http://39.96.37.187/api/v1/robot/heartbeat
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 1
+else
+  upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL https://gogoguard.cn/api/v1/robot/heartbeat
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0
+fi
+
+chown root:root "$TEMPORARY_ENV"
+chmod 0600 "$TEMPORARY_ENV"
+mv "$TEMPORARY_ENV" "$RUNTIME_ENV"
+trap - EXIT
+
+echo "Combined patrol + realtime joint-test configuration is ready."
+echo "Profile: $profile"
+if [[ $profile == temporary-icp-fallback ]]; then
+  echo "WARNING: temporary IP/ws fallback is active; return to the secure profile after ICP recovery."
+fi
+echo "The service was not started; keep the robot lying down for the first start."

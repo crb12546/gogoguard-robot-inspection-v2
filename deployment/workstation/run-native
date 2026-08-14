@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+readonly REPOSITORY_ROOT=$(cd "$SCRIPT_ROOT/../.." && pwd)
+
+export PYTHONPATH="$REPOSITORY_ROOT/modules/contracts:$REPOSITORY_ROOT/modules/device_io:$REPOSITORY_ROOT/modules/data_capture:$REPOSITORY_ROOT/modules/evidence:$REPOSITORY_ROOT/modules/transfer:$REPOSITORY_ROOT/modules/route:$REPOSITORY_ROOT/modules/navigation:$REPOSITORY_ROOT/services/map_factory:$REPOSITORY_ROOT/apps/site_console/backend:$REPOSITORY_ROOT/apps/field_workstation/backend"
+
+cd "$REPOSITORY_ROOT"
+exec python3 -m gogoguard_field_workstation \
+  --host 0.0.0.0 \
+  --port "${GOGOGUARD_WORKSTATION_PORT:-8080}" \
+  --data-root "${GOGOGUARD_WORKSTATION_DATA:-$REPOSITORY_ROOT/workstation-data}" \
+  --config "${GOGOGUARD_WORKSTATION_CONFIG:-$REPOSITORY_ROOT/config/workstation.json}" \
+  --static-root "$REPOSITORY_ROOT/apps/site_console/frontend"

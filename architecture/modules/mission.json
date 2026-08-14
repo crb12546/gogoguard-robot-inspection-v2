@@ -2,11 +2,11 @@
   "id": "mission",
   "responsibility": "Inspection task state machine and orchestration without algorithm ownership",
   "runtime": ["robot", "cloud"],
-  "status": "planned",
-  "codeRoots": [],
-  "entrypoints": [],
+  "status": "checkpoint_state_machine_true_stop_and_frozen_verdict_policy_contract_implemented_offline",
+  "codeRoots": ["modules/mission"],
+  "entrypoints": ["gogoguard_mission.state_machine:MissionCoordinator"],
   "dependsOn": ["contracts", "route", "navigation", "inspection", "evidence"],
-  "consumes": ["inspection task"],
-  "produces": ["mission state", "mission result"],
-  "sourceProvenance": ["V2 module boundary"]
+  "consumes": ["MissionPlan", "monotonic route progress", "NavigationStopReceipt", "inspection action result", "platform continue request"],
+  "produces": ["MissionStatus", "checkpoint reached event", "pause/inspect/resume requests", "mission result"],
+  "sourceProvenance": ["V2 module boundary", "2026-08-10 GoGoGuard checkpoint-inspection alignment section 4"]
 }

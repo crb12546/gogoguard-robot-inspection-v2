@@ -1,0 +1,16 @@
+services:
+  field-workstation:
+    build:
+      context: ../..
+      dockerfile: deployment/workstation/Dockerfile
+    image: gogoguard-field-workstation:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      GOGOGUARD_DEVICE_TOKEN: ${GOGOGUARD_DEVICE_TOKEN:-}
+    volumes:
+      - ../../workstation-data:/var/lib/gogoguard-workstation
+      - ../../config/workstation.json:/etc/gogoguard/workstation.json:ro
+      - ${HOME}/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - ${HOME}/.ssh/known_hosts:/root/.ssh/known_hosts:ro

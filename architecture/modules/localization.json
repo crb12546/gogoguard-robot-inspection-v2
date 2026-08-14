@@ -1,12 +1,12 @@
 {
   "id": "localization",
-  "responsibility": "Local LiDAR-inertial odometry now; fixed-map localization in a later real slice",
+  "responsibility": "FAST-LIO local odometry plus continuous VGICP localization against one GLIM map",
   "runtime": ["robot"],
-  "status": "migrating_locked_source",
-  "codeRoots": ["third_party/locked_stack/src/FAST_LIO"],
-  "entrypoints": ["ros2 run fast_lio fastlio_mapping"],
+  "status": "vgicp_latest_only_three_frame_recovery_operator_baseline_accepted_repeatability_pending",
+  "codeRoots": ["modules/localization", "third_party/locked_stack/src/FAST_LIO", "third_party/locked_stack/src/go2_map_manager"],
+  "entrypoints": ["ros2 run fast_lio fastlio_mapping", "ros2 run go2_map_manager calibrated_cloud_transformer", "ros2 run go2_map_manager continuous_map_localizer"],
   "dependsOn": ["contracts", "device_io", "calibration"],
-  "consumes": ["/mapping/livox/lidar", "/mapping/livox/imu"],
-  "produces": ["/Odometry"],
-  "sourceProvenance": ["old FAST-LIO tree 36ee56ee; small_gicp later slice remains pinned"]
+  "consumes": ["/mapping/livox/lidar", "/mapping/livox/imu", "/navigation/cloud_body", "versioned localization map PCD"],
+  "produces": ["/Odometry", "map -> odom", "/localization/pose", "/localization/status", "/localization/usable"],
+  "sourceProvenance": ["old FAST-LIO tree 36ee56ee", "old go2_map_manager tree 3a512028", "small_gicp commit 8a2d373", "2026-08-09 localization-owned build patch go2-vgicp-orin-v2 bounds registration to a 24 m scan and 32 m local target after a field trace reached 144k target points and 526 ms; continuous-r1 deployed it without changing the frozen capability snapshot, generation 4 candidate binding passed, quality gates and V1 compatibility remain", "2026-08-09 complete-r1 map-6855ba54ae11 field trace produced eight localization holds; final recovery accepted a 3.58 m map-pose shift while FAST-LIO odometry moved 0.066 m because recovery disables the normal 0.75 m tracking jump constraint and accepts matches inside a 4 m recovery zone, then rejected 15 strong matches outside the shifted zone", "2026-08-10 correction retains the last trusted map-to-odom anchor during recovery, applies the normal jump gate during search, and requires three mutually consistent candidates before beginning normal acquisition", "2026-08-10 v6-r4 field diagnosis found 1.2 s large-map recovery registrations replaying queued SensorDataQoS clouds: two excellent VGICP confirmations were followed by stale_input and cleared; the owned patch now keeps only one pending cloud and discards stale input before odometry/evidence/registration without resetting the recovery cluster", "2026-08-10 v6-r4 Linux/ARM64 image deployed with sensors online and localization/Nav2/motion stopped; fresh three-frame recovery acceptance remained pending at static deployment", "2026-08-10 the operator accepted the first V6-r4 patrol as the integration baseline; synchronized evidence through approximately 32 percent route progress shows at least six localization holds resumed without the former stale-cloud lockout, while a complete retained trace and repeatability remain pending"]
 }

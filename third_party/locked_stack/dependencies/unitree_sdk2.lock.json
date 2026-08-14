@@ -1,0 +1,10 @@
+{
+  "name": "unitree_sdk2",
+  "repository": "https://github.com/unitreerobotics/unitree_sdk2.git",
+  "commit": "5ea10f3230e41c6ab62aa79f49f84afa685d84aa",
+  "projectVersion": "2.0.0",
+  "reason": "Exact official revision and aarch64 SDK ABI recovered from the verified 2026-08-01 robot backup",
+  "buildOptions": {
+    "BUILD_EXAMPLES": false
+  }
+}

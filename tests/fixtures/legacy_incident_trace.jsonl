@@ -1,0 +1,4 @@
+{"schema":"go2.runtime_trace.v1","wallTime":1786192815.8,"monotonicS":100.0,"stream":"odometry","payload":{"x":3.12,"y":-2.41,"z":0.0,"yaw":1.18,"vx":0.21,"vy":0.0,"wz":0.05}}
+{"schema":"go2.runtime_trace.v1","wallTime":1786192816.2,"monotonicS":100.4,"stream":"body_cloud","payload":{"frameId":"base_link","width":4815,"height":1,"pointStep":32,"dataBytes":154080,"fields":["x","y","z","intensity"]}}
+{"schema":"go2.runtime_trace.v1","wallTime":1786192816.3,"monotonicS":100.5,"stream":"safety","payload":{"obstacleDetected":true,"stopReason":"LOCAL_OBSTACLE"}}
+{"schema":"go2.runtime_trace.v1","wallTime":1786192820.9,"monotonicS":105.1,"stream":"runtime","payload":{"state":"BLOCKED","reason":"LOCAL_PATH_BLOCKED","routeProgressPercent":68.5,"motionAuthorized":false}}

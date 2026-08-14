@@ -12,18 +12,20 @@ checks pass.
 - MID-360 host and sensor IPs are confirmed for this robot;
 - the old production services and rollback command are inventoried.
 
-The cloud SSH host and fixed `gogoguard-map-job` wrapper are required before
-the cloud step, but they do not block robot-side live sensing or recording.
+The Mac workstation must reach both the Edge Agent and the fixed cloud
+`gogoguard-map-job` wrapper before the cloud step. Neither connection blocks
+robot-side live sensing or recording.
 
 ## Acceptance sequence
 
 1. Start the V2 container under systemd. After the stationary receipts pass,
    keep the production service running and enable it at boot.
-2. Confirm the page says `机器狗实时`, never `本机演示`.
+2. Open the Mac workstation page and confirm it reports the robot online.
 3. Observe Livox PointCloud2 and IMU rate for five stationary minutes.
 4. Confirm `/Odometry` is finite and stationary drift is recorded.
 5. Record 30 stationary seconds, stop, and verify the bundle hashes.
-6. Submit that bundle to cloud GLIM and retain its job ID and artifacts.
+6. Let Mac resume/copy the sealed bundle, submit it to cloud GLIM and retain its
+   job ID and artifacts in the workstation history.
 7. Only then walk one short out-and-back loop with the human remote.
 
 Failure at any step stops the experiment at that layer. It does not trigger an

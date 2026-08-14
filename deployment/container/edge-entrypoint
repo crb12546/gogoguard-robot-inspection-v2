@@ -9,8 +9,16 @@ set -u
 readonly APP_ROOT=/opt/gogoguard/app
 readonly LOG_ROOT=/var/lib/gogoguard/runtime-logs
 readonly ROBOT_ID=${GOGOGUARD_ROBOT_ID:-LLYJ0001}
-readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP1U0038561}
-readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-ssh}
+readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP6B0035634}
+readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
+readonly INTERACTION_ENABLED=${GOGOGUARD_INTERACTION_ENABLED:-0}
+readonly INTERACTION_ALLOW_INSECURE_WS=${GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS:-0}
+readonly PLATFORM_HEARTBEAT_ENABLED=${GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED:-0}
+readonly PLATFORM_HEARTBEAT_URL=${GOGOGUARD_PLATFORM_HEARTBEAT_URL:-}
+readonly PLATFORM_HEARTBEAT_INTERVAL_S=${GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S:-5}
+readonly PLATFORM_HEARTBEAT_TLS_INSECURE=${GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE:-0}
+readonly PLATFORM_HEARTBEAT_HOST_HEADER=${GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER:-}
+readonly PLATFORM_HEARTBEAT_ALLOW_HTTP=${GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP:-0}
 mkdir -p "$LOG_ROOT"
 
 declare -a CHILD_PIDS=()
@@ -51,6 +59,25 @@ setsid mediamtx "$APP_ROOT/config/robot/mediamtx.yml" \
   >"$LOG_ROOT/mediamtx.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
+if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+  if [[ -z ${UNITREE_AES_128_KEY:-} ]]; then
+    echo "interaction enabled but UNITREE_AES_128_KEY is unavailable" >&2
+    exit 78
+  fi
+  interaction_args=(
+    --robot-id "$ROBOT_ID"
+    --hardware-config "$APP_ROOT/config/robot/interaction-hardware.json"
+    --persona-config "$APP_ROOT/config/robot/interaction-persona.json"
+  )
+  if [[ "$INTERACTION_ALLOW_INSECURE_WS" == "1" ]]; then
+    interaction_args+=(--allow-insecure-ws)
+  fi
+  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+    gogoguard-interaction-edge "${interaction_args[@]}" \
+    >"$LOG_ROOT/interaction.log" 2>&1 &
+  CHILD_PIDS+=("$!")
+fi
+
 setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -r __node:=livox_mapping_publisher \
   -r /livox/lidar:=/mapping/livox/lidar \
@@ -62,15 +89,23 @@ setsid ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -p output_data_type:=0 \
   -p frame_id:=lidar_link \
   -p imu_frame_id:=lidar_imu \
-  -p user_config_path:="$APP_ROOT/third_party/locked_stack/src/livox_ros_driver2/config/MID360s_config.json" \
+  -p user_config_path:="$APP_ROOT/config/robot/livox-mid360s.json" \
   >"$LOG_ROOT/livox.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
 setsid gogoguard-mount-tf --ros-args \
-  -p calibration_path:="$APP_ROOT/modules/calibration/gogoguard_calibration/config/go2-u2-mid360.json" \
+  -p calibration_path:="$APP_ROOT/modules/calibration/gogoguard_calibration/config/go2-u2-mid360s-ARMCP6B0035634.json" \
   -p robot_id:="$ROBOT_ID" \
   -p sensor_id:="$SENSOR_ID" \
   >"$LOG_ROOT/calibration.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+setsid ros2 run go2_map_manager calibrated_cloud_transformer --ros-args \
+  -p input_topic:=/navigation/cloud_lidar \
+  -p output_topic:=/navigation/cloud_body \
+  -p source_frame:=lidar_link \
+  -p target_frame:=base_link \
+  >"$LOG_ROOT/navigation-cloud.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
 setsid ros2 run fast_lio fastlio_mapping --ros-args \
@@ -79,6 +114,101 @@ setsid ros2 run fast_lio fastlio_mapping --ros-args \
   >"$LOG_ROOT/fastlio.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
+# Unitree's bare-DDS low-state publisher is fixed on domain 0. Keep the main
+# navigation ROS graph isolated on the commissioned domain 42 and override only
+# this read-only hardware observer.
+setsid env ROS_DOMAIN_ID=0 gogoguard-battery-observer \
+  --topic /lf/lowstate \
+  --output /var/lib/gogoguard/device/battery.json \
+  >"$LOG_ROOT/battery-observer.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+setsid gogoguard-navigation-observer \
+  --output /var/lib/gogoguard/navigation/status.json \
+  >"$LOG_ROOT/navigation-observer.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+# Development evidence is dormant under the production diagnostic profile.
+# When explicitly enabled it writes a bounded pre/post-trigger ring without
+# decoding camera video or participating in the navigation command path.
+setsid gogoguard-incident-recorder \
+  --data-root /var/lib/gogoguard \
+  --site-id local-first-site \
+  --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
+  --camera-source rtsp://192.168.144.108/ \
+  >"$LOG_ROOT/incident-recorder.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+# The web API is only a client. This single, persistent owner prevents page or
+# API restarts from leaving duplicate Nav2/MPPI and Unitree bridge generations.
+setsid gogoguard-navigation-supervisor \
+  --data-root /var/lib/gogoguard \
+  --socket /var/lib/gogoguard/navigation/supervisor.sock \
+  --site-id local-first-site \
+  --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
+  >"$LOG_ROOT/navigation-supervisor.log" 2>&1 &
+CHILD_PIDS+=("$!")
+
+supervisor_deadline=$((SECONDS + 10))
+while [[ ! -S /var/lib/gogoguard/navigation/supervisor.sock ]]; do
+  if (( SECONDS >= supervisor_deadline )); then
+    echo "navigation supervisor did not become ready" >&2
+    exit 70
+  fi
+  sleep 0.1
+done
+
+# Platform lifecycle control depends on the persistent navigation owner, but
+# not on the optional interaction module. Each Unix client connects lazily only
+# when its own allow-listed command is received.
+if [[ "$PLATFORM_HEARTBEAT_ENABLED" == "1" ]]; then
+  if [[ -z "$PLATFORM_HEARTBEAT_URL" ]]; then
+    echo "platform heartbeat enabled but GOGOGUARD_PLATFORM_HEARTBEAT_URL is empty" >&2
+    exit 78
+  fi
+  if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+    interaction_deadline=$((SECONDS + 10))
+    while [[ ! -S /var/lib/gogoguard/interaction/control.sock ]]; do
+      if (( SECONDS >= interaction_deadline )); then
+        echo "interaction control socket did not become ready" >&2
+        exit 70
+      fi
+      sleep 0.1
+    done
+  fi
+  platform_args=(
+    --robot-id "$ROBOT_ID"
+    --url "$PLATFORM_HEARTBEAT_URL"
+    --interval "$PLATFORM_HEARTBEAT_INTERVAL_S"
+    --navigation-socket /var/lib/gogoguard/navigation/supervisor.sock
+    --battery-status /var/lib/gogoguard/device/battery.json
+  )
+  if [[ "$PLATFORM_HEARTBEAT_TLS_INSECURE" == "1" ]]; then
+    platform_args+=(--tls-insecure)
+  fi
+  if [[ -n "$PLATFORM_HEARTBEAT_HOST_HEADER" ]]; then
+    platform_args+=(--host-header "$PLATFORM_HEARTBEAT_HOST_HEADER")
+  fi
+  if [[ "$PLATFORM_HEARTBEAT_ALLOW_HTTP" == "1" ]]; then
+    platform_args+=(--allow-insecure-http)
+  fi
+  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+    gogoguard-platform-edge "${platform_args[@]}" \
+    >"$LOG_ROOT/platform-heartbeat.log" 2>&1 &
+  CHILD_PIDS+=("$!")
+  if [[ "$INTERACTION_ENABLED" == "1" ]]; then
+    setsid gogoguard-platform-pose-stream \
+      --robot-id "$ROBOT_ID" \
+      --navigation-status /var/lib/gogoguard/navigation/status.json \
+      --interaction-socket /var/lib/gogoguard/interaction/control.sock \
+      --max-hz 10 \
+      >"$LOG_ROOT/platform-pose-stream.log" 2>&1 &
+    CHILD_PIDS+=("$!")
+  fi
+fi
+
 setsid gogoguard-site-console \
   --mode robot \
   --map-worker "$MAP_WORKER" \
@@ -86,6 +216,7 @@ setsid gogoguard-site-console \
   --port 8080 \
   --data-root /var/lib/gogoguard \
   --robot-id "$ROBOT_ID" \
+  --sensor-id "$SENSOR_ID" \
   --config /etc/gogoguard/runtime.json \
   --static-root "$APP_ROOT/apps/site_console/frontend" \
   >"$LOG_ROOT/site-console.log" 2>&1 &

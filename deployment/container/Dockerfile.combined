@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1.7
+#
+# The combined release deliberately extends the exact field-accepted V6 image.
+# Rebuilding Ubuntu, ROS, Nav2, MPPI or Unitree packages here would make the
+# patrol runtime different from the artifact accepted on 2026-08-10.
+FROM --platform=linux/arm64 gogoguard-robot-inspection:v2-edge-20260810-v6-r4@sha256:b8ca1b65ede57fa0f7ca2cfefa3c1490b905717aa3681d245128fa4e9081269c
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /opt/gogoguard/app
+
+COPY pyproject.toml setup.py /opt/gogoguard/app/
+COPY modules /opt/gogoguard/app/modules
+COPY apps /opt/gogoguard/app/apps
+COPY services /opt/gogoguard/app/services
+COPY config /opt/gogoguard/app/config
+COPY deployment/container/interaction-requirements.txt /tmp/interaction-requirements.txt
+COPY deployment/container/interaction-wheelhouse.sha256 /tmp/interaction-wheelhouse.sha256
+COPY deployment/container/edge-entrypoint /tmp/gogoguard-edge-entrypoint
+COPY --from=interaction_webrtc_wheels / /tmp/interaction-wheels/
+COPY --from=interaction_livekit_wheels / /tmp/interaction-wheels/
+
+# Keep realtime-media wheels in their own import root. In particular, its
+# pinned NumPy must not replace the NumPy used by the accepted ROS image. The
+# current application package is installed globally without dependencies for
+# the existing edge processes; only the two realtime daemons receive this
+# additional PYTHONPATH from the entrypoint.
+# The frozen V6 image already owns this pure-Python ROS package. This release
+# changes its runtime/launch/config composition for checkpoints, so install
+# exactly those owned files without rebuilding or replacing any ROS, Nav2,
+# MPPI, localization or Unitree binary.
+RUN cd /tmp/interaction-wheels \
+    && sha256sum --check /tmp/interaction-wheelhouse.sha256 \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/nav2_profile_contract.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/launch/active_map_patrol.launch.py \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+    && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/package.xml \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/package.xml \
+    && grep -q 'FollowPath, Spin' \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
+    && grep -q 'nav2_behaviors/Spin' \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
+    && grep -q 'nav2_behaviors' \
+      /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/launch/active_map_patrol.launch.py \
+    && cd /opt/gogoguard/app \
+    && python3 -m pip install --no-deps --no-build-isolation . \
+    && python3 -m pip install --no-index --no-deps \
+      --find-links /tmp/interaction-wheels \
+      --target /opt/gogoguard/interaction-python \
+      -r /tmp/interaction-requirements.txt \
+    && python3 -c 'import numpy; assert numpy.__version__ == "1.21.5"' \
+    && PYTHONPATH=/opt/gogoguard/interaction-python python3 -c \
+      'from gogoguard_device_io.interaction_native import NATIVE_DEPENDENCIES; import numpy; assert len(NATIVE_DEPENDENCIES) == 5; assert numpy.__version__ == "2.0.2"' \
+    && g++ -std=c++17 -O2 \
+      -I/opt/gogoguard/deps/include \
+      -I/opt/gogoguard/deps/include/ddscxx \
+      /opt/gogoguard/app/modules/device_io/ros/go2_cmd_vel_bridge/src/go2_vui_control.cpp \
+      /opt/gogoguard/deps/lib/libunitree_sdk2.a \
+      -L/opt/gogoguard/deps/lib \
+      -Wl,-rpath,/opt/gogoguard/deps/lib \
+      -lddsc -lddscxx -pthread \
+      -o /tmp/go2_vui_control \
+    && install -m 0755 /tmp/go2_vui_control \
+      /opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control \
+    && test -x /opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control \
+    && install -m 0755 /tmp/gogoguard-edge-entrypoint \
+      /usr/local/bin/gogoguard-edge-entrypoint \
+    && rm -rf /tmp/gogoguard-edge-entrypoint /tmp/interaction-requirements.txt \
+      /tmp/interaction-wheelhouse.sha256 /tmp/interaction-wheels /tmp/go2_vui_control
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/gogoguard-edge-entrypoint"]

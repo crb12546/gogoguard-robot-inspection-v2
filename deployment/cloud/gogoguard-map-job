@@ -45,6 +45,29 @@ if [[ ! -x $MAPPING_PYTHON ]]; then
   echo "sealed mapping Python executable is missing" >&2
   exit 78
 fi
+
+output_is_complete() {
+  local artifact
+  [[ -d $OUTPUT_ROOT && ! -L $OUTPUT_ROOT ]] || return 1
+  for artifact in \
+    map.json \
+    map.ply \
+    overview.svg \
+    glim-build.json \
+    trajectory-poses.json; do
+    [[ -s $OUTPUT_ROOT/$artifact && ! -L $OUTPUT_ROOT/$artifact ]] || return 1
+  done
+}
+
+# The cloud build can complete while the workstation loses its download
+# connection. A retry for that immutable job must reuse its sealed artifacts
+# instead of attempting to overwrite the original GLIM result.
+if output_is_complete; then
+  echo "GOGOGUARD_PROGRESS 93 cloud_complete 复用云端已完成的 GLIM 结果"
+  echo "GoGoGuard cloud GLIM job already complete: $JOB_ID"
+  exit 0
+fi
+
 if [[ -e $WORK_ROOT || -e $OUTPUT_ROOT || -e $OUTPUT_STAGING ]]; then
   echo "map job output already exists; job ids are immutable" >&2
   exit 78
@@ -60,6 +83,14 @@ run_pipeline() {
   /usr/sbin/runuser -u go2mapping -- "$PIPELINE_ENTRY" "$@"
 }
 
+progress() {
+  local percent=$1
+  local stage=$2
+  shift 2
+  echo "GOGOGUARD_PROGRESS $percent $stage $*"
+}
+
+progress 72 cloud_validation "云端校验录制包与 GLIM 配置"
 run_pipeline prepare-session \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
@@ -69,11 +100,13 @@ run_pipeline prepare-session \
   --bag "$BAG_ROOT" \
   --compute-profile cpu
 
+progress 76 glim_optimization "GLIM 轨迹优化与子图构建"
 run_pipeline run-session \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
   --session-id "$JOB_ID"
 
+progress 86 map_build "组合 GLIM 会话与版本化地图"
 run_pipeline create-build \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
@@ -81,11 +114,13 @@ run_pipeline create-build \
   --site-id "$SITE_ID" \
   --session-id "$JOB_ID"
 
+progress 90 review_artifacts "生成点云与地图评审产物"
 run_pipeline produce-review-artifacts \
   --root "$WORK_ROOT" \
   --glim-config "$GLIM_CONFIG" \
   --build-id "$BUILD_ID"
 
+progress 92 artifact_export "导出 PLY、轨迹、2D 概览和建图回执"
 install -d -o go2mapping -g go2mapping -m 0750 "$OUTPUT_STAGING"
 /usr/sbin/runuser -u go2mapping -- "$MAPPING_PYTHON" - \
   "$REVIEW_ARTIFACTS/map.ply" \
@@ -94,6 +129,7 @@ install -d -o go2mapping -g go2mapping -m 0750 "$OUTPUT_STAGING"
   "$OUTPUT_STAGING" <<'PY'
 import html
 import json
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -113,10 +149,38 @@ if len(points_array) > 50000:
 points = [[float(x), float(y), float(z), 0.7] for x, y, z in points_array]
 
 trajectory = []
+optimized_poses = []
+previous_timestamp = -math.inf
 for raw in trajectory_path.read_text(encoding="utf-8").splitlines():
     values = raw.split()
-    if len(values) == 8:
-        trajectory.append([float(values[1]), float(values[2]), float(values[3])])
+    if not values:
+        continue
+    if len(values) != 8:
+        raise SystemExit("GLIM trajectory contains a malformed pose")
+    timestamp, x, y, z, qx, qy, qz, qw = (float(value) for value in values)
+    if not all(
+        math.isfinite(value)
+        for value in (timestamp, x, y, z, qx, qy, qz, qw)
+    ):
+        raise SystemExit("GLIM trajectory contains a non-finite pose")
+    if timestamp <= previous_timestamp:
+        raise SystemExit("GLIM trajectory timestamps are not strictly increasing")
+    if math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw) < 0.5:
+        raise SystemExit("GLIM trajectory contains an invalid quaternion")
+    trajectory.append([x, y, z])
+    optimized_poses.append(
+        {
+            "timestamp": timestamp,
+            "x": x,
+            "y": y,
+            "z": z,
+            "qx": qx,
+            "qy": qy,
+            "qz": qz,
+            "qw": qw,
+        }
+    )
+    previous_timestamp = timestamp
 if len(trajectory) < 2:
     raise SystemExit("GLIM trajectory contains fewer than two poses")
 
@@ -130,7 +194,27 @@ artifact = {
     "points": points,
 }
 (output_root / "map.json").write_text(
-    json.dumps(artifact, ensure_ascii=False, separators=(",", ":")) + "\n",
+    json.dumps(
+        artifact,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+(output_root / "trajectory-poses.json").write_text(
+    json.dumps(
+        {
+            "schema": "gogoguard.optimized_trajectory.v1",
+            "frame": "map",
+            "poses": optimized_poses,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    + "\n",
     encoding="utf-8",
 )
 shutil.copy2(ply_path, output_root / "map.ply")
@@ -164,4 +248,5 @@ PY
 
 chmod -R a-w "$OUTPUT_STAGING"
 mv "$OUTPUT_STAGING" "$OUTPUT_ROOT"
+progress 93 cloud_complete "云端 GLIM 产物已封存"
 echo "GoGoGuard cloud GLIM job complete: $JOB_ID"

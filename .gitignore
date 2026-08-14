@@ -7,5 +7,6 @@ dist/
 build/
 node_modules/
 runtime-data/
+release-cache/
+workstation-data/
 *.log
-

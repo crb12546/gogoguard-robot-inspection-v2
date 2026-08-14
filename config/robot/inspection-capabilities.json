@@ -1,0 +1,88 @@
+{
+  "schema": "gogoguard.robot_capabilities.v1",
+  "revision": 3,
+  "routeExecution": {
+    "supported": true,
+    "model": "map_bound_route",
+    "routeProgressIndex": true,
+    "checkpointEvent": true,
+    "platformStartStop": true,
+    "checkpointBinding": "execution_route_progress_index"
+  },
+  "pauseResume": {
+    "supported": true,
+    "mode": "automatic_checkpoint_true_stop_and_suffix_resume",
+    "externalArbitraryPause": false,
+    "stableStopThresholdS": 0.5
+  },
+  "checkpointInspection": {
+    "supported": true,
+    "action": "true_stop_pose_announce_capture_verdict_suffix_resume",
+    "usesExistingLiveVideo": true,
+    "requiresPlatformMissionPlan": true,
+    "retake": true,
+    "platformTimeoutContinue": true
+  },
+  "gimbal": {
+    "supported": true,
+    "hardwareSupported": true,
+    "commissioningStatus": "software_complete_robot_field_acceptance_pending",
+    "manufacturer": "Nanjing Xianfei Robot Technology",
+    "model": "Z-1Pro",
+    "transport": "tcp://192.168.144.108:2332",
+    "controlMode": "gcu_angle_control_0x10",
+    "panFrame": "carrier_relative",
+    "tiltFrame": "euler_attitude",
+    "absoluteWorld": false,
+    "panDeg": [-140.0, 140.0],
+    "tiltDeg": [-110.0, 120.0],
+    "maxControlSpeedDegS": 150.0,
+    "recommendedCommandHz": [30, 50],
+    "stabilizationAccuracyDeg": 0.01,
+    "repeatabilityDeg": null,
+    "settleTimeS": null
+  },
+  "stillCapture": {
+    "supported": true,
+    "mode": "platform_frame_from_live_video",
+    "usesExistingInteractionVideo": true,
+    "resolution": [1920, 1080],
+    "nativePhotoHardwareSupported": true,
+    "nativePhotoCommand": "gcu_shutter_0x20",
+    "nativePhotoMaxResolution": [2688, 1520],
+    "configurationSampleCapture": "robot_local_jpeg_in_asset_bundle",
+    "dailyEvidenceCapture": "platform_frame_from_live_video_after_capture_ready",
+    "nativePhotoRetrievalIntegrated": false,
+    "interruptsLiveVideo": null
+  },
+  "offlineBuffer": {
+    "supported": false,
+    "implementationPresent": true,
+    "reason": "buffer_is_implemented_but_not_bound_to_a_platform_checkpoint_contract",
+    "maxFrames": 2000,
+    "maxBytes": 4294967296
+  },
+  "poseStream": {
+    "supported": true,
+    "sourceHz": 10,
+    "publicStatusHz": 5,
+    "livekitDataChannelAvailable": true,
+    "posePublisherIntegrated": true,
+    "schema": "gogoguard.robot_pose.v1",
+    "topic": "gogoguard.robot_pose.v1",
+    "delivery": "unreliable_latest_only",
+    "binding": ["mapVersion", "routeId", "frameId", "mission"],
+    "missionContext": true,
+    "requiresActiveLiveSession": true
+  },
+  "powerStatus": {
+    "supported": true,
+    "source": "unitree_lowstate",
+    "fields": ["percent", "voltage", "observedAt"],
+    "charging": "pending_docked_field_receipt"
+  },
+  "lowBatteryReturn": {
+    "supported": false,
+    "reason": "no_commissioned_dock_or_return_route"
+  }
+}

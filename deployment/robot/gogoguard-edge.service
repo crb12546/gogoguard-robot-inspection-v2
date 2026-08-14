@@ -1,15 +1,17 @@
 [Unit]
 Description=GoGoGuard robot inspection edge runtime
 Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
+After=docker.service network-online.target systemd-timesyncd.service
+Wants=network-online.target systemd-timesyncd.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
 [Service]
 Type=simple
+ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60
 ExecStart=/opt/gogoguard/bin/run-edge
-ExecStop=/usr/bin/docker stop --timeout 15 gogoguard-edge
+ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=25

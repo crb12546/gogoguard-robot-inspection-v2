@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>go2_cmd_vel_bridge</name>
+  <version>0.1.0</version>
+  <description>Fail-closed UDP and Unitree SDK2 motion boundary for the Go2 runtime.</description>
+  <maintainer email="engineering@gogoguard.local">GoGoGuard</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
