@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## New-task handoff — start here
 
@@ -37,7 +37,7 @@ current architecture guide and archives five superseded one-off handoffs.
 Commit `1c81255` was built and installed as the generation-8 robot release
 described below. The later cloud trajectory-export recovery and the local-only
 Z1Pro mixed-feedback correction are recorded in the final dated sections. The
-current worktree passes all 221 tests, compilation, UI smoke, container
+current worktree passes all 223 tests, compilation, UI smoke, container
 contract, generated knowledge and a real-map browser regression. The corrected
 `gimbal-feedback-r1` release is now installed and statically verified on the
 robot; no localization, Nav2, body motion or real gimbal motion occurred while
@@ -73,16 +73,46 @@ the robot, but have no motion, obstacle-bypass or full-patrol field receipt. V6
 therefore remains the operator-accepted mobility baseline. Operator instructions are in
 `docs/NAVIGATION_MAP_EDITOR_GUIDE.md`.
 
+The current Mac source adds a **review-only 2.5D ground preview** without
+changing the robot navigation authority. `route` extracts a dominant point-
+cloud lower envelope, keeps measured, locally interpolated and unknown ground
+cells distinct, and carries bounded slope/roughness metadata. `site_console`
+now exposes explicit `2D annotation`, `3D ground/cloud` and synchronized split
+modes instead of the former small expandable overlay. A real-map browser
+receipt on `map-62d8cec9a1dc` rendered 655 measured, 1,752 interpolated and 940
+unknown ground cells, retained the existing 631 red occupied cells, verified
+fullscreen 3D and verified that brush entry returns to 2D at 220%. No save,
+publish, robot connection, deployment or motion occurred; the green reviewed
+area and red occupancy remain the only Nav2 map authority.
+
+### Immediate continuation for the next Codex task
+
+- Start in this repository and treat the 2026-08-15 ground/editor work as
+  **implemented and Mac-browser verified**, not robot-deployed or
+  motion-accepted. Do not rebuild the 2D/3D modes from scratch.
+- If the operator continues the map-editor work, first collect usability
+  feedback on the real map: whether the measured/interpolated ground is easy to
+  understand, whether zoom/drag/angle controls are sufficient and whether the
+  green boundary can be drawn confidently. This needs no robot connection.
+- Do not make the 2.5D ground cells traversability authority merely by changing
+  `navigationAuthority`. Any such promotion is a separate algorithm and field-
+  acceptance task covering slopes, steps, holes, low returns and localization-
+  map separation.
+- If work returns to platform patrol/checkpoint behavior instead, the known
+  terminal-message application defect remains a separate owner and the entry
+  checklist is `docs/CHECKPOINT_CLOSURE_REPAIR_TODO.md`. Do not mix that repair
+  into `route` or the map-editor UI.
+
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
 | Architecture and contracts | Three-end ownership, module boundaries, persisted contracts and generated repository index exist and are tested | Keep contracts stable while later slices integrate |
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active. Z1Pro command feedback now uses the protocol-correct mixed frames on the robot | Physically verify one fine manual adjustment; long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map, offers precise 2D zoom/pan/fullscreen editing with a synchronized 3D PCD reference and has published the real revision-1 candidate to the robot; it never rewrites localization PCD | Operator editing acceptance and physical planning receipts remain pending |
+| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map and has published the real revision-1 candidate to the robot; it never rewrites localization PCD. The local Mac source additionally derives a review-only 2.5D ground layer with measured/interpolated/unknown cells | Operator editing acceptance, ground-model field acceptance before any navigation authority, and physical planning receipts remain pending |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes on the V6 baseline. Generation 9 is now installed and statically verified with a reviewed StaticLayer map, full-map Smac point-goal planning, the same MPPI controller, one 0.48 m safety circle and the green KeepoutFilter | Verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release before calling generation 9 motion-accepted |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. A 2026-08-14 real-map browser regression verified one-click 220% erase entry, visible brush/clear trace, exact per-stroke undo, finish/cancel, collapsible 3D and full-workbench fullscreen while leaving the saved map at 631 candidates, 0 manual block and 0 manual clear. The current process was restarted without a platform token | Get operator usability acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. The 2026-08-15 real-map browser regression verified explicit 2D, 3D and split modes, full-screen ground/cloud rendering and automatic 2D/220% brush entry while leaving the saved map at 631 candidates, 0 manual block and 0 manual clear. The current process was restarted without a platform token | Get operator usability acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |
@@ -2729,3 +2759,35 @@ authorization before localization, Nav2 or physical motion.
 - This is a local Mac-workstation UX receipt, not robot motion acceptance. The
   robot was offline and no localization, Nav2, motion, camera, platform upload
   or deployment operation occurred.
+
+## 2026-08-15 2.5D ground layer and explicit 2D/3D modes (Mac browser verified)
+
+- The operator correctly identified that the former point-cloud reference did
+  not reconstruct visible ground and that its expand/hide controls were not a
+  real 2D/3D mode switch. The green fill was operator-drawn allowed area, not
+  detected floor; the navigation PGM inferred free space inside that polygon
+  but did not supply a human-readable terrain model.
+- `route` now owns a bounded review-only ground preview. It groups the cloud at
+  approximately 0.20 m, finds the dominant lower envelope while excluding roof
+  and tall-object layers, separates measured support from bounded local
+  interpolation, preserves unsupported cells as unknown and records confidence,
+  slope and roughness. Preview density is capped, and core static-map/planning
+  calls do not pay this UI-only computation cost.
+- The model explicitly carries `navigationAuthority=false`. This task did not
+  change PCD localization, the reviewed red occupancy cells, the green keepout
+  polygon, StaticLayer generation, SmacPlanner2D, MPPI or robot motion. Ground
+  rendering must receive its own field acceptance before it can influence
+  traversability.
+- `site_console` replaces the old floating expand/hide behavior with three
+  explicit modes: full 2D annotation, full 3D ground/cloud and synchronized
+  split view. Both views share map center and zoom; 3D renders the ground,
+  original cloud, red occupancy, green boundary and blue route. Selecting a
+  brush or boundary/route drawing tool automatically returns to 2D; the common
+  red-clear entry still moves directly to 220%.
+- The local workstation was restarted and tested in the in-app browser using
+  real `map-62d8cec9a1dc`. The API returned 655 measured, 1,752 interpolated and
+  940 unknown ground cells at 0.20 m with reference elevation -0.474 m, while
+  red occupancy remained 631 cells. Browser checks exercised 2D, angled 3D,
+  synchronized split, full-workbench fullscreen and 3D -> clear-brush automatic
+  2D/220% transition. No workspace save, candidate publication, platform upload,
+  robot connection, deployment, localization, Nav2 or movement occurred.

@@ -475,7 +475,9 @@ class RouteManager:
         if not map_ply.is_file():
             raise KeyError(job_id)
         points, _digest = _read_binary_ply(map_ply)
-        return navigation_surface_cells(self.workspaces.get(job_id), points)
+        return navigation_surface_cells(
+            self.workspaces.get(job_id), points, include_ground=True
+        )
 
     def plan_preview(
         self,

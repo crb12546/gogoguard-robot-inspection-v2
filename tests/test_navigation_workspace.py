@@ -68,6 +68,7 @@ class NavigationWorkspaceTest(unittest.TestCase):
             value,
             [[0.15, 0.05, 1.0], [0.25, 0.05, 2.5]],
         )
+        self.assertNotIn("ground", preview)
         self.assertNotIn([1, 0], preview["occupiedCells"])
         self.assertIn([5, 5], preview["occupiedCells"])
 
@@ -93,6 +94,56 @@ class NavigationWorkspaceTest(unittest.TestCase):
         self.assertIn([7, 5], preview["occupiedCells"])
         self.assertIn([8, 5], preview["occupiedCells"])
         self.assertEqual(preview["stats"]["rejectedIsolatedCellCount"], 1)
+
+    def test_ground_preview_separates_floor_from_roof_and_stays_review_only(self):
+        value = self.value()
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+            "reviewed": True,
+        }
+        cloud = []
+        for cell_x in range(-4, 10, 2):
+            for cell_y in range(-4, 5, 2):
+                cloud.append([cell_x / 10, cell_y / 10, 0.0])
+                cloud.append([cell_x / 10, cell_y / 10, 3.0])
+        cloud.extend([[0.4, 0.4, 1.0], [0.45, 0.4, 1.0]])
+
+        ground = navigation_surface_cells(value, cloud, include_ground=True)["ground"]
+
+        self.assertEqual(ground["schema"], "gogoguard.ground_surface_preview.v1")
+        self.assertFalse(ground["navigationAuthority"])
+        self.assertAlmostEqual(ground["referenceElevationM"], 0.0, places=3)
+        self.assertGreater(ground["stats"]["measuredCellCount"], 10)
+        self.assertTrue(
+            all(abs(row[2]) < 0.01 for row in ground["measuredCells"]),
+            "roof and obstacle returns must not become the floor elevation",
+        )
+        self.assertEqual(ground["regionSource"], "operator_allowed_area")
+
+    def test_ground_preview_before_green_area_only_dilates_measured_support(self):
+        value = self.value()
+        value["allowedArea"] = None
+        cloud = [
+            [0.0, 0.0, 0.0],
+            [0.05, 0.0, 0.01],
+            [0.2, 0.0, 0.0],
+            [0.25, 0.0, 0.01],
+        ]
+
+        ground = navigation_surface_cells(value, cloud, include_ground=True)["ground"]
+
+        self.assertEqual(ground["regionSource"], "measured_support_neighborhood")
+        self.assertGreater(ground["stats"]["measuredCellCount"], 0)
+        self.assertLess(
+            sum(ground["stats"][key] for key in (
+                "measuredCellCount", "inferredCellCount", "unknownCellCount"
+            )),
+            200,
+        )
 
     def test_preview_routes_around_static_obstacle(self):
         value = self.value()

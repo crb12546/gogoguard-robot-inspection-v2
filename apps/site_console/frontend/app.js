@@ -10,10 +10,11 @@ const state = {
   navigationWorkspace: null,
   savedNavigationWorkspace: null,
   workspaceEditMode: null,
+  workspaceDisplayMode: 'split',
   workspaceTransform: null,
   workspaceView: {zoom: 1, centerX: null, centerY: null, panMode: false, drag: null},
   workspaceCursorWorld: null,
-  workspaceCloudView: {yaw: 0, pitch: Math.PI / 2, zoom: 18, zoomFactor: 1, centerX: 0, centerY: 0, sliceOnly: false},
+  workspaceCloudView: {yaw: 0.72, pitch: 0.62, zoom: 18, zoomFactor: 1, centerX: 0, centerY: 0, sliceOnly: false},
   navigationSurface: null,
   surfaceBrushDown: false,
   surfaceUndo: [],
@@ -628,17 +629,15 @@ async function showResult(job, {explicit = false} = {}) {
   state.checkpointAudit = null;
   state.platformUpload = null;
   state.workspaceEditMode = null;
+  state.workspaceDisplayMode = 'split';
   state.workspaceView = {zoom: 1, centerX: null, centerY: null, panMode: false, drag: null};
   state.workspaceCursorWorld = null;
-  state.workspaceCloudView = {yaw: 0, pitch: Math.PI / 2, zoom: 18, zoomFactor: 1, centerX: null, centerY: null, sliceOnly: false};
+  state.workspaceCloudView = {yaw: 0.72, pitch: 0.62, zoom: 18, zoomFactor: 1, centerX: null, centerY: null, sliceOnly: false};
   $('workspacePan').classList.remove('active');
   $('workspaceMap').classList.remove('pan-mode');
   $('workspace3dSlice').classList.remove('active');
   $('workspace3dSlice').textContent = '只看高度层';
-  $('workspace3dReference').classList.remove('expanded');
-  $('workspace3dReference').classList.remove('collapsed');
-  $('workspace3dExpand').textContent = '放大3D';
-  $('workspace3dHide').textContent = '隐藏3D';
+  setWorkspaceDisplayMode('split');
   state.surfaceUndo = [];
   state.planPreview = null;
   state.planStart = state.navigationWorkspace?.route?.[0] || null;
@@ -739,15 +738,56 @@ function drawWorkspaceScale(context, width, height, scale) {
   context.fillText(`${worldLength} m`, startX, y - 9);
 }
 
+function workspaceGroundModel() {
+  return state.navigationSurface?.ground || null;
+}
+
+function addProjectedGroundCells(context, rows, resolution, view, width, height, color) {
+  if (!rows?.length) return;
+  context.beginPath();
+  for (const row of rows) {
+    const cellX = Number(row[0]);
+    const cellY = Number(row[1]);
+    const elevation = Number(row[2] || 0);
+    const corners = [
+      [cellX * resolution, cellY * resolution, elevation],
+      [(cellX + 1) * resolution, cellY * resolution, elevation],
+      [(cellX + 1) * resolution, (cellY + 1) * resolution, elevation],
+      [cellX * resolution, (cellY + 1) * resolution, elevation],
+    ].map(point => projectCentered(point, view, width, height));
+    context.moveTo(...corners[0]);
+    for (const corner of corners.slice(1)) context.lineTo(...corner);
+    context.closePath();
+  }
+  context.fillStyle = color;
+  context.fill();
+}
+
+function drawWorkspaceGround3d(context, view, width, height) {
+  const ground = workspaceGroundModel();
+  if (!ground || !$('showWorkspaceGround').checked) return;
+  const resolution = Number(ground.resolutionM || 0.20);
+  addProjectedGroundCells(context, ground.unknownCells, resolution, view, width, height, '#64748b2e');
+  addProjectedGroundCells(
+    context, ground.inferredCells,
+    resolution, view, width, height, '#22d3ee4f',
+  );
+  addProjectedGroundCells(
+    context, ground.measuredCells,
+    resolution, view, width, height, '#10b98187',
+  );
+}
+
 function drawWorkspaceCloud() {
   const canvas = $('workspaceCloud');
+  if (state.workspaceDisplayMode === '2d' || canvas.clientWidth < 2 || canvas.clientHeight < 2) return;
   const [context, width, height] = sizeCanvas(canvas);
   context.fillStyle = '#071421';
   context.fillRect(0, 0, width, height);
   const points = state.mapArtifact?.points || [];
   const view = state.workspaceCloudView;
   const source = workspaceBounds();
-  if (!points.length || !source) return;
+  if (!source) return;
   const visible = workspaceViewBounds();
   view.centerX = Number(state.workspaceView.centerX ?? (source.minX + source.maxX) / 2);
   view.centerY = Number(state.workspaceView.centerY ?? (source.minY + source.maxY) / 2);
@@ -757,14 +797,56 @@ function drawWorkspaceCloud() {
   const surface = state.navigationWorkspace?.navigationSurface || {};
   const minimumZ = Number(surface.obstacleMinZ ?? 0.05);
   const maximumZ = Number(surface.obstacleMaxZ ?? 1.80);
-  for (const point of points) {
-    if (view.sliceOnly && (Number(point[2]) < minimumZ || Number(point[2]) > maximumZ)) continue;
-    const [x, y] = projectCentered(point, view, width, height);
-    if (x < 0 || y < 0 || x > width || y > height) continue;
-    const z = Number(point[2] || 0);
-    context.fillStyle = `hsla(${190 + z * 20},88%,64%,.72)`;
-    context.fillRect(x, y, 1.6, 1.6);
+  const ground = workspaceGroundModel();
+  const groundZ = Number(ground?.referenceElevationM || 0);
+
+  drawWorkspaceGround3d(context, view, width, height);
+
+  const area = state.navigationWorkspace?.allowedArea || [];
+  if ($('showWorkspaceArea').checked && area.length >= 2) {
+    context.strokeStyle = '#4ade80';
+    context.lineWidth = 2.5;
+    context.beginPath();
+    area.forEach((point, index) => {
+      const projected = projectCentered([point[0], point[1], groundZ + 0.04], view, width, height);
+      index ? context.lineTo(...projected) : context.moveTo(...projected);
+    });
+    if (area.length >= 3) context.closePath();
+    context.stroke();
   }
+
+  if ($('showWorkspaceSurface').checked) {
+    const resolution = Number(surface.resolutionM || 0.10);
+    const rows = [...visibleNavigationSurfaceCells(surface)].map(key => {
+      const [cellX, cellY] = key.split(',').map(Number);
+      return [cellX, cellY, groundZ + 0.06];
+    });
+    addProjectedGroundCells(context, rows, resolution, view, width, height, '#e11d48a8');
+  }
+
+  if ($('showWorkspacePoints').checked) {
+    for (const point of points) {
+      if (view.sliceOnly && (Number(point[2]) < minimumZ || Number(point[2]) > maximumZ)) continue;
+      const [x, y] = projectCentered(point, view, width, height);
+      if (x < 0 || y < 0 || x > width || y > height) continue;
+      const z = Number(point[2] || 0);
+      context.fillStyle = `hsla(${190 + z * 20},88%,64%,.78)`;
+      context.fillRect(x, y, 1.8, 1.8);
+    }
+  }
+
+  const route = state.navigationWorkspace?.route || [];
+  if ($('showWorkspaceRoute').checked && route.length) {
+    context.strokeStyle = '#22d3ee';
+    context.lineWidth = 3;
+    context.beginPath();
+    route.forEach((point, index) => {
+      const projected = projectCentered([point[0], point[1], groundZ + 0.10], view, width, height);
+      index ? context.lineTo(...projected) : context.moveTo(...projected);
+    });
+    context.stroke();
+  }
+
   if (state.workspaceCursorWorld) {
     let samples = points.filter(point => Math.hypot(
       Number(point[0]) - state.workspaceCursorWorld[0],
@@ -783,8 +865,8 @@ function drawWorkspaceCloud() {
       if (nearest) samples = [nearest];
     }
     const heights = samples.map(point => Number(point[2] || 0)).filter(Number.isFinite);
-    const lowZ = heights.length ? Math.min(...heights) : 0;
-    const highZ = heights.length ? Math.max(...heights) : 1.8;
+    const lowZ = heights.length ? Math.min(...heights) : groundZ;
+    const highZ = heights.length ? Math.max(...heights) : groundZ + 1.8;
     const centerZ = (lowZ + highZ) / 2;
     const low = projectCentered([state.workspaceCursorWorld[0], state.workspaceCursorWorld[1], lowZ], view, width, height);
     const high = projectCentered([state.workspaceCursorWorld[0], state.workspaceCursorWorld[1], highZ], view, width, height);
@@ -793,6 +875,25 @@ function drawWorkspaceCloud() {
     context.beginPath(); context.moveTo(...low); context.lineTo(...high); context.stroke();
     context.beginPath(); context.arc(x, y, 10, 0, Math.PI * 2); context.stroke();
   }
+}
+
+function setWorkspaceDisplayMode(mode) {
+  if (!['2d', '3d', 'split'].includes(mode)) return;
+  state.workspaceDisplayMode = mode;
+  const viewport = $('workspaceViewport');
+  const buttonIds = {
+    '2d': 'workspaceView2d',
+    '3d': 'workspaceView3d',
+    split: 'workspaceViewSplit',
+  };
+  for (const value of ['2d', '3d', 'split']) {
+    viewport.classList.toggle(`view-${value}`, value === mode);
+    $(buttonIds[value]).classList.toggle('active', value === mode);
+  }
+  requestAnimationFrame(() => {
+    drawWorkspace();
+    drawWorkspaceCloud();
+  });
 }
 
 function setWorkspaceView(bounds, zoom = 1) {
@@ -839,7 +940,39 @@ function zoomWorkspace(factor, anchor = state.workspaceCursorWorld) {
   drawWorkspace();
 }
 
+function fillWorkspaceGround2d(context, rows, resolution, scale, worldToCanvas, color) {
+  if (!rows?.length) return;
+  context.fillStyle = color;
+  const size = Math.max(1.2, resolution * scale + 0.35);
+  for (const row of rows) {
+    const topLeft = worldToCanvas([
+      Number(row[0]) * resolution,
+      (Number(row[1]) + 1) * resolution,
+    ]);
+    context.fillRect(topLeft[0], topLeft[1], size, size);
+  }
+}
+
+function drawWorkspaceGround2d(context, scale, worldToCanvas) {
+  const ground = workspaceGroundModel();
+  if (!ground || !$('showWorkspaceGround').checked) return;
+  const resolution = Number(ground.resolutionM || 0.20);
+  fillWorkspaceGround2d(context, ground.unknownCells, resolution, scale, worldToCanvas, '#64748b32');
+  fillWorkspaceGround2d(
+    context, ground.inferredCells,
+    resolution, scale, worldToCanvas, '#22d3ee4a',
+  );
+  fillWorkspaceGround2d(
+    context, ground.measuredCells,
+    resolution, scale, worldToCanvas, '#10b98180',
+  );
+}
+
 function drawWorkspace() {
+  if (state.workspaceDisplayMode === '3d') {
+    drawWorkspaceCloud();
+    return;
+  }
   const canvas = $('workspaceMap');
   const [context, width, height] = sizeCanvas(canvas);
   context.fillStyle = '#07111f';
@@ -860,6 +993,7 @@ function drawWorkspace() {
     height - offsetY - (point[1] - bounds.minY) * scale,
   ];
   state.workspaceTransform = {bounds, scale, offsetX, offsetY, height};
+  drawWorkspaceGround2d(context, scale, worldToCanvas);
   const area = state.navigationWorkspace?.allowedArea || [];
   if ($('showWorkspaceArea').checked && area.length >= 2) {
     context.beginPath();
@@ -1056,7 +1190,7 @@ function renderWorkspaceControls() {
   if (state.workspaceEditMode === 'clear') $('paintClear').classList.add('active');
   if (state.workspaceEditMode === 'plan-start') $('selectPlanStart').classList.add('active');
   if (state.workspaceEditMode === 'plan-goal') $('selectPlanGoal').classList.add('active');
-  for (const id of ['workspaceZoomOut', 'workspaceZoomIn', 'workspaceFit', 'workspaceFocusRoute', 'workspacePan', 'workspaceFullscreen', 'workspace3dSlice', 'workspace3dTop', 'workspace3dAngle', 'workspace3dExpand', 'workspace3dHide']) {
+  for (const id of ['workspaceView2d', 'workspaceView3d', 'workspaceViewSplit', 'workspaceZoomOut', 'workspaceZoomIn', 'workspaceFit', 'workspaceFocusRoute', 'workspacePan', 'workspaceFullscreen', 'workspace3dSlice', 'workspace3dTop', 'workspace3dAngle']) {
     $(id).disabled = !workspace;
   }
   const editor = state.glimEditor || {state: 'not_started'};
@@ -1233,6 +1367,7 @@ function startSurfaceEdit(mode) {
     state.surfaceUndo = [];
   }
   state.workspaceEditMode = mode;
+  setWorkspaceDisplayMode('2d');
   state.workspaceView.panMode = false;
   state.workspaceView.drag = null;
   $('workspacePan').classList.remove('active');
@@ -1277,7 +1412,12 @@ function syncSurfaceControls() {
   const automatic = visibleNavigationSurfaceCells(surface);
   const clear = new Set((surface.manualClearCells || []).map(surfaceCellKey));
   const blocked = new Set((surface.manualBlockedCells || []).map(surfaceCellKey));
-  $('surfaceStats').textContent = `当前红色 ${automatic.size} 格 · 手工补画 ${blocked.size} 格 · 擦除标记 ${clear.size} 格。红色来自点云高度切片，不代表物体语义识别。`;
+  const ground = workspaceGroundModel();
+  const groundStats = ground?.stats;
+  const groundText = groundStats
+    ? `地面：实测 ${groundStats.measuredCellCount} 格 · 插值 ${groundStats.inferredCellCount} 格 · 未知 ${groundStats.unknownCellCount} 格。`
+    : '地面层尚未生成。';
+  $('surfaceStats').textContent = `${groundText} 红色占用 ${automatic.size} 格 · 手工补画 ${blocked.size} 格 · 擦除 ${clear.size} 格。地面是编辑参考，现阶段不直接改变 Nav2 通行权限。`;
 }
 
 function surfaceCellKey(cell) { return `${cell[0]},${cell[1]}`; }
@@ -2070,9 +2210,12 @@ $('resetMapView').addEventListener('click', () => {
   Object.assign(state.views.result, {yaw: 0.7, pitch: 0.55, zoom: 18});
   redrawResult();
 });
-for (const id of ['showWorkspacePoints', 'showWorkspaceSurface', 'showWorkspaceRoute', 'showWorkspaceArea']) {
+for (const id of ['showWorkspaceGround', 'showWorkspacePoints', 'showWorkspaceSurface', 'showWorkspaceRoute', 'showWorkspaceArea']) {
   $(id).addEventListener('change', drawWorkspace);
 }
+$('workspaceView2d').addEventListener('click', () => setWorkspaceDisplayMode('2d'));
+$('workspaceView3d').addEventListener('click', () => setWorkspaceDisplayMode('3d'));
+$('workspaceViewSplit').addEventListener('click', () => setWorkspaceDisplayMode('split'));
 $('workspaceZoomIn').addEventListener('click', () => zoomWorkspace(1.35));
 $('workspaceZoomOut').addEventListener('click', () => zoomWorkspace(1 / 1.35));
 $('workspaceFit').addEventListener('click', () => {
@@ -2128,21 +2271,6 @@ $('workspace3dSlice').addEventListener('click', () => {
   $('workspace3dSlice').textContent = state.workspaceCloudView.sliceOnly ? '显示全部高度' : '只看高度层';
   drawWorkspaceCloud();
 });
-$('workspace3dExpand').addEventListener('click', () => {
-  const expanded = $('workspace3dReference').classList.toggle('expanded');
-  $('workspace3dExpand').textContent = expanded ? '缩小3D' : '放大3D';
-  requestAnimationFrame(drawWorkspaceCloud);
-});
-$('workspace3dHide').addEventListener('click', () => {
-  const reference = $('workspace3dReference');
-  const collapsed = reference.classList.toggle('collapsed');
-  if (collapsed) {
-    reference.classList.remove('expanded');
-    $('workspace3dExpand').textContent = '放大3D';
-  }
-  $('workspace3dHide').textContent = collapsed ? '显示3D' : '隐藏3D';
-  if (!collapsed) requestAnimationFrame(drawWorkspaceCloud);
-});
 attachWorkspaceCloudControls();
 $('editRoute').addEventListener('click', () => {
   if (!state.navigationWorkspace) return;
@@ -2151,6 +2279,7 @@ $('editRoute').addEventListener('click', () => {
   state.navigationWorkspace.routeSource = 'edited';
   state.planPreview = null;
   state.workspaceEditMode = 'route';
+  setWorkspaceDisplayMode('2d');
   $('workspaceError').textContent = '';
   drawWorkspace(); renderWorkspaceControls();
 });
@@ -2175,6 +2304,7 @@ $('editAllowedArea').addEventListener('click', () => {
   state.navigationWorkspace.allowedArea = [];
   state.planPreview = null;
   state.workspaceEditMode = 'area';
+  setWorkspaceDisplayMode('2d');
   $('workspaceError').textContent = '';
   drawWorkspace(); renderWorkspaceControls();
 });

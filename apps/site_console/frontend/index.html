@@ -44,19 +44,19 @@
     </section>
     <section class="map-workbench" id="mapWorkbenchSection">
       <article class="panel map-workbench-canvas-panel" id="workspaceEditorPanel">
-        <div class="panel-title"><div><span>巡检地图工作台</span><small>滚轮缩放 · 拖动平移 · 2D/3D 对照后再标记</small></div><div class="workspace-title-actions"><b id="workspaceBadge">请先选地图</b><button id="workspaceZoomOut" class="mini-button" title="缩小地图">－</button><button id="workspaceZoomIn" class="mini-button" title="放大地图">＋</button><button id="workspaceFit" class="mini-button">适应全图</button><button id="workspaceFocusRoute" class="mini-button">看路线</button><button id="workspacePan" class="mini-button">拖动地图</button><button id="workspaceFullscreen" class="mini-button">全屏编辑（含工具）</button></div></div>
-        <div class="workspace-viewport" id="workspaceViewport">
+        <div class="panel-title"><div><span>巡检地图工作台</span><small>2D 标注 · 3D 查看 · 同坐标对照</small></div><div class="workspace-title-actions"><b id="workspaceBadge">请先选地图</b><div class="workspace-view-tabs" role="group" aria-label="地图查看方式"><button id="workspaceView2d" class="mini-button">2D 标注</button><button id="workspaceView3d" class="mini-button">3D 查看</button><button id="workspaceViewSplit" class="mini-button active">2D + 3D</button></div><button id="workspaceZoomOut" class="mini-button" title="缩小地图">－</button><button id="workspaceZoomIn" class="mini-button" title="放大地图">＋</button><button id="workspaceFit" class="mini-button">适应全图</button><button id="workspaceFocusRoute" class="mini-button">看路线</button><button id="workspacePan" class="mini-button">拖动地图</button><button id="workspaceFullscreen" class="mini-button">全屏编辑（含工具）</button></div></div>
+        <div class="workspace-viewport view-split" id="workspaceViewport">
           <canvas id="workspaceMap" aria-label="二维巡检导航地图"></canvas>
-          <div class="workspace-layer-switches"><label><input id="showWorkspacePoints" type="checkbox" checked>原始点</label><label><input id="showWorkspaceSurface" type="checkbox" checked>红色占用</label><label><input id="showWorkspaceRoute" type="checkbox" checked>路线/点位</label><label><input id="showWorkspaceArea" type="checkbox" checked>绿色范围</label></div>
+          <div class="workspace-layer-switches"><label><input id="showWorkspaceGround" type="checkbox" checked>地面</label><label><input id="showWorkspacePoints" type="checkbox" checked>原始点云</label><label><input id="showWorkspaceSurface" type="checkbox" checked>红色占用</label><label><input id="showWorkspaceRoute" type="checkbox" checked>路线/点位</label><label><input id="showWorkspaceArea" type="checkbox" checked>绿色范围</label></div>
           <div class="workspace-mode-banner" id="workspaceModeBanner"><b id="workspaceModeTitle">查看地图</b><span id="workspaceModeHint">选择右侧工具后，在这里直接操作</span><button id="finishWorkspaceEdit" class="mini-button" hidden>完成当前绘制</button></div>
           <div class="workspace-coordinate"><b id="workspaceZoomLabel">100%</b><span id="workspaceCursor">移动鼠标查看坐标</span></div>
-          <aside class="workspace-3d-reference" id="workspace3dReference"><div><strong>同步 3D 参考</strong><small>黄色圈与2D鼠标对应</small><button id="workspace3dSlice" class="mini-button">只看高度层</button><button id="workspace3dTop" class="mini-button">俯视</button><button id="workspace3dAngle" class="mini-button">斜视</button><button id="workspace3dExpand" class="mini-button">放大3D</button><button id="workspace3dHide" class="mini-button">隐藏3D</button></div><canvas id="workspaceCloud" aria-label="同步三维点云参考"></canvas></aside>
-          <div class="workspace-legend"><span><i class="map-dot"></i>原始点</span><span><i class="obstacle-swatch"></i>红色不可走</span><span><i class="clear-swatch"></i>擦除标记</span><span><i class="route-line"></i>巡检顺序</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
+          <aside class="workspace-3d-reference" id="workspace3dReference"><div><strong>3D 地面与点云</strong><small>与 2D 使用同一坐标</small><button id="workspace3dSlice" class="mini-button">只看高度层</button><button id="workspace3dTop" class="mini-button">俯视</button><button id="workspace3dAngle" class="mini-button">斜视</button></div><canvas id="workspaceCloud" aria-label="同步三维地面与点云"></canvas></aside>
+          <div class="workspace-legend"><span><i class="ground-measured-swatch"></i>实测地面</span><span><i class="ground-inferred-swatch"></i>插值地面</span><span><i class="ground-unknown-swatch"></i>未知地面</span><span><i class="map-dot"></i>原始点云</span><span><i class="obstacle-swatch"></i>红色不可走</span><span><i class="clear-swatch"></i>擦除标记</span><span><i class="route-line"></i>巡检顺序</span><span><i class="allowed-area-swatch"></i>可走范围</span><span><i class="preview-line"></i>规划预演</span></div>
         </div>
       </article>
       <article class="panel map-workbench-controls">
         <div class="panel-title"><div><span>准备巡检材料</span><small>日常只做三件事：选地图、画绿圈、预演并保存</small></div></div>
-        <div class="workbench-explanation"><b>最简单用法</b><span>1. 选地图　2. 点“擦除红色”并在左图按住拖动　3. 画绿圈　4. 预演并保存。</span><small>红色不是“识别出的墙或柜子”，只是点云高度切片形成的不可走候选。工具会自动放大到安全倍率；不确定时再结合 3D 判断。</small></div>
+        <div class="workbench-explanation"><b>最简单用法</b><span>1. 先在“3D 查看”里看地面和障碍　2. 切到“2D 标注”擦红色、画绿圈　3. 用“2D + 3D”对照　4. 预演并保存。</span><small>青绿色是点云下包络生成的 2.5D 地面；实测、插值和未知分开显示。红色仍是不可走候选，不是对墙或柜子的语义识别。</small></div>
         <div class="glim-editor-actions">
           <strong>1. 可选：清掉建图时的临时人车</strong>
           <div><button id="startGlimEditor" class="secondary">打开官方 GLIM 3D 清图</button><button id="openGlimEditor" class="secondary" hidden>重新打开 GLIM 窗口</button></div>
@@ -64,7 +64,7 @@
           <small id="glimEditorState">需要清掉建图时的人、车等临时点云时，才打开官方 GLIM 3D 工具。</small>
         </div>
         <div class="navigation-surface-editor">
-          <strong>2. 确认红色不可走占用</strong>
+          <strong>2. 确认地面和红色不可走占用</strong>
           <div class="surface-preset-actions"><button id="indoorSurfacePreset" class="secondary">自动隐藏屋顶（推荐）</button><button id="outdoorSurfacePreset" class="secondary">室外高障碍</button></div>
           <small id="surfaceStats">选择地图后自动投影。</small>
           <div class="surface-edit-guide"><b>要清除红色：</b><span>点下面的“擦除红色”，然后在左图按住鼠标拖动。系统会自动放大，不需要先找其他按钮。</span></div>

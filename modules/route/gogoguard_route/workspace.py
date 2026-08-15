@@ -19,6 +19,11 @@ DEFAULT_ROBOT_RADIUS_M = 0.48
 DEFAULT_SURFACE_RESOLUTION_M = 0.10
 DEFAULT_OBSTACLE_MIN_Z = 0.05
 DEFAULT_OBSTACLE_MAX_Z = 1.80
+DEFAULT_GROUND_RESOLUTION_M = 0.20
+MAX_GROUND_PREVIEW_CELLS = 50000
+GROUND_REFERENCE_BIN_M = 0.08
+GROUND_REFERENCE_BAND_M = 0.32
+GROUND_INTERPOLATION_RADIUS_M = 1.20
 MAX_ROUTE_POINTS = 5000
 MAX_BOUNDARY_POINTS = 1000
 MAX_MANUAL_SURFACE_CELLS = 50000
@@ -505,9 +510,300 @@ def _surface_cell(x: float, y: float, resolution: float) -> tuple[int, int]:
     return math.floor(x / resolution), math.floor(y / resolution)
 
 
+def _ground_preview_resolution(
+    value: dict[str, Any], cloud: Sequence[tuple[float, float, float]]
+) -> float:
+    """Keep the operator preview detailed without returning an unbounded grid."""
+
+    requested = max(
+        DEFAULT_GROUND_RESOLUTION_M,
+        float(value["navigationSurface"]["resolutionM"]) * 2.0,
+    )
+    polygon = value.get("allowedArea") or []
+    points = [(float(point[0]), float(point[1])) for point in polygon]
+    if not points:
+        points = [(point[0], point[1]) for point in cloud]
+    if not points:
+        return requested
+    span_x = max(point[0] for point in points) - min(point[0] for point in points)
+    span_y = max(point[1] for point in points) - min(point[1] for point in points)
+    estimated = max(1.0, span_x / requested) * max(1.0, span_y / requested)
+    if estimated <= MAX_GROUND_PREVIEW_CELLS:
+        return requested
+    return max(
+        requested,
+        math.sqrt(max(span_x * span_y, 1.0) / MAX_GROUND_PREVIEW_CELLS),
+    )
+
+
+def _ground_reference(cell_elevations: dict[tuple[int, int], float]) -> float | None:
+    """Find the dominant low horizontal layer while ignoring roofs and tall objects."""
+
+    if not cell_elevations:
+        return None
+    ordered = sorted(cell_elevations.values())
+    lower_half = ordered[: max(1, (len(ordered) + 1) // 2)]
+    buckets: dict[int, int] = {}
+    for elevation in lower_half:
+        bucket = round(elevation / GROUND_REFERENCE_BIN_M)
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+    dominant = max(
+        buckets,
+        key=lambda bucket: (
+            buckets[bucket],
+            -abs(bucket * GROUND_REFERENCE_BIN_M - lower_half[len(lower_half) // 2]),
+            -bucket,
+        ),
+    )
+    center = dominant * GROUND_REFERENCE_BIN_M
+    supported = [
+        elevation
+        for elevation in lower_half
+        if abs(elevation - center) <= GROUND_REFERENCE_BIN_M * 1.5
+    ]
+    supported.sort()
+    return supported[len(supported) // 2] if supported else center
+
+
+def _cell_ground_measurements(
+    cloud: Sequence[tuple[float, float, float]], resolution: float
+) -> tuple[
+    dict[tuple[int, int], list[float]],
+    dict[tuple[int, int], float],
+]:
+    samples: dict[tuple[int, int], list[float]] = {}
+    for point in cloud:
+        samples.setdefault(_surface_cell(point[0], point[1], resolution), []).append(
+            point[2]
+        )
+    # The lowest return is the local ground hypothesis. Later neighborhood and
+    # dominant-layer checks reject isolated low returns and upper surfaces.
+    elevations = {cell: min(values) for cell, values in samples.items()}
+    return samples, elevations
+
+
+def _ground_target_cells(
+    value: dict[str, Any],
+    measured: set[tuple[int, int]],
+    resolution: float,
+) -> tuple[set[tuple[int, int]], str]:
+    polygon = value.get("allowedArea")
+    if polygon:
+        polygon_xy = [(point[0], point[1]) for point in polygon]
+        minimum_x = math.floor(min(point[0] for point in polygon_xy) / resolution)
+        maximum_x = math.ceil(max(point[0] for point in polygon_xy) / resolution)
+        minimum_y = math.floor(min(point[1] for point in polygon_xy) / resolution)
+        maximum_y = math.ceil(max(point[1] for point in polygon_xy) / resolution)
+        cells = {
+            (cell_x, cell_y)
+            for cell_x in range(minimum_x, maximum_x + 1)
+            for cell_y in range(minimum_y, maximum_y + 1)
+            if _point_in_polygon(
+                (
+                    (cell_x + 0.5) * resolution,
+                    (cell_y + 0.5) * resolution,
+                ),
+                polygon_xy,
+            )
+        }
+        return cells, "operator_allowed_area"
+
+    # Before the operator draws the green boundary, show a bounded continuous
+    # patch around actual floor returns. This is deliberately not a convex hull:
+    # a hull could paint across a courtyard, wall or other unobserved void.
+    dilation = max(1, int(math.ceil(0.60 / resolution)))
+    cells: set[tuple[int, int]] = set()
+    for cell_x, cell_y in measured:
+        for dx in range(-dilation, dilation + 1):
+            for dy in range(-dilation, dilation + 1):
+                if math.hypot(dx, dy) <= dilation:
+                    cells.add((cell_x + dx, cell_y + dy))
+                    if len(cells) >= MAX_GROUND_PREVIEW_CELLS:
+                        return cells, "measured_support_neighborhood"
+    return cells, "measured_support_neighborhood"
+
+
+def _navigation_ground_surface(
+    value: dict[str, Any], cloud: Sequence[tuple[float, float, float]]
+) -> dict[str, Any]:
+    """Build a review-only 2.5D ground layer from the point-cloud lower envelope.
+
+    It intentionally does not authorize navigation. The reviewed green polygon
+    and red occupancy cells remain the Nav2 static-map authority until this
+    terrain model has a separate field-acceptance receipt.
+    """
+
+    resolution = _ground_preview_resolution(value, cloud)
+    samples, elevations = _cell_ground_measurements(cloud, resolution)
+    reference = _ground_reference(elevations)
+    if reference is None:
+        return {
+            "schema": "gogoguard.ground_surface_preview.v1",
+            "frame": "map",
+            "resolutionM": resolution,
+            "referenceElevationM": None,
+            "regionSource": "none",
+            "navigationAuthority": False,
+            "measuredCells": [],
+            "inferredCells": [],
+            "unknownCells": [],
+            "stats": {
+                "measuredCellCount": 0,
+                "inferredCellCount": 0,
+                "unknownCellCount": 0,
+                "traversableCellCount": 0,
+                "cautionCellCount": 0,
+            },
+        }
+
+    raw_cells = set(elevations)
+    measured: set[tuple[int, int]] = set()
+    for cell, elevation in elevations.items():
+        if abs(elevation - reference) > GROUND_REFERENCE_BAND_M:
+            continue
+        support = len(samples[cell]) >= 2 or any(
+            neighbor in raw_cells
+            and abs(elevations[neighbor] - elevation) <= 0.18
+            for neighbor in (
+                (cell[0] - 1, cell[1]),
+                (cell[0] + 1, cell[1]),
+                (cell[0], cell[1] - 1),
+                (cell[0], cell[1] + 1),
+                (cell[0] - 1, cell[1] - 1),
+                (cell[0] - 1, cell[1] + 1),
+                (cell[0] + 1, cell[1] - 1),
+                (cell[0] + 1, cell[1] + 1),
+            )
+        )
+        if support:
+            measured.add(cell)
+
+    targets, region_source = _ground_target_cells(value, measured, resolution)
+    interpolation_cells = max(
+        1, int(math.ceil(GROUND_INTERPOLATION_RADIUS_M / resolution))
+    )
+    measured_rows: list[list[Any]] = []
+    measured_values: dict[tuple[int, int], tuple[float, float, float, str]] = {}
+    for cell in sorted(measured & targets):
+        elevation = elevations[cell]
+        ground_band = [
+            sample for sample in samples[cell] if sample <= elevation + 0.12
+        ]
+        mean = sum(ground_band) / len(ground_band)
+        roughness = math.sqrt(
+            sum((sample - mean) ** 2 for sample in ground_band) / len(ground_band)
+        )
+        slopes = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if not dx and not dy:
+                    continue
+                neighbor = (cell[0] + dx, cell[1] + dy)
+                if neighbor in measured:
+                    distance = math.hypot(dx, dy) * resolution
+                    slopes.append(
+                        math.degrees(
+                            math.atan2(abs(elevations[neighbor] - elevation), distance)
+                        )
+                    )
+        slope = max(slopes, default=0.0)
+        status = "caution" if slope > 24.0 or roughness > 0.08 else "traversable"
+        confidence = min(0.98, 0.72 + min(len(samples[cell]), 5) * 0.05)
+        measured_values[cell] = (elevation, slope, roughness, status)
+        measured_rows.append(
+            [
+                cell[0],
+                cell[1],
+                round(elevation, 3),
+                round(confidence, 2),
+                round(slope, 1),
+                round(roughness, 3),
+                status,
+            ]
+        )
+
+    inferred_rows: list[list[Any]] = []
+    unknown_rows: list[list[Any]] = []
+    for cell in sorted(targets - measured):
+        nearby: list[tuple[float, float]] = []
+        for dx in range(-interpolation_cells, interpolation_cells + 1):
+            for dy in range(-interpolation_cells, interpolation_cells + 1):
+                neighbor = (cell[0] + dx, cell[1] + dy)
+                if neighbor not in measured_values:
+                    continue
+                distance = math.hypot(dx, dy) * resolution
+                if distance <= GROUND_INTERPOLATION_RADIUS_M:
+                    nearby.append((distance, measured_values[neighbor][0]))
+        nearby.sort()
+        closest = nearby[:4]
+        if closest:
+            spread = max(value[1] for value in closest) - min(
+                value[1] for value in closest
+            )
+            weights = [1.0 / max(value[0], resolution * 0.5) for value in closest]
+            elevation = sum(
+                value[1] * weight for value, weight in zip(closest, weights)
+            ) / sum(weights)
+            nearest_distance = closest[0][0]
+            confidence = max(
+                0.25,
+                min(0.68, 0.68 - nearest_distance / (GROUND_INTERPOLATION_RADIUS_M * 2.5)),
+            )
+            status = "caution" if spread > 0.18 else "traversable"
+            inferred_rows.append(
+                [
+                    cell[0],
+                    cell[1],
+                    round(elevation, 3),
+                    round(confidence, 2),
+                    status,
+                ]
+            )
+        else:
+            unknown_rows.append([cell[0], cell[1], round(reference, 3)])
+
+    traversable = sum(row[-1] == "traversable" for row in measured_rows) + sum(
+        row[-1] == "traversable" for row in inferred_rows
+    )
+    caution = len(measured_rows) + len(inferred_rows) - traversable
+    return {
+        "schema": "gogoguard.ground_surface_preview.v1",
+        "frame": "map",
+        "resolutionM": resolution,
+        "referenceElevationM": round(reference, 3),
+        "regionSource": region_source,
+        "navigationAuthority": False,
+        "cellFormats": {
+            "measuredCells": [
+                "cellX", "cellY", "elevationM", "confidence", "slopeDeg", "roughnessM", "status"
+            ],
+            "inferredCells": [
+                "cellX", "cellY", "elevationM", "confidence", "status"
+            ],
+            "unknownCells": ["cellX", "cellY", "referenceElevationM"],
+        },
+        "measuredCells": measured_rows,
+        "inferredCells": inferred_rows,
+        "unknownCells": unknown_rows,
+        "stats": {
+            "measuredCellCount": len(measured_rows),
+            "inferredCellCount": len(inferred_rows),
+            "unknownCellCount": len(unknown_rows),
+            "traversableCellCount": traversable,
+            "cautionCellCount": caution,
+        },
+        "note": (
+            "点云下包络生成的2.5D地面参考；实测、插值和未知区分开显示，"
+            "未经现场验收，不直接改变Nav2通行权限"
+        ),
+    }
+
+
 def navigation_surface_cells(
     workspace: dict[str, Any],
     map_points: Iterable[Sequence[Any]],
+    *,
+    include_ground: bool = False,
 ) -> dict[str, Any]:
     """Project one reviewed height slice into deterministic map-frame cells."""
 
@@ -560,7 +856,7 @@ def navigation_surface_cells(
     manual_clear = {tuple(cell) for cell in surface["manualClearCells"]}
     manual_blocked = {tuple(cell) for cell in surface["manualBlockedCells"]}
     occupied = (automatic - manual_clear) | manual_blocked
-    return {
+    preview = {
         "schema": "gogoguard.navigation_surface_preview.v1",
         "frame": "map",
         "resolutionM": resolution,
@@ -581,6 +877,9 @@ def navigation_surface_cells(
             "recordedCorridorClearCellCount": len(route_cleared),
         },
     }
+    if include_ground:
+        preview["ground"] = _navigation_ground_surface(value, cloud)
+    return preview
 
 
 def _raster_bounds(
