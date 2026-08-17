@@ -1061,16 +1061,22 @@ function drawWorkspace() {
       context.beginPath(); context.arc(value[0], value[1], 3.5, 0, Math.PI * 2); context.fill();
     });
   }
-  if (state.planPreview?.path?.length) {
+  const previewPaths = state.planPreview?.segments?.length
+    ? state.planPreview.segments.map(segment => segment.path || [])
+    : state.planPreview?.path?.length ? [state.planPreview.path] : [];
+  if (previewPaths.some(path => path.length)) {
     context.strokeStyle = '#c084fc';
     context.lineWidth = 4;
     context.setLineDash([9, 6]);
-    context.beginPath();
-    state.planPreview.path.forEach((point, index) => {
-      const value = worldToCanvas(point);
-      index ? context.lineTo(...value) : context.moveTo(...value);
-    });
-    context.stroke();
+    for (const path of previewPaths) {
+      if (!path.length) continue;
+      context.beginPath();
+      path.forEach((point, index) => {
+        const value = worldToCanvas(point);
+        index ? context.lineTo(...value) : context.moveTo(...value);
+      });
+      context.stroke();
+    }
     context.setLineDash([]);
   }
   for (const [point, color, label] of [
@@ -1534,28 +1540,90 @@ async function previewNavigationPlan() {
     $('planPreviewResult').textContent = '请先确认起点和目标。';
     return;
   }
-  $('planPreviewResult').textContent = '正在检查这张导航地图是否连通……';
+  if (state.checkpointAudit && !state.checkpointAudit.audit?.ready) {
+    $('planPreviewResult').textContent = `暂时不能预演整趟巡检：${state.checkpointAudit.audit?.message || '巡检点尚未完成路线绑定'}。`;
+    return;
+  }
+  const rawCheckpoints = state.checkpointAudit?.checkpoints || [];
+  const checkpoints = rawCheckpoints
+    .filter(checkpoint => Number.isFinite(Number(checkpoint.position?.x)) && Number.isFinite(Number(checkpoint.position?.y)))
+    .sort((left, right) => (
+      Number(left.routeProgressIndex ?? Number.MAX_SAFE_INTEGER)
+      - Number(right.routeProgressIndex ?? Number.MAX_SAFE_INTEGER)
+    ) || String(left.checkpointId).localeCompare(String(right.checkpointId)));
+  if (checkpoints.length !== rawCheckpoints.length) {
+    $('planPreviewResult').textContent = '暂时不能预演整趟巡检：有巡检点缺少可用的地图坐标。';
+    return;
+  }
+  const stops = [
+    {label: '起点', point: state.planStart},
+    ...checkpoints.map(checkpoint => ({
+      label: String(checkpoint.checkpointId),
+      point: [Number(checkpoint.position.x), Number(checkpoint.position.y)],
+    })),
+    {label: '终点', point: state.planGoal},
+  ];
+  const legs = stops.slice(0, -1).map((stop, index) => ({from: stop, to: stops[index + 1]}));
+  $('planPreviewResult').textContent = `正在按巡检顺序规划 ${legs.length} 段路线……`;
   $('previewNavigationPlan').disabled = true;
   try {
     const surface = ensureNavigationSurface();
-    const result = await post(
-      `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-plan-preview`,
-      {
-        start: state.planStart,
-        goal: state.planGoal,
-        workspace: {
-          route: state.navigationWorkspace.route,
-          allowedArea: state.navigationWorkspace.allowedArea,
-          routeSource: state.navigationWorkspace.routeSource,
-          robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
-          navigationSurface: {...surface, reviewed: false},
-        },
-      },
-    );
-    state.planPreview = result;
-    $('planPreviewResult').textContent = result.reachable
-      ? `可到达 · 预演路线约 ${Number(result.lengthM || 0).toFixed(1)} m。紫色线是编辑器的连通性预演，狗端由 Nav2 重新计算。`
-      : '不可到达：起点和目标之间被绿色边界或红色障碍隔断了。';
+    const workspace = {
+      route: state.navigationWorkspace.route,
+      allowedArea: state.navigationWorkspace.allowedArea,
+      routeSource: state.navigationWorkspace.routeSource,
+      robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
+      navigationSurface: {...surface, reviewed: false},
+    };
+    const segments = await Promise.all(legs.map(async leg => {
+      const distance = Math.hypot(
+        leg.to.point[0] - leg.from.point[0],
+        leg.to.point[1] - leg.from.point[1],
+      );
+      if (distance < 0.02) {
+        return {
+          fromLabel: leg.from.label,
+          toLabel: leg.to.label,
+          reachable: true,
+          reason: 'SAME_POSITION',
+          path: [leg.from.point],
+          lengthM: 0,
+        };
+      }
+      try {
+        const result = await post(
+          `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-plan-preview`,
+          {start: leg.from.point, goal: leg.to.point, workspace},
+        );
+        return {...result, fromLabel: leg.from.label, toLabel: leg.to.label};
+      } catch (error) {
+        return {
+          fromLabel: leg.from.label,
+          toLabel: leg.to.label,
+          reachable: false,
+          reason: 'PREVIEW_FAILED',
+          path: [],
+          message: friendlyError(error),
+        };
+      }
+    }));
+    const reachable = segments.every(segment => segment.reachable);
+    const lengthM = segments.reduce((total, segment) => total + Number(segment.lengthM || 0), 0);
+    state.planPreview = {
+      schema: 'gogoguard.mission_navigation_plan_preview.v1',
+      reachable,
+      checkpointCount: checkpoints.length,
+      segments,
+      lengthM,
+    };
+    const segmentSummary = segments.map(segment => (
+      segment.reachable
+        ? `${segment.fromLabel}→${segment.toLabel} ${Number(segment.lengthM || 0).toFixed(1)}m`
+        : `${segment.fromLabel}→${segment.toLabel} 不通${segment.message ? `（${segment.message}）` : ''}`
+    )).join('；');
+    $('planPreviewResult').textContent = reachable
+      ? `整趟可到达 · 经过 ${checkpoints.length} 个巡检点 · 共 ${lengthM.toFixed(1)} m。${segmentSummary}。紫色虚线是分段连通性预演，狗端每段由 Nav2 Smac 重新规划。`
+      : `整趟不可达：${segmentSummary}。请检查不通的那一段绿色边界和红色障碍。`;
   } catch (error) {
     state.planPreview = null;
     $('planPreviewResult').textContent = friendlyError(error);

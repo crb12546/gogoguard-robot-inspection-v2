@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-15
+Updated: 2026-08-17
 
 ## New-task handoff — start here
 
@@ -84,6 +84,16 @@ unknown ground cells, retained the existing 631 red occupied cells, verified
 fullscreen 3D and verified that brush entry returns to 2D at 220%. No save,
 publish, robot connection, deployment or motion occurred; the green reviewed
 area and red occupancy remain the only Nav2 map authority.
+
+The workstation mission preview now follows the same ordered goal semantics as
+the generation-9 runtime instead of drawing one misleading start-to-end path.
+It plans and renders each `start -> checkpoint(s) -> final endpoint` leg
+separately, keeps disconnected legs visually separate and names the exact leg
+that cannot be reached. A 2026-08-17 browser receipt against real
+`map-62d8cec9a1dc` workspace revision 2 passed all three legs: start to `cp_01`
+3.580 m, `cp_01` to `cp_02` 4.556 m and `cp_02` to the final endpoint 2.041 m.
+This is a Mac-side static-connectivity and UI receipt; it is not a physical
+robot completion receipt.
 
 ### Immediate continuation for the next Codex task
 

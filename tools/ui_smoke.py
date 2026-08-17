@@ -23,6 +23,7 @@ required = {
         "workspaceViewSplit", "showWorkspaceGround",
         "workspaceZoomLabel", "workspaceModeBanner", "finishWorkspaceEdit",
         "擦除红色（常用）", "全屏编辑（含工具）", "实测地面",
+        "预演整趟巡检", "红色巡检点会按录制顺序逐个经过",
     ],
     "app.js": [
         "/api/v1/live", "/api/v1/camera", "/api/v1/sessions/start",
@@ -53,6 +54,8 @@ required = {
         "setWorkspaceDisplayMode",
         "requireWorkspaceEditZoom", "startSurfaceEdit",
         "finishWorkspaceEditing", "mapWorkbenchSection", "附近没有点云",
+        "gogoguard.mission_navigation_plan_preview.v1",
+        "正在按巡检顺序规划", "整趟不可达",
     ],
     "styles.css": [
         ".workspace", ".camera-panel", ".control-panel", ".action-help",
