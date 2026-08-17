@@ -119,10 +119,10 @@ robot completion receipt.
 | Robot hardware and calibration | MID-360S, IMU, FAST-LIO, Z1Pro and Unitree motion boundary are deployed; replacement-sensor calibration is active. Z1Pro command feedback now uses the protocol-correct mixed frames on the robot | Physically verify one fine manual adjustment; long-duration full-load performance is not yet characterized |
 | Recording and transfer | Real bags can be recorded, sealed, hashed, resumed and moved robot -> Mac | Operator recovery and large-transfer UX still need product polish |
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
-| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map and has published the real revision-1 candidate to the robot; it never rewrites localization PCD. The local Mac source additionally derives a review-only 2.5D ground layer with measured/interpolated/unknown cells | Operator editing acceptance, ground-model field acceptance before any navigation authority, and physical planning receipts remain pending |
+| Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map and has published real `map-62d8cec9a1dc` revision 4 to the robot; it never rewrites localization PCD. The local Mac additionally derives a review-only 2.5D ground layer with measured/interpolated/unknown cells | Operator editing acceptance, ground-model field acceptance before any navigation authority, and physical planning receipts remain pending |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
 | Navigation and motion | Nav2/MPPI has completed real routes on the V6 baseline. Generation 9 is now installed and statically verified with a reviewed StaticLayer map, full-map Smac point-goal planning, the same MPPI controller, one 0.48 m safety circle and the green KeepoutFilter | Verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release before calling generation 9 motion-accepted |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and real-map connectivity preview in addition to GLIM, checkpoint and gimbal workflows. The 2026-08-15 real-map browser regression verified explicit 2D, 3D and split modes, full-screen ground/cloud rendering and automatic 2D/220% brush entry while leaving the saved map at 631 candidates, 0 manual block and 0 manual clear. The current process was restarted without a platform token | Get operator usability acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and checkpoint-ordered mission preview in addition to GLIM, checkpoint and gimbal workflows. The current real workspace has 523 visible occupied cells, 1,548 explicit clear cells and two checkpoints; browser verification rendered three reachable task legs totaling 10.177 m | Get operator usability and physical-patrol acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
 | Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |
@@ -264,43 +264,30 @@ boundaries and receipts to distinguish them.
   alignment and revision-safe publication are source commit `074f379`; route-
   bound mission isolation is source commit `6613c6f`, with the empty optional
   ROS launch-argument correction in `b103370` and the split process/patrol
-  readiness boundary in `7f79aa4`. These
-  commits remain local until explicitly pushed. Always check `git status` for
-  a later handoff commit. Checkpoint inspection code is deployed but remains
-  dormant until the operator explicitly starts a physical test.
+  readiness boundary in `7f79aa4`. The current source adds the generation-9
+  runtime-overlay packaging correction in `0069c3d` and the checkpoint-ordered
+  mission preview in `e10af40`. These commits remain local until explicitly
+  pushed. Always check `git status` for a later handoff commit.
 - Last verified robot release is
-  `gogoguard-robot-inspection:v2-edge-20260811-mission-isolation-r3`, built
-  from `7f79aa4` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-
-  list ID is
-  `sha256:6c9c9453a3a7ba191ac580d2566a406ef85997fc727eeeacd7501d8055734c6f`;
+  `gogoguard-robot-inspection:v2-edge-20260817-mission-plan-r1`, built from
+  `e10af40` on the unchanged accepted V6 base. Its Mac Linux/ARM64 manifest-list
+  ID is
+  `sha256:41f8b4914c212a84cdb92452f98e0e1dd388b63842f0d02c7ec75f13bb7d6673`;
   the robot-loaded config ID is
-  `sha256:54c79cafdefab076ec92c09c0443635e551656b403dcfd55a49127f031455fc0`.
-  The enabled service is active with zero restarts, platform heartbeat is
-  online through the frozen HTTP IP endpoint, Z1Pro status is ready and the
-  live static device receipt reported LiDAR 10.0 Hz, IMU 44.9 Hz and odometry
-  9.0 Hz. The r5
-  realtime audio/video behavior and peak-limited `outputGain=3.0` are retained.
-  The operator subsequently started the real local mission. It produced a true
-  zero-speed stop at `cp_01`, but the camera comparison failed because the
-  published checkpoint yaw was 16.623 degrees left of the timestamp-matched
-  GLIM quaternion yaw. The mission was then explicitly stopped: patrol runtime,
-  Nav2 motion path and Unitree motion bridge stopped, UDP 5005 was released and
-  the robot was removed for charging. Always re-read live robot state before
-  deployment or motion because the operator can change it between tasks.
-- The 2026-08-10 V6 navigation and latest-only VGICP recovery code is now
-  deployed and has received an operator-accepted physical patrol. The selected
-  robot candidate is
-  generation 7 for `map-70fb209b5b20`, bound to
-  `route-70fb209b5b20-workspace-r5`, its saved green allowed area and two
-  route-bound checkpoints. Repeated robot import succeeded while immutable
-  `map.ply`/`map.json` hashes remained authoritative. Starting the runtime and
-  completing further physical patrols remain explicit operator actions.
-- A Mac-only generation-8 candidate is now prepared for the same map as
-  `route-70fb209b5b20-workspace-r6`. It keeps the accepted blue route, green
-  area and V6 mobility parameters unchanged, while correcting checkpoint yaw
-  from GLIM timestamps/quaternions. This local asset is not installed on the
-  robot and does not supersede the deployed revision-5 receipt until tomorrow's
-  explicitly authorized deployment succeeds.
+  `sha256:ea70208069535a3431d11a0eb9f56f589ee4586052305ea493a4016e54016004`.
+  The service restarted at 2026-08-17 20:28:55 CST and remains active with zero
+  restarts. LiDAR, IMU and odometry are online. A direct in-container load of
+  the real generation-9 candidate returned `BUNDLE_OK`; the earlier stale ROS
+  overlay `navigation_map_path` argument failure is repaired. Navigation,
+  localization and the motion bridge remain stopped and UDP 5005 is unbound.
+  No motion occurred during this deployment.
+- The selected robot candidate is generation 9 for
+  `map-62d8cec9a1dc`, bound to
+  `route-62d8cec9a1dc-workspace-r4`, two checkpoints, workspace hash
+  `e77fe719d8000a82026105c3a68bbf1d6be91d03d44301a400fffa8167cf76ae`
+  and a 198 by 222 reviewed static map containing 523 occupied cells. V6 remains
+  the operator-accepted mobility baseline until a complete physical
+  generation-9 patrol succeeds.
 - The commissioned Mac workstation was restarted from this worktree and is
   listening on `http://127.0.0.1:8080/`. Robot, map catalog, Z1Pro and new
   checkpoint/platform routes return valid responses. The selected real map
@@ -2801,3 +2788,34 @@ authorization before localization, Nav2 or physical motion.
   synchronized split, full-workbench fullscreen and 3D -> clear-brush automatic
   2D/220% transition. No workspace save, candidate publication, platform upload,
   robot connection, deployment, localization, Nav2 or movement occurred.
+
+## 2026-08-17 generation-9 runtime packaging and ordered mission preview
+
+- Two real start attempts failed before localization because the generation-9
+  launch called `load_candidate_runtime_bundle(... navigation_map_path=...)`
+  while the ROS install overlay still contained the older `runtime_core.py`.
+  Commit `0069c3d` now installs and contract-checks that owned runtime module
+  together with the launch and Nav2 configuration.
+- Commit `e10af40` changes the workstation preview from one start-to-end line to
+  ordered `start -> checkpoint(s) -> final endpoint` legs. A fresh browser used
+  real `map-62d8cec9a1dc` and reported three reachable legs: 3.580 m, 4.556 m
+  and 2.041 m, totaling 10.177 m. Disconnected legs are drawn independently and
+  named instead of being visually bridged.
+- The ARM64 image
+  `gogoguard-robot-inspection:v2-edge-20260817-mission-plan-r1` has manifest-list
+  ID `sha256:41f8b4914c212a84cdb92452f98e0e1dd388b63842f0d02c7ec75f13bb7d6673`
+  and robot-loaded config ID
+  `sha256:ea70208069535a3431d11a0eb9f56f589ee4586052305ea493a4016e54016004`.
+  Its 1,389,852,672-byte archive passed SHA-256 on both ends as
+  `8606babcb31b65a17db498b636aded17e6ac3a32dac08978ebb8544f516684f9`.
+- The explicit install and service restart completed at 20:28:55 CST. The
+  service is active with zero restarts and sensors online. Inside the active
+  container, the real revision-4 candidate and all seven map/route/profile
+  hashes loaded as `BUNDLE_OK`; the preview marker is present in the packaged
+  UI. Nav2, localization and the motion bridge remained stopped, the final
+  command remained null and UDP 5005 remained unbound. No robot or camera
+  movement occurred.
+- Static deployment does not accept the new navigation behavior. The next
+  physical receipt must stand the robot, start fixed-map localization, confirm
+  the first Smac plan, then complete the ordered two-checkpoint patrol before
+  testing a moving person or a wide mapped obstacle.
