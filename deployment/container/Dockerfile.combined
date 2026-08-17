@@ -34,6 +34,9 @@ RUN cd /tmp/interaction-wheels \
       /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py \
       /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/nav2_profile_contract.py \
     && install -m 0644 \
+      /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/runtime_core.py \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/runtime_core.py \
+    && install -m 0644 \
       /opt/gogoguard/app/modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py \
       /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
     && install -m 0644 \
@@ -47,6 +50,8 @@ RUN cd /tmp/interaction-wheels \
       /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/package.xml \
     && grep -q 'FollowPath, Spin' \
       /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/patrol_runtime_manager.py \
+    && grep -q 'navigation_map_path: Path' \
+      /opt/gogoguard/ros_ws/install/lib/python3.10/site-packages/go2_nav2_runtime/runtime_core.py \
     && grep -q 'nav2_behaviors/Spin' \
       /opt/gogoguard/ros_ws/install/share/go2_nav2_runtime/config/go2_nav2_patrol.yaml \
     && grep -q 'nav2_behaviors' \

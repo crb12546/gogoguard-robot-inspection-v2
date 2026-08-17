@@ -89,9 +89,11 @@ for required in (
     'numpy.__version__ == "2.0.2"',
     "src/go2_vui_control.cpp",
     "/opt/gogoguard/ros_ws/install/lib/go2_cmd_vel_bridge/go2_vui_control",
+    "site-packages/go2_nav2_runtime/runtime_core.py",
     "site-packages/go2_nav2_runtime/patrol_runtime_manager.py",
     "share/go2_nav2_runtime/launch/active_map_patrol.launch.py",
     "share/go2_nav2_runtime/config/go2_nav2_patrol.yaml",
+    "navigation_map_path: Path",
 ):
     if required not in combined_content:
         raise SystemExit(f"combined release is missing frozen-baseline contract: {required}")

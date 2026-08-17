@@ -432,6 +432,11 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             combined,
         )
         self.assertIn(
+            "site-packages/go2_nav2_runtime/runtime_core.py",
+            combined,
+        )
+        self.assertIn("navigation_map_path: Path", combined)
+        self.assertIn(
             "share/go2_nav2_runtime/launch/active_map_patrol.launch.py",
             combined,
         )
