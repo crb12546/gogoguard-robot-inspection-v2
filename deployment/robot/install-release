@@ -22,7 +22,9 @@ for required_file in \
   "$STAGING_DIRECTORY/release.env" \
   "$STAGING_DIRECTORY/runtime.json" \
   "$STAGING_DIRECTORY/run-edge" \
+  "$STAGING_DIRECTORY/commission-device-token" \
   "$STAGING_DIRECTORY/configure-combined-joint-test" \
+  "$STAGING_DIRECTORY/validate-runtime-env" \
   "$STAGING_DIRECTORY/wait-clock-sync" \
   "$STAGING_DIRECTORY/gogoguard-edge.service"; do
   if [[ ! -f $required_file ]]; then
@@ -48,8 +50,12 @@ docker load --input "$IMAGE_ARCHIVE"
 
 install -d -m 0755 /opt/gogoguard/bin /etc/gogoguard /var/lib/gogoguard
 install -m 0755 "$STAGING_DIRECTORY/run-edge" /opt/gogoguard/bin/run-edge
+install -m 0755 "$STAGING_DIRECTORY/commission-device-token" \
+  /opt/gogoguard/bin/commission-device-token
 install -m 0755 "$STAGING_DIRECTORY/configure-combined-joint-test" \
   /opt/gogoguard/bin/configure-combined-joint-test
+install -m 0755 "$STAGING_DIRECTORY/validate-runtime-env" \
+  /opt/gogoguard/bin/validate-runtime-env
 install -m 0755 "$STAGING_DIRECTORY/wait-clock-sync" \
   /opt/gogoguard/bin/wait-clock-sync
 if [[ -f /etc/gogoguard/runtime.env ]]; then
@@ -69,6 +75,7 @@ if [[ -f /etc/gogoguard/runtime.env ]]; then
 else
   install -m 0600 "$STAGING_DIRECTORY/runtime.env" /etc/gogoguard/runtime.env
 fi
+/opt/gogoguard/bin/validate-runtime-env /etc/gogoguard/runtime.env
 install -m 0644 "$STAGING_DIRECTORY/release.env" /etc/gogoguard/release.env
 install -m 0644 "$STAGING_DIRECTORY/runtime.json" /etc/gogoguard/runtime.json
 install -m 0644 "$STAGING_DIRECTORY/gogoguard-edge.service" \

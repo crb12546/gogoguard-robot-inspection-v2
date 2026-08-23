@@ -36,6 +36,7 @@ class NavigationMission:
     decision_mode: str = "platform"
     verdict_timeout_s: int = 15
     max_retake_attempts: int = 2
+    evidence_transaction_version: int | None = None
 
 
 def load_navigation_mission(
@@ -142,6 +143,13 @@ def load_navigation_mission(
         raise ValueError("navigation mission verdict timeout is invalid")
     if isinstance(max_retakes, bool) or not isinstance(max_retakes, int) or not 0 <= max_retakes <= 5:
         raise ValueError("navigation mission max retakes is invalid")
+    evidence_version = value.get("evidenceTransactionVersion")
+    if evidence_version is not None and (
+        isinstance(evidence_version, bool)
+        or not isinstance(evidence_version, int)
+        or evidence_version != 1
+    ):
+        raise ValueError("navigation mission evidence transaction version is invalid")
     return NavigationMission(
         mission_id,
         expected_map_version,
@@ -151,6 +159,7 @@ def load_navigation_mission(
         decision_mode,
         verdict_timeout,
         max_retakes,
+        evidence_version,
     )
 
 
@@ -300,6 +309,10 @@ class CheckpointExecutor:
         action = control.get("action")
         if action == "capture" and self.phase == "WAITING_PLATFORM":
             self.request_spin()
+        elif action == "capture_failed" and self.phase == "WAITING_PLATFORM":
+            # Protocol-only transition: no spin, goal, or velocity is issued.
+            # The robot remains stopped and can accept an explicit retake.
+            self.phase = "WAITING_VERDICT"
         elif action == "retake" and self.phase == "WAITING_VERDICT":
             if self.attempt > self.mission.max_retake_attempts:
                 return "retake_limit"
@@ -345,6 +358,7 @@ class CheckpointExecutor:
             "attempt": self.attempt if self.active_checkpoint else None,
             "verdictTimeoutSec": self.mission.verdict_timeout_s,
             "maxRetakeAttempts": self.mission.max_retake_attempts,
+            "evidenceTransactionVersion": self.mission.evidence_transaction_version,
             "bodyYawRad": (
                 self.active_checkpoint.body_yaw_rad if self.active_checkpoint else None
             ),

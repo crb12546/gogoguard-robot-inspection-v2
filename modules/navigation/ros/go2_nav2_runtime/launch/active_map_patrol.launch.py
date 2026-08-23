@@ -256,6 +256,24 @@ def _runtime_nodes(context):
                 ),
             ]
         )
+    runtime_nodes.append(
+        Node(
+            package="go2_nav2_runtime",
+            executable="obstacle_cloud_filter",
+            name="navigation_obstacle_cloud_filter",
+            output="screen",
+            respawn=True,
+            respawn_delay=1.0,
+            parameters=[
+                {
+                    "input_topic": "/navigation/cloud_body",
+                    "output_topic": "/navigation/cloud_obstacles",
+                    "expected_frame": "base_link",
+                    "use_sim_time": use_sim_time,
+                }
+            ],
+        )
+    )
     manager_node = Node(
         package="go2_nav2_runtime",
         executable="patrol_runtime_manager",

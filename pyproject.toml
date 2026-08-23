@@ -43,3 +43,4 @@ include = ["gogoguard_*"]
 
 [tool.setuptools.package-data]
 gogoguard_calibration = ["config/*.json"]
+gogoguard_contracts = ["evidence_txn/v1/*.json", "evidence_txn/v1/vectors/*.json"]

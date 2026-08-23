@@ -71,7 +71,7 @@
     "schema": "gogoguard.robot_pose.v1",
     "topic": "gogoguard.robot_pose.v1",
     "delivery": "unreliable_latest_only",
-    "binding": ["mapVersion", "routeId", "frameId", "mission"],
+    "binding": ["runtimeInstanceId", "mapVersion", "routeId", "frameId", "mission"],
     "missionContext": true,
     "requiresActiveLiveSession": true
   },

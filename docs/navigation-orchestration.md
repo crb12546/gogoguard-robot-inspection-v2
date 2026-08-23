@@ -54,7 +54,13 @@ block/clear overrides. It never rewrites the localization PCD.
   person or parked vehicle and trigger a fresh global plan.
 - The rolling local costmap gives MPPI the nearby static and live obstacles.
 - MPPI owns smooth local tracking, lateral clearance and short reactions.
-- Collision Monitor owns one visible 0.48 m emergency stop circle.
+- The navigation-only obstacle filter removes returns that geometrically fall
+  inside the rigid body/backboard volume; localization keeps the complete
+  calibrated cloud.
+- MPPI, both costmaps and Collision Monitor share one rectangular hard
+  envelope: the measured body plus 0.10 m shoulder padding, giving x
+  `[-0.43, 0.50]` and y `+/-0.30 m`. Inflation outside it is a soft planning
+  preference, not another hard body.
 - The Unitree receiver owns authorization, freshness and hardware limits, not
   path selection.
 

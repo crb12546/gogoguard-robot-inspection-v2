@@ -11,7 +11,13 @@ import time
 import uuid
 from pathlib import Path
 
-from gogoguard_contracts import RecordingSession, RecordingState, json_ready, utc_now
+from gogoguard_contracts import (
+    RecordingSession,
+    RecordingState,
+    jpeg_metadata,
+    json_ready,
+    utc_now,
+)
 from gogoguard_evidence import EventJournal
 
 
@@ -249,12 +255,10 @@ class CaptureManager:
         with self._lock:
             if self._active_id != session_id:
                 raise CaptureError("checkpoints can only be marked during the active recording")
-            if (
-                not isinstance(sample_jpeg, (bytes, bytearray))
-                or not bytes(sample_jpeg).startswith(b"\xff\xd8")
-                or not bytes(sample_jpeg).endswith(b"\xff\xd9")
-            ):
-                raise CaptureError("checkpoint sample must be a JPEG")
+            try:
+                sample_metadata = jpeg_metadata(sample_jpeg)
+            except ValueError as exc:
+                raise CaptureError("checkpoint sample must be a valid JPEG with SOF dimensions") from exc
             value = self.checkpoints(session_id)
             items = list(value.get("checkpoints") or [])
             ordinal = max(
@@ -304,6 +308,12 @@ class CaptureManager:
                 "spin": bool(spin),
                 "note": str(note or "")[:200],
                 "sampleFrames": [f"samples/inspection/{relative_sample}"],
+                "sampleFrameMetadata": [
+                    {
+                        "path": f"samples/inspection/{relative_sample}",
+                        **sample_metadata,
+                    }
+                ],
             }
             items.append(item)
             payload = {
@@ -344,8 +354,15 @@ class CaptureManager:
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.name in {"recording_bundle.json", "session.json"}:
                 continue
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            files.append({"path": str(path.relative_to(root)), "sha256": digest, "bytes": path.stat().st_size})
+            content = path.read_bytes()
+            entry = {
+                "path": str(path.relative_to(root)),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "bytes": len(content),
+            }
+            if path.suffix.lower() in {".jpg", ".jpeg"}:
+                entry.update(jpeg_metadata(content))
+            files.append(entry)
         manifest = {
             "schema": "gogoguard.recording_bundle.v1",
             "session_id": session.session_id,

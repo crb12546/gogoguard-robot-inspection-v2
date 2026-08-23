@@ -64,7 +64,7 @@ LOCALIZATION_V2_PATCH = ROOT / (
 
 
 class NavigationRuntimeCompatibilityTest(unittest.TestCase):
-    def test_circular_costmap_rejects_mppi_polygon_footprint_mode(self) -> None:
+    def test_rectangular_costmap_requires_mppi_footprint_mode(self) -> None:
         spec = importlib.util.spec_from_file_location(
             "test_nav2_profile_contract", NAV2_PROFILE_CONTRACT
         )
@@ -74,18 +74,19 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         spec.loader.exec_module(module)
         if module.yaml is None:
             contract = NAV2_PROFILE_CONTRACT.read_text(encoding="utf-8")
-            self.assertIn('cost_critic.get("consider_footprint") is not False', contract)
+            self.assertIn('cost_critic.get("consider_footprint") is not True', contract)
             return
 
         metrics = module.validate_nav2_profile(NAV2_CONFIG)
-        self.assertEqual(metrics["robotRadiusM"], 0.48)
+        self.assertEqual(metrics["lateralHalfWidthM"], 0.30)
+        self.assertEqual(metrics["shoulderClearanceM"], 0.10)
         invalid = NAV2_CONFIG.read_text(encoding="utf-8").replace(
-            "consider_footprint: false", "consider_footprint: true", 1
+            "consider_footprint: true", "consider_footprint: false", 1
         )
         with tempfile.TemporaryDirectory() as temporary:
             candidate = Path(temporary) / "nav2.yaml"
             candidate.write_text(invalid, encoding="utf-8")
-            with self.assertRaisesRegex(module.Nav2ProfileError, "circular robot"):
+            with self.assertRaisesRegex(module.Nav2ProfileError, "rectangular footprint"):
                 module.validate_nav2_profile(candidate)
 
     def test_trace_recorder_does_not_overwrite_rclpy_node_handle(self) -> None:
@@ -363,9 +364,11 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("map_topic: /navigation_static_map", nav2_config)
         self.assertGreaterEqual(nav2_config.count("filters: [keepout_filter]"), 2)
         self.assertIn("plugin: nav2_costmap_2d::KeepoutFilter", nav2_config)
-        self.assertIn("robot_radius: 0.48", nav2_config)
-        self.assertIn("consider_footprint: false", nav2_config)
-        self.assertNotRegex(nav2_config, r"(?m)^\s+footprint:")
+        self.assertNotIn("robot_radius:", nav2_config)
+        self.assertIn("consider_footprint: true", nav2_config)
+        self.assertEqual(nav2_config.count('footprint: "[[0.40, 0.20]'), 2)
+        self.assertEqual(nav2_config.count("footprint_padding: 0.10"), 2)
+        self.assertGreaterEqual(nav2_config.count("/navigation/cloud_obstacles"), 3)
         self.assertIn("polygons: [SafetyEnvelope]", nav2_config)
         self.assertNotIn("DetourPath", nav2_config)
         self.assertNotIn("SlowZone", nav2_config)
@@ -421,6 +424,10 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn("patch --strip=1 --forward", dockerfile)
         self.assertNotIn("go2_nav2_runtime_delivery.patch", dockerfile)
         self.assertNotIn("go2_incident_diagnostics.patch", dockerfile)
+        self.assertIn(
+            "test -x install/lib/go2_nav2_runtime/obstacle_cloud_filter",
+            dockerfile,
+        )
         self.assertNotIn(
             "cp -a third_party/locked_stack/src/go2_nav2_runtime", dockerfile
         )
@@ -540,7 +547,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         receiver = Process(None, 999998)
         runtime = Process(1, 999999)
         candidate = {
-            "candidate_generation": 9,
+            "candidate_generation": 10,
             "candidate_id": "map-123456789abc",
             "map_version": "map-123456789abc",
             "localization_map": "/tmp/map.pcd",
@@ -611,7 +618,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         receiver = Process(999998)
         runtime = Process(999999)
         candidate = {
-            "candidate_generation": 9,
+            "candidate_generation": 10,
             "candidate_id": "map-123456789abc",
             "map_version": "map-123456789abc",
             "route_id": "route-r5",
@@ -716,9 +723,12 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
     def test_one_visible_safety_envelope_replaces_layered_rectangles(self) -> None:
         config = NAV2_CONFIG.read_text(encoding="utf-8")
         self.assertIn("polygons: [SafetyEnvelope]", config)
-        self.assertIn("radius: 0.48", config)
+        self.assertIn(
+            "points: [0.50, 0.30, 0.50, -0.30, -0.43, -0.30, -0.43, 0.30]",
+            config,
+        )
         self.assertNotIn("action_type: slowdown", config)
-        self.assertNotIn("type: polygon", config)
+        self.assertNotIn("type: circle", config)
 
     def test_diagnostics_names_a_blocked_patrol_instead_of_runnable(self) -> None:
         manager = NavigationManager.__new__(NavigationManager)

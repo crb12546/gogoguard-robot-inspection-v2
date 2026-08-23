@@ -28,6 +28,7 @@ setup(
             "patrol_runtime_manager = go2_nav2_runtime.patrol_runtime_manager:main",
             "runtime_trace_recorder = go2_nav2_runtime.runtime_trace_recorder:main",
             "runtime_diagnostics = go2_nav2_runtime.runtime_diagnostics:main",
+            "obstacle_cloud_filter = go2_nav2_runtime.obstacle_cloud_filter:main",
         ],
     },
 )

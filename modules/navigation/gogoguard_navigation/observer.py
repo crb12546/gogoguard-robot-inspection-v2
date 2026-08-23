@@ -9,6 +9,54 @@ import time
 from pathlib import Path
 
 
+ACTIVE_PATROL_STATES = {
+    "PATROLLING",
+    "RECOVERING",
+    "SEARCHING_PATH",
+    "BLOCKED",
+    "PAUSED",
+    "CHECKPOINT_PAUSING",
+    "CHECKPOINT_SETTLING",
+    "INSPECTING",
+}
+RUNTIME_STATUS_TIMEOUT_S = 3.0
+
+
+def fail_closed_runtime_after_timeout(
+    runtime: object,
+    *,
+    last_runtime_monotonic: float | None,
+    now_monotonic: float,
+    timeout_s: float = RUNTIME_STATUS_TIMEOUT_S,
+) -> object:
+    """Turn a lost active runtime publisher into a durable terminal status.
+
+    The observer outlives an individually launched Nav2 generation.  Without
+    this liveness fence its last PATROLLING sample would be written forever
+    after that generation exited, making the platform believe a dead patrol
+    was still running.  Monotonic time is used only for local publisher
+    liveness; no wall-clock comparison or stale-data fallback is involved.
+    """
+    if not isinstance(runtime, dict):
+        return runtime
+    state = str(runtime.get("state") or "")
+    if state not in ACTIVE_PATROL_STATES or last_runtime_monotonic is None:
+        return runtime
+    if now_monotonic - last_runtime_monotonic <= float(timeout_s):
+        return runtime
+    terminal = dict(runtime)
+    terminal.update(
+        {
+            "state": "INTERRUPTED",
+            "reason": "NAV_RUNTIME_LOST",
+            "operatorMessage": "导航运行时已退出，巡检中断，未继续发送运动控制",
+            "motionAuthorized": False,
+            "runtimeStatusStale": True,
+        }
+    )
+    return terminal
+
+
 def _parse(value: str):
     try:
         return json.loads(value)
@@ -32,6 +80,7 @@ def _atomic(path: Path, payload: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--edge-generation-id", required=True)
     args = parser.parse_args()
 
     import rclpy
@@ -42,6 +91,7 @@ def main() -> None:
     rclpy.init(args=None)
     node = rclpy.create_node("gogoguard_navigation_observer")
     state = {
+        "edge_generation_id": args.edge_generation_id,
         "runtime": None,
         "localization": None,
         "localization_pose": None,
@@ -50,10 +100,14 @@ def main() -> None:
         "commands": {"nav2": None, "collision_filtered": None, "final": None},
         "observed_at": None,
     }
+    last_runtime_monotonic: float | None = None
 
     def text_callback(name):
         def callback(message: String):
+            nonlocal last_runtime_monotonic
             state[name] = _parse(message.data)
+            if name == "runtime":
+                last_runtime_monotonic = time.monotonic()
         return callback
 
     def pose_callback(message: PoseWithCovarianceStamped):
@@ -96,6 +150,11 @@ def main() -> None:
             rclpy.spin_once(node, timeout_sec=0.05)
             now = time.monotonic()
             if now - last_write >= 0.2:
+                state["runtime"] = fail_closed_runtime_after_timeout(
+                    state.get("runtime"),
+                    last_runtime_monotonic=last_runtime_monotonic,
+                    now_monotonic=now,
+                )
                 state["observed_at"] = time.time()
                 _atomic(args.output, state)
                 last_write = now

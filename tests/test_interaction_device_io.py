@@ -183,6 +183,7 @@ class InteractionDeviceIoTest(unittest.TestCase):
         message = {
             "schema": "gogoguard.wake_transcript.v1",
             "action": "wake_transcript",
+            "eventId": "wake-event-1",
             "text": "小九小九",
             "state": "awake",
             "wake": True,
@@ -198,7 +199,14 @@ class InteractionDeviceIoTest(unittest.TestCase):
             )
         )
         self.assertEqual(
-            received, [{"action": "wake_transcript", "text": "小九小九"}]
+            received,
+            [
+                {
+                    "action": "wake_transcript",
+                    "eventId": "wake-event-1",
+                    "text": "小九小九",
+                }
+            ],
         )
         mission_messages = []
         transport.set_mission_message_handler(mission_messages.append)

@@ -8,6 +8,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+ExecStartPre=/opt/gogoguard/bin/validate-runtime-env /etc/gogoguard/runtime.env
 ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60
 ExecStart=/opt/gogoguard/bin/run-edge
 ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge

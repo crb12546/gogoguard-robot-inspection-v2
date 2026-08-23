@@ -9,8 +9,14 @@ On the commissioned Mac, run the native process so its wired-LAN and SSH
 traffic use the Mac network directly:
 
 ```bash
+deployment/workstation/commission-platform-device-token  # first commissioning only
 make workstation
 ```
+
+The commissioning helper prompts through macOS Keychain and never accepts the
+token as a command-line argument. Native workstation restarts read that item
+automatically. `GOGOGUARD_DEVICE_TOKEN` remains an explicit process-only
+override for temporary tests and non-macOS/container deployments.
 
 For a portable container delivery on another workstation:
 

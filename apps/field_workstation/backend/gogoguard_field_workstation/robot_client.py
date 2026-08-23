@@ -149,6 +149,8 @@ class RobotClient:
             try:
                 response = urlopen(request, timeout=max(self.timeout_s, 60.0))
             except (HTTPError, URLError, TimeoutError) as exc:
+                if isinstance(exc, HTTPError):
+                    exc.close()
                 raise RobotConnectionError(f"recording download failed: {exc}") from exc
             mode = "ab" if offset and getattr(response, "status", 200) == 206 else "wb"
             if mode == "wb":
@@ -225,6 +227,8 @@ class RobotClient:
             try:
                 response = urlopen(request, timeout=max(self.timeout_s, 60.0))
             except (HTTPError, URLError, TimeoutError) as exc:
+                if isinstance(exc, HTTPError):
+                    exc.close()
                 raise RobotConnectionError(f"incident download failed: {exc}") from exc
             mode = "ab" if offset and getattr(response, "status", 200) == 206 else "wb"
             with response, temporary.open(mode) as output:
@@ -373,6 +377,8 @@ class RobotClient:
                 detail = json.loads(exc.read().decode("utf-8")).get("error")
             except (ValueError, UnicodeDecodeError):
                 detail = str(exc)
+            finally:
+                exc.close()
             raise RobotConnectionError(detail or str(exc)) from exc
         except (URLError, TimeoutError, ValueError) as exc:
             raise RobotConnectionError(f"robot edge agent unavailable: {exc}") from exc

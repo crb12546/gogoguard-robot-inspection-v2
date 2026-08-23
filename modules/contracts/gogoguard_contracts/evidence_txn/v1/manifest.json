@@ -1,0 +1,32 @@
+{
+  "schema": "gogoguard.evidence_txn.v1",
+  "schemaVersion": 1,
+  "evidenceTransactionVersion": 1,
+  "compatibility": {
+    "policy": "双方各自 pin manifestSha256。任一侧 pin 的哈希与对方声明不符 → admission 拒绝 CONTRACT_HASH_MISMATCH，绝不按自己那份执行。",
+    "gate": {
+      "logicalName": "CHECKPOINT_EVIDENCE_TXN",
+      "platformEnv": "CHECKPOINT_EVIDENCE_TXN",
+      "robotEnv": "GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED",
+      "default": "off",
+      "note": "同名开关不算兼容协商。必须双向显式声明 evidenceTransactionVersion。"
+    },
+    "negotiation": {
+      "platformDeclaresIn": "start_patrol.missionPlan.evidenceTransactionVersion",
+      "robotDeclaresIn": "heartbeat.capabilities.evidenceTransaction",
+      "rule": "平台只有在（狗端声明支持 v1）且（平台 gate 开）时才下发 v1；任一不满足则不带该字段，双方回落旧路径。"
+    }
+  },
+  "files": [
+    {
+      "path": "contract.schema.json",
+      "bytes": 13775,
+      "sha256": "c6f362ad1bafe4df8b894e665bd6de6056e3cbf3dcc78b369a9ec0387fa512a0"
+    },
+    {
+      "path": "vectors/vectors.json",
+      "bytes": 9742,
+      "sha256": "251756e38745b1984930942771e9c3a6da66d937340213272cbd598208c9547b"
+    }
+  ]
+}

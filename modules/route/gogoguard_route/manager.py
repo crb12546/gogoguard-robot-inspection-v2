@@ -14,10 +14,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from gogoguard_contracts import is_safe_external_id
+from gogoguard_calibration import (
+    MountCalibration,
+    load_commissioned_mount_calibration,
+)
+from gogoguard_contracts import is_safe_external_id, jpeg_metadata
 
+from .pose_frames import (
+    LIDAR_POSE_FRAME,
+    artifact_pose_frame,
+    optimized_pose_to_base,
+)
 from .workspace import (
     NavigationWorkspaceStore,
+    PADDED_BASE_FOOTPRINT_M,
     navigation_surface_cells,
     plan_navigation_preview,
     validate_workspace,
@@ -27,7 +37,7 @@ from .workspace import (
 
 
 SAFE_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
-CANDIDATE_GENERATION = 9
+CANDIDATE_GENERATION = 10
 CHECKPOINT_TIMESTAMP_TOLERANCE_S = 0.5
 
 
@@ -237,10 +247,25 @@ def _quaternion_yaw(pose: dict[str, Any]) -> float:
 
 
 class RouteManager:
-    def __init__(self, data_root: Path, *, site_id: str) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        *,
+        site_id: str,
+        sensor_id: str = "ARMCP6B0035634",
+        mount_calibration: MountCalibration | None = None,
+    ) -> None:
         self.data_root = Path(data_root)
         self.site_id = site_id
-        self.workspaces = NavigationWorkspaceStore(self.data_root)
+        self.sensor_id = sensor_id
+        self.mount_calibration = mount_calibration or load_commissioned_mount_calibration(
+            sensor_id
+        )
+        self.workspaces = NavigationWorkspaceStore(
+            self.data_root,
+            sensor_id=sensor_id,
+            mount_calibration=self.mount_calibration,
+        )
         self.root = self.data_root / "navigation" / "candidates"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -336,6 +361,10 @@ class RouteManager:
                         and existing.get("source_checkpoint_sha256")
                         == source_checkpoint_hash
                         and existing.get("workspace_hash") == workspace_hash
+                        and existing.get("route_pose_frame")
+                        == workspace["routePoseFrame"]
+                        and existing.get("mount_calibration_sha256")
+                        == self.mount_calibration.digest
                         and artifacts_unchanged
                     ):
                         return existing
@@ -389,6 +418,9 @@ class RouteManager:
                     "staticNavigationMapArtifact": "navigation_map",
                     "staticNavigationMapWorkspaceHash": workspace_hash,
                     "robotRadiusM": workspace["robotRadiusM"],
+                    "paddedBaseFootprintM": [
+                        list(point) for point in PADDED_BASE_FOOTPRINT_M
+                    ],
                 },
                 "patrol": {
                     "loopMode": "once",
@@ -421,6 +453,12 @@ class RouteManager:
                 "route_id": route_id,
                 "route_length_m": round(length_m, 3),
                 "route_waypoint_count": len(planar),
+                "route_pose_frame": workspace["routePoseFrame"],
+                "source_trajectory_pose_frame": workspace[
+                    "sourceTrajectoryPoseFrame"
+                ],
+                "mount_calibration_id": self.mount_calibration.calibration_id,
+                "mount_calibration_sha256": self.mount_calibration.digest,
                 "execution_route_point_count": len(execution_route["waypoints"]),
                 "checkpoint_asset": (
                     str(checkpoint_asset_path) if checkpoint_asset_path.is_file() else None
@@ -575,6 +613,12 @@ class RouteManager:
             raise ValueError("GLIM optimized pose timeline is unavailable") from exc
         if optimized_contract.get("schema") != "gogoguard.optimized_trajectory.v1":
             raise ValueError("GLIM optimized pose timeline schema is invalid")
+        try:
+            optimized_pose_frame = artifact_pose_frame(
+                optimized_contract, legacy=LIDAR_POSE_FRAME
+            )
+        except ValueError as exc:
+            raise ValueError("GLIM optimized pose timeline pose frame is invalid") from exc
         optimized: list[dict[str, Any]] = []
         previous_timestamp = -math.inf
         for item in optimized_contract.get("poses") or []:
@@ -582,11 +626,11 @@ class RouteManager:
                 raise ValueError("GLIM optimized pose timeline is invalid")
             try:
                 timestamp = float(item["timestamp"])
-                x, y = float(item["x"]), float(item["y"])
+                x, y, z = float(item["x"]), float(item["y"]), float(item["z"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError("GLIM optimized pose timeline is invalid") from exc
             if (
-                not all(math.isfinite(value) for value in (timestamp, x, y))
+                not all(math.isfinite(value) for value in (timestamp, x, y, z))
                 or timestamp <= previous_timestamp
             ):
                 raise ValueError("GLIM optimized pose timeline is invalid")
@@ -636,7 +680,18 @@ class RouteManager:
                     f"checkpoint {checkpoint_id} has no time-aligned GLIM pose "
                     f"(delta {timestamp_delta:.3f}s)"
                 )
-            target = (float(optimized_pose["x"]), float(optimized_pose["y"]))
+            try:
+                body_pose = optimized_pose_to_base(
+                    optimized_pose,
+                    pose_frame=optimized_pose_frame,
+                    calibration=self.mount_calibration,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("GLIM optimized pose frame conversion failed") from exc
+            target = (
+                float(body_pose.translation_xyz_m[0]),
+                float(body_pose.translation_xyz_m[1]),
+            )
             route_index, route_point = min(
                 enumerate(execution),
                 key=lambda pair: math.hypot(
@@ -648,13 +703,37 @@ class RouteManager:
                 float(route_point["x"]) - target[0],
                 float(route_point["y"]) - target[1],
             )
-            body_yaw = _quaternion_yaw(optimized_pose)
+            qx, qy, qz, qw = body_pose.rotation_xyzw
+            body_yaw = math.atan2(
+                2.0 * (qw * qz + qx * qy),
+                1.0 - 2.0 * (qy * qy + qz * qz),
+            )
             review = distance > 1.0
             needs_review += int(review)
             sample_frames = []
+            sample_frame_metadata = []
+            declared_metadata = {
+                str(item.get("path")): item
+                for item in raw.get("sampleFrameMetadata") or []
+                if isinstance(item, dict) and isinstance(item.get("path"), str)
+            }
             for source_relative in raw.get("sampleFrames") or []:
                 source_name = Path(str(source_relative)).name
-                sample_frames.append(f"samples/{checkpoint_id}-{source_name}")
+                target_relative = f"samples/{checkpoint_id}-{source_name}"
+                source_sample = (recording_root / str(source_relative)).resolve()
+                if recording_root.resolve() not in source_sample.parents or not source_sample.is_file():
+                    raise ValueError("checkpoint sample path is unsafe or missing")
+                actual_metadata = jpeg_metadata(source_sample.read_bytes())
+                declared = declared_metadata.get(str(source_relative))
+                if declared is not None and any(
+                    declared.get(name) != actual_metadata[name]
+                    for name in ("mime", "bytes", "sha256", "width", "height")
+                ):
+                    raise ValueError("checkpoint sample metadata does not match JPEG content")
+                sample_frames.append(target_relative)
+                sample_frame_metadata.append(
+                    {"path": target_relative, **actual_metadata}
+                )
             bound.append(
                 {
                     "checkpointId": checkpoint_id,
@@ -669,13 +748,16 @@ class RouteManager:
                     "dwellSec": 3,
                     "note": str(raw.get("note") or ""),
                     "sampleFrames": sample_frames,
+                    "sampleFrameMetadata": sample_frame_metadata,
                     "binding": {
                         "recordingSampleIndex": sample_index,
                         "recordingCapturedAt": captured_at,
                         "optimizedTrajectoryIndex": optimized_index,
                         "optimizedTimestamp": optimized_timestamp,
                         "timestampDeltaS": round(timestamp_delta, 6),
-                        "orientationSource": "glim_quaternion",
+                        "orientationSource": "glim_quaternion_base_link",
+                        "optimizedPoseFrame": optimized_pose_frame,
+                        "mountCalibrationId": self.mount_calibration.calibration_id,
                         "distanceToExecutionRouteM": round(distance, 3),
                         "needsReview": review,
                     },
@@ -789,8 +871,16 @@ class RouteManager:
                 for item in raw_payload.get("checkpoints") or []
                 if isinstance(item, dict)
             }
+        checkpoint_sample_metadata: dict[str, dict[str, Any]] = {}
         for checkpoint in checkpoints["checkpoints"]:
             raw = raw_by_id.get(str(checkpoint["checkpointId"]), {})
+            checkpoint_sample_metadata.update(
+                {
+                    str(item.get("path")): item
+                    for item in checkpoint.get("sampleFrameMetadata") or []
+                    if isinstance(item, dict) and isinstance(item.get("path"), str)
+                }
+            )
             for source_relative, target_relative in zip(
                 raw.get("sampleFrames") or [], checkpoint.get("sampleFrames") or []
             ):
@@ -812,15 +902,30 @@ class RouteManager:
                     writer.flush()
                     os.fsync(writer.fileno())
                 os.replace(temporary, target)
-            files.append(
-                {
-                    "role": role,
-                    "path": relative_name,
-                    "bytes": target.stat().st_size,
-                    "sha256": _file_hash(target),
-                    "contentType": content_type,
-                }
-            )
+            entry = {
+                "role": role,
+                "path": relative_name,
+                "bytes": target.stat().st_size,
+                "sha256": _file_hash(target),
+                "contentType": content_type,
+            }
+            if role == "checkpoint_sample":
+                metadata = checkpoint_sample_metadata.get(relative_name)
+                if metadata is None:
+                    raise ValueError("checkpoint sample metadata is missing from descriptor")
+                if any(
+                    metadata.get(name) != entry[manifest_name]
+                    for name, manifest_name in (
+                        ("bytes", "bytes"),
+                        ("sha256", "sha256"),
+                        ("mime", "contentType"),
+                    )
+                ):
+                    raise ValueError("checkpoint sample bundle identity mismatch")
+                entry.update(
+                    {"width": int(metadata["width"]), "height": int(metadata["height"])}
+                )
+            files.append(entry)
 
         manifest = {
             "schema": "gogoguard.map_asset_bundle.v1",
@@ -839,6 +944,9 @@ class RouteManager:
             "allowedArea": {
                 "geometryPath": "navigation-workspace.json",
                 "robotRadiusM": workspace["robotRadiusM"],
+                "paddedBaseFootprintM": [
+                    list(point) for point in PADDED_BASE_FOOTPRINT_M
+                ],
             },
             "staticNavigationMap": {
                 "yamlPath": "navigation-map.yaml",

@@ -7,9 +7,9 @@ from pathlib import Path
 dockerfile, service, installer, cloud_adapter = (Path(item) for item in sys.argv[1:5])
 checks = {
     dockerfile: ["ros:humble-ros-base-jammy", "linux/arm64", "ros-humble-rosbag2", "ros-humble-rosbag2-storage-mcap", "ffmpeg", "alsa-utils", "Livox-SDK2", "fast_lio", "modules/navigation/ros/go2_nav2_runtime", "modules/device_io/ros/go2_cmd_vel_bridge", "go2_vui_control", "interaction-requirements.txt", "2da379972ba86627632aa7e3f779c680ba04a5ee26ef2a20dc61cefcc24f73b8", "8189/udp", "LD_LIBRARY_PATH=/opt/gogoguard/deps/lib:/usr/local/lib", "gogoguard-edge-entrypoint"],
-    service: ["/opt/gogoguard/bin/run-edge", "ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60", "systemd-timesyncd.service", "ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge", "SuccessExitStatus=143", "Restart=on-failure", "StartLimitBurst=3", "After=docker.service"],
-    installer: ["sha256sum --check", "docker load --input", "configure-combined-joint-test", "runtime.env.install", "wait-clock-sync", "systemctl daemon-reload", "Service is not started or enabled"],
-    cloud_adapter: ["/opt/go2/jobs/map-", "run_pipeline prepare-session", "run_pipeline run-session", "run_pipeline produce-review-artifacts", "overview.svg", "map.json", "trajectory-poses.json", "gogoguard.optimized_trajectory.v1"],
+    service: ["/opt/gogoguard/bin/run-edge", "ExecStartPre=/opt/gogoguard/bin/validate-runtime-env /etc/gogoguard/runtime.env", "ExecStartPre=/opt/gogoguard/bin/wait-clock-sync 60", "systemd-timesyncd.service", "ExecStop=/usr/bin/docker stop -t 15 gogoguard-edge", "SuccessExitStatus=143", "Restart=on-failure", "StartLimitBurst=3", "After=docker.service"],
+    installer: ["sha256sum --check", "docker load --input", "commission-device-token", "configure-combined-joint-test", "validate-runtime-env", "runtime.env.install", "wait-clock-sync", "systemctl daemon-reload", "Service is not started or enabled"],
+    cloud_adapter: ["/opt/go2/jobs/map-", "run_pipeline prepare-session", "run_pipeline run-session", "run_pipeline produce-review-artifacts", "overview.svg", "map.json", "trajectory-poses.json", "gogoguard-export-glim-artifact"],
 }
 cloud_editor = cloud_adapter.parent / "gogoguard-glim-editor"
 cloud_exporter = cloud_adapter.parent / "export_glim_artifact.py"
@@ -30,6 +30,7 @@ checks[cloud_exporter] = [
     "glim-build.json",
     "trajectory-poses.json",
     "gogoguard.optimized_trajectory.v1",
+    "gogoguard.recording_route_coverage.v1",
 ]
 for path, needles in checks.items():
     if not path.is_file():
@@ -83,7 +84,7 @@ if not combined_dockerfile.is_file():
     raise SystemExit("combined release Dockerfile is missing")
 combined_content = combined_dockerfile.read_text(encoding="utf-8")
 for required in (
-    "v2-edge-20260810-v6-r4@sha256:b8ca1b65ede57fa0f7ca2cfefa3c1490b905717aa3681d245128fa4e9081269c",
+    "v2-edge-20260817-mission-plan-r1@sha256:41f8b4914c212a84cdb92452f98e0e1dd388b63842f0d02c7ec75f13bb7d6673",
     "--target /opt/gogoguard/interaction-python",
     'numpy.__version__ == "1.21.5"',
     'numpy.__version__ == "2.0.2"',

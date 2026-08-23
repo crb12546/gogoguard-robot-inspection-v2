@@ -28,6 +28,7 @@ def main() -> None:
         cloud=config["cloud"],
         map_worker=args.map_worker,
         site_id=str(config.get("site_id") or "local-first-site"),
+        sensor_id=str(config.get("sensor_id") or "ARMCP6B0035634"),
         platform=config.get("platform"),
     )
     app.start()

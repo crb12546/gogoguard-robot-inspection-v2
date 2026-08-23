@@ -191,8 +191,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .navigation-map-panel canvas { background: #07111f; }
 .map-legend { position: absolute; left: 18px; bottom: 16px; display: flex; gap: 18px; padding: 8px 12px; border-radius: 8px; background: #07111fdd; color: var(--muted); font-size: 12px; }
 .map-legend span { display: flex; align-items: center; gap: 6px; }
-.map-dot, .robot-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+.map-dot, .robot-dot, .checkpoint-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
 .robot-dot { background: var(--orange); }
+.checkpoint-dot { background: #ef4444; border: 1px solid #f8fafc; }
 .route-line { width: 18px; height: 3px; background: var(--cyan); }
 .navigation-control-panel { min-height: 590px; overflow: hidden; }
 .workflow-message { margin: 14px 16px 10px; padding: 12px 14px; border: 1px solid #285577; border-radius: 9px; background: #0b2940; color: #c9f5fb; font-size: 13px; line-height: 1.55; }

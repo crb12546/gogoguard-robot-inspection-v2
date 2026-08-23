@@ -9,13 +9,18 @@ import ssl
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from gogoguard_contracts import utc_now, validate_platform_mission_message
+from gogoguard_contracts import (
+    evidence_transaction_capability,
+    utc_now,
+    validate_platform_mission_message,
+)
 
 
 MAX_HTTP_BYTES = 1024 * 1024
@@ -46,6 +51,24 @@ INTERACTION_STATUS_FIELDS = {
     "lastErrorCode",
     "observedAt",
 }
+WAKE_STATUS_FIELDS = {
+    "schema",
+    "state",
+    "wakePhrase",
+    "wakeSequence",
+    "awakenedAt",
+    "lastActivityAt",
+    "sleepReason",
+    "observedAt",
+}
+
+
+def _boot_id(path: Path = Path("/proc/sys/kernel/random/boot_id")) -> str:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+        return str(uuid.UUID(value))
+    except (FileNotFoundError, OSError, ValueError):
+        return "unknown"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -269,7 +292,11 @@ class UrllibJsonPoster:
             with urlopen(request, timeout=timeout_s, context=context) as response:
                 raw = response.read(MAX_HTTP_BYTES + 1)
         except HTTPError as exc:
-            raise RuntimeError(f"platform heartbeat returned HTTP {exc.code}") from exc
+            code = int(exc.code)
+            exc.close()
+            error = RuntimeError(f"platform heartbeat returned HTTP {code}")
+            error.code = code  # type: ignore[attr-defined]
+            raise error from exc
         except URLError as exc:
             raise ConnectionError("platform heartbeat connection failed") from exc
         if len(raw) > MAX_HTTP_BYTES:
@@ -310,6 +337,10 @@ class PlatformHeartbeatService:
             "/var/lib/gogoguard/platform/checkpoint-inbox.jsonl"
         ),
         checkpoint_coordinator: Any | None = None,
+        boot_id_path: Path = Path("/proc/sys/kernel/random/boot_id"),
+        build_identity: dict[str, str] | None = None,
+        evidence_transaction_enabled: bool = False,
+        navigation_generation_id: str | None = None,
     ) -> None:
         if not robot_id or len(robot_id) > 128:
             raise ValueError("robot id is invalid")
@@ -334,6 +365,39 @@ class PlatformHeartbeatService:
         self.timeout_s = float(timeout_s)
         self.mission_inbox_path = Path(mission_inbox_path)
         self.checkpoint_coordinator = checkpoint_coordinator
+        self.boot_id = _boot_id(Path(boot_id_path))
+        self.navigation_generation_id = str(navigation_generation_id or "")
+        # The entrypoint generation and edge process have the same lifecycle:
+        # every required-child exit terminates the container.  Reuse that one
+        # identity on the wire instead of publishing a fourth, competing ID.
+        self.edge_instance_id = self.navigation_generation_id or str(uuid.uuid4())
+        self.edge_started_at = utc_now()
+        supplied_identity = build_identity or {}
+        self.build_identity = {
+            "softwareVersion": str(
+                supplied_identity.get("softwareVersion")
+                or os.environ.get("GOGOGUARD_SOFTWARE_VERSION")
+                or "unknown"
+            ),
+            "gitCommit": str(
+                supplied_identity.get("gitCommit")
+                or os.environ.get("GOGOGUARD_GIT_COMMIT")
+                or "unknown"
+            ),
+            "imageDigest": str(
+                supplied_identity.get("imageDigest")
+                or os.environ.get("GOGOGUARD_IMAGE_DIGEST")
+                or "unknown"
+            ),
+            "buildId": str(
+                supplied_identity.get("buildId")
+                or os.environ.get("GOGOGUARD_BUILD_ID")
+                or "unknown"
+            ),
+        }
+        self.evidence_transaction_enabled = bool(evidence_transaction_enabled)
+        self._navigation_ready = not bool(self.navigation_generation_id)
+        self._navigation_reason_code: str | None = None
         self._sequence = 0
         self._last_success_at: str | None = None
         self._last_error_code: str | None = None
@@ -344,6 +408,34 @@ class PlatformHeartbeatService:
 
     def build_payload(self) -> dict[str, Any]:
         navigation = _read_json(self.navigation_status_path)
+        observed_generation = navigation.get("edge_generation_id")
+        observed_runtime = navigation.get("runtime")
+        runtime_status_stale = (
+            isinstance(observed_runtime, dict)
+            and observed_runtime.get("runtimeStatusStale") is True
+        )
+        if self.navigation_generation_id and not observed_generation:
+            navigation = {}
+            self._navigation_ready = False
+            self._navigation_reason_code = "NAVIGATION_SNAPSHOT_MISSING"
+        elif (
+            self.navigation_generation_id
+            and observed_generation != self.navigation_generation_id
+        ):
+            navigation = {}
+            self._navigation_ready = False
+            self._navigation_reason_code = (
+                "NAVIGATION_SNAPSHOT_GENERATION_MISMATCH"
+            )
+        elif runtime_status_stale:
+            self._navigation_ready = False
+            reason = observed_runtime.get("reason")
+            self._navigation_reason_code = (
+                reason if isinstance(reason, str) and reason else "NAV_RUNTIME_LOST"
+            )
+        else:
+            self._navigation_ready = True
+            self._navigation_reason_code = None
         battery_status = _read_json(self.battery_status_path)
         interaction_edge = _read_json(self.interaction_status_path)
         capabilities = _read_json(self.capabilities_path)
@@ -362,9 +454,32 @@ class PlatformHeartbeatService:
         public_live = {
             key: value for key, value in live.items() if key in INTERACTION_STATUS_FIELDS
         }
+        wake = interaction_edge.get("wake")
+        wake = wake if isinstance(wake, dict) else {}
+        public_wake = {
+            key: value for key, value in wake.items() if key in WAKE_STATUS_FIELDS
+        }
+        public_interaction = dict(public_live)
+        if public_wake:
+            public_interaction["wake"] = public_wake
+        public_checkpoint = runtime.get("checkpoint")
+        public_checkpoint = (
+            dict(public_checkpoint) if isinstance(public_checkpoint, dict) else {}
+        )
+        if self.checkpoint_coordinator is not None and hasattr(
+            self.checkpoint_coordinator, "public_status"
+        ):
+            evidence_status = self.checkpoint_coordinator.public_status()
+            if evidence_status:
+                public_checkpoint["evidenceTransaction"] = evidence_status
         payload: dict[str, Any] = {
             "schema": "gogoguard.robot_heartbeat.v1",
             "robotId": self.robot_id,
+            "bootId": self.boot_id,
+            "edgeInstanceId": self.edge_instance_id,
+            "edgeStartedAt": self.edge_started_at,
+            "runtimeInstanceId": runtime.get("runtimeInstanceId"),
+            **self.build_identity,
             "time": utc_now(),
             "status": "patrolling" if patrol_running else "idle",
             "motion": {
@@ -387,17 +502,29 @@ class PlatformHeartbeatService:
             "patrol": {
                 "running": patrol_running,
                 "state": state,
-                "reason": runtime.get("reason"),
+                "reason": (
+                    runtime.get("reason")
+                    if self._navigation_ready
+                    else self._navigation_reason_code
+                ),
+                "navigationReady": self._navigation_ready,
+                "navigationReasonCode": self._navigation_reason_code,
                 "mapVersion": runtime.get("mapVersion"),
                 "routeId": runtime.get("routeId"),
                 "routeProgressIndex": runtime.get("routeProgressIndex"),
                 "routeProgressPercent": runtime.get("routeProgressPercent"),
-                "checkpoint": runtime.get("checkpoint"),
+                "checkpoint": public_checkpoint or None,
             },
-            "interaction": public_live,
+            "interaction": public_interaction,
         }
         if capabilities.get("schema") == "gogoguard.robot_capabilities.v1":
-            payload["capabilities"] = capabilities
+            public_capabilities = dict(capabilities)
+            public_capabilities["evidenceTransaction"] = (
+                evidence_transaction_capability(
+                    enabled=self.evidence_transaction_enabled
+                )
+            )
+            payload["capabilities"] = public_capabilities
         return payload
 
     @staticmethod
@@ -499,6 +626,22 @@ class PlatformHeartbeatService:
                 "status": "duplicate",
                 "message": "command already processed",
             }
+        if action == "start_patrol" and not self._navigation_ready:
+            reason_code = (
+                self._navigation_reason_code or "NAVIGATION_SNAPSHOT_MISSING"
+            )
+            return {
+                "idHash": self.ledger.key(command_id),
+                "action": action,
+                "duplicate": False,
+                "ok": False,
+                "status": "NAVIGATION_NOT_READY",
+                "reasonCode": reason_code,
+                "message": (
+                    "navigation is not ready for this edge generation; "
+                    f"reasonCode={reason_code}; patrol was not started"
+                ),
+            }
         if action in mission_actions:
             value = command.get("payload", command.get("params"))
             if not isinstance(value, dict):
@@ -512,7 +655,7 @@ class PlatformHeartbeatService:
                 raise ValueError("platform mission fallback schema is invalid")
             value = validate_platform_mission_message(value)
             self._append_mission_message(value)
-            response = {"result": {"state": "accepted"}}
+            response = {"result": {"state": "queued"}}
         elif action in interaction_actions:
             response = self.interaction_client.request(command)
         else:
@@ -527,7 +670,11 @@ class PlatformHeartbeatService:
             "duplicate": False,
             "ok": True,
             "status": str(result.get("state") or "accepted"),
-            "message": "command accepted by robot service",
+            "message": (
+                "mission message validated and queued"
+                if action in mission_actions
+                else "command accepted by robot service"
+            ),
             "operationId": result.get("operationId"),
         }
 
@@ -566,6 +713,8 @@ class PlatformHeartbeatService:
             "msg": str(outcome.get("message") or outcome.get("status") or "")[:512],
             "status": str(outcome.get("status") or "failed")[:64],
         }
+        if outcome.get("reasonCode"):
+            result["reason_code"] = str(outcome["reasonCode"])[:128]
         if outcome.get("operationId"):
             result["operation_id"] = str(outcome["operationId"])[:128]
         try:
@@ -611,6 +760,8 @@ class PlatformHeartbeatService:
                 "duplicateCommands": self._duplicate_commands,
                 "commandResultsSent": self._command_results_sent,
                 "commandResultFailures": self._command_result_failures,
+                "navigationReady": self._navigation_ready,
+                "navigationReasonCode": self._navigation_reason_code,
                 "observedAt": utc_now(),
                 "motionCommandsPermitted": False,
                 "selectedPatrolLifecyclePermitted": True,

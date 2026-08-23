@@ -1,13 +1,31 @@
 # 到点闭环修复待办
 
-更新时间：2026-08-12
+更新时间：2026-08-23
 
-状态：**根因分析完成，尚未修改运行代码，等待机器狗下次上线后开发和部署。**
+状态：**狗端开发与离线验证已完成；尚未部署、尚未注入机器狗令牌、尚未进行静态或真实巡检验收。**
 
 主责模块：`platform_edge`
 
 不属于本次范围：定位、VGICP、Nav2、MPPI、避障、路线、速度、加速度、
 安全圈、Z1Pro 角度算法、LiveKit 建连算法。
+
+## 2026-08-23 开发交接
+
+- 到点终态现在先于 mission event 补发处理；401/403 使用低频退避，不再阻断
+  `announcement_completed` 或 verdict 应用。
+- 证据事务 v1 只有在双方显式启用
+  `GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED=1` 时生效，release 默认仍为 `0`。
+- `capture_ready` 只接受顶层 `captureResponse` 包裹。成功回执持久化后才允许生成
+  `capture` 控制；`captured` 事件只携带平台 `captureId`，不再合成 `evidenceId`。
+- `captureRequestId` 已按双方补充约定钉死为紧凑 UTF-8 JSON 数组的 SHA-256；
+  黄金值测试覆盖 attempt 数字类型和空字符串槽位。固定 v1 artifact 不改字节，
+  `manifestSha256` 仍为
+  `58230fa7782fb5c4921a5ba730eb359f06b56b57eff57494732caac341281eb0`。
+- 增加了持久任务占用与机器可读冲突码、四层运行身份、逐 transcript 唤醒回执、
+  心跳唤醒状态，以及从 JPEG SOF 读取的真实宽高/字节数/摘要。
+- 离线结果：253 项单元/集成测试通过，Python 编译、知识索引、release 脚本语法和
+  `git diff --check` 通过。容器契约检查仍被工作区已有的 combined Dockerfile
+  冻结基线缺失阻断；本次没有覆盖该现有修改。
 
 ## 一句话说明
 
@@ -35,6 +53,39 @@
 | 两个点的等待时长高度一致 | 实际走的是狗端固定兜底超时，不是随机网络延迟 |
 | 平台未看到狗端 mission event | 到点协调器的事件流程没有完整建立 |
 
+### 2026-08-17 完整狗端复现
+
+证据目录：
+`runtime-data/analysis/platform-checkpoint-20260817-232116/`
+
+任务：`mission-20260817-231747-RG-狗02`
+
+地图：`map-62d8cec9a1dc`
+
+路线：`route-62d8cec9a1dc-workspace-r5`
+
+| UTC 时间 | 狗端证据 | 结论 |
+|---|---|---|
+| 15:18:19.409 | `cp_01` 真停车完成，距目标约 0.10 m | 到点和定位正常 |
+| 15:18:19.414 | 观察角分配为 `camera_only`，镜头目标 `+62.976 deg` | 角度计算正常，不是资产要求镜头不动 |
+| 随后每 0.2 s | `checkpoint-state.json` 仍为 `stage=new, lastError=RuntimeError` | 同步 mission-event 在改变 stage 前抛错，并无退避重试 |
+| 整个任务 | 无 15:18 的 `gimbal.move_converged` 或 `gimbal.move_failed`，最后反馈约 0 deg | 协调器没有调用本地云台端点 |
+| 15:18:21--22 | 平台播报完成 | 平台心跳兼容路径可以绕过狗端 event 流播报 |
+| 15:18:26.524 | `announcement_completed` 已校验并写入 inbox | 传输正常，但协调器没有消费 |
+| 任务全程 | 没有对应 `checkpoint_verdict` | `waiting_verdict` event 同样 401，平台不知道狗正在等判定 |
+| 15:18:46.555 | 命令账本记录 `stop_patrol` | 平台记录证实该命令为 `by=admin` 手动点击，不是平台或狗端兜底 |
+| 15:18:47.825 | 导航进入 `STOP_REQUESTED`，点位失败原因 `STOPPED` | 狗正确执行平台停止 |
+
+平台日志已将该 `RuntimeError` 精确为 HTTP 401，响应体是
+`{"detail":"设备令牌无效"}`。08-17 当天从 11:06:19 UTC 起共有 18,541
+次 mission-event 请求，100% 为相同 401；只有 08-11 历史上成功过 8 次。
+平台的校验顺序是 eventId -> phase -> 设备鉴权，因此 401 同时证明
+报文格式和 phase 合法，失败仅属于令牌不匹配。
+
+狗端取证另外排除了原待办中的“本地相机前置异常”：云台 HTTP
+端点无论成功或失败都会写入 gimbal journal，本次没有任何对应
+记录，所以协调器在云台调用前已经退出。
+
 ## 已确认与尚待取证的边界
 
 ### 已确认的代码缺陷
@@ -48,11 +99,16 @@
    “消息早已收到，但狗仍把时间等满”。
 6. `expiresAt` 只做“过期丢弃”判断，不存在“等到 expiresAt 再执行”的代码。
 
-### 尚未确认的第一触发错误
+### 已确认的鉴权不一致
 
-机器狗已经下线，当前无法读取 22:10 那趟的狗端原始文件。因此还不能把最早一次
-mission event 失败精确写成 HTTP 400、401、超时或本地前置异常。这个细节不改变
-上面的结构性缺陷，但下次上线后应先取证再覆盖运行环境。
+- `/robot/heartbeat` 当前只按 `robotId` 识别，不检查令牌。
+- `/robot/mission/event` 优先检查 `X-Device-Token`；只要请求带了错误
+  令牌就直接 401，不回落到 `robotId`。
+- 之前提供的新令牌只注入了 Mac 工作台进程，用于 r5 资产上传；
+  机器狗主容器从根用户专有的 `/etc/gogoguard/runtime.env` 取值，
+  且部署脚本会主动保留已有值，因此镜像更新没有替换旧令牌。
+- 平台将改为令牌不匹配时回落到 `robotId`，并细分 401 诊断。这能恢复
+  联调，但狗端仍必须配置正确令牌，不应把回落当成长期身份方案。
 
 ## 对平台四个问题的正式口径
 
@@ -79,25 +135,29 @@ mission event 失败精确写成 HTTP 400、401、超时或本地前置异常。
 
 ### P0：解除错误的前置依赖
 
-- [ ] 在 `CheckpointCoordinator` 每次 tick 开始时先读取并验证收件箱消息。
-- [ ] 对当前 `missionId + checkpointId + attempt` 的播报终态，允许在没有预存
+- [ ] 通过机器狗本地安全配置注入正确 `GOGOGUARD_DEVICE_TOKEN`；不得
+      写入 Git、镜像、release archive 或日志。
+- [x] 在 `CheckpointCoordinator` 每次 tick 开始时先读取并验证收件箱消息。
+- [x] 对当前 `missionId + checkpointId + attempt` 的播报终态，允许在没有预存
       `announcementId` 时采用收到的 ID，并立刻推进到稳定等待。
-- [ ] 对当前地图、路线、任务、点位、attempt 且未过期的 verdict，先生成
+- [x] 对当前地图、路线、任务、点位、attempt 且未过期的 verdict，先生成
       `continue/skip/retake` 控制，再处理不影响动作安全的业务事件上报。
-- [ ] 将 mission event 改成幂等、可重试、**不会阻塞终态消费**的通知流程。
+- [x] 将 mission event 改成幂等、可重试、**不会阻塞终态消费**的通知流程。
       平台已经声明 event 不要求有序，因此补发不会破坏协议。
-- [ ] 保留既有 `eventId` 幂等规则、迟到 verdict 拒绝和导航最终超时兜底。
-- [ ] DataChannel、心跳、HTTP 响应三路收到同一终态时只产生一次业务动作。
+- [x] 为 mission event 增加有上限的指数退避；401 记录为鉴权故障后降到
+      低频重试，不得再每 0.2 秒请求一次。
+- [x] 保留既有 `eventId` 幂等规则、迟到 verdict 拒绝和导航最终超时兜底。
+- [x] DataChannel、心跳、HTTP 响应三路收到同一终态时只产生一次业务动作。
 
 ### P1：把“收到”和“执行”说清楚
 
-- [ ] mission fallback 的命令回执改为明确的“validated and queued”，不再使用容易
+- [x] mission fallback 的命令回执改为明确的“validated and queued”，不再使用容易
       被理解成状态机已执行的笼统文案。
-- [ ] 在狗端只读状态中记录：最近入队消息、最近匹配结果、最近应用的控制、拒绝原因、
+- [x] 在狗端只读状态中记录：最近入队消息、最近匹配结果、最近应用的控制、拒绝原因、
       当前 coordinator stage、最近失败的 mission-event phase 和安全化错误码。
-- [ ] `checkpoint-state.json` 不只保存 `RuntimeError` 类型；至少能区分 HTTP 状态、
+- [x] `checkpoint-state.json` 不只保存 `RuntimeError` 类型；至少能区分 HTTP 状态、
       连接失败、本地相机前置失败和相关字段不匹配，同时不得记录令牌。
-- [ ] 平台心跳应能暴露协调器是否健康，避免下次只能从“等满了”反推内部失败。
+- [x] 平台心跳应能暴露协调器是否健康，避免下次只能从“等满了”反推内部失败。
 
 ### P2：单独确认稳定等待时间
 
@@ -109,38 +169,41 @@ mission event 失败精确写成 HTTP 400、401、超时或本地前置异常。
 
 ## 必须增加的自动化测试
 
-- [ ] mission event 第一次就失败，但收件箱已有合法 `announcement_completed`：
+- [x] mission event 第一次就失败，但收件箱已有合法 `announcement_completed`：
       一个 coordinator tick 内进入稳定等待，在配置的 `dwellSec` 后产生
       `capture`，不能等待 20/25 秒。
-- [ ] mission event 失败，但已有合法、未过期 `checkpoint_verdict=continue`：
+- [x] mission event 失败，但已有合法、未过期 `checkpoint_verdict=continue`：
       一个 tick 内产生 `continue`，不能等待 verdict timeout。
-- [ ] 没有预存 `announcementId`，但任务、点位、attempt 全匹配：接受终态并记住 ID。
-- [ ] 错误任务、错误点位、错误 attempt 的播报终态不得推进。
-- [ ] 错误地图、错误路线或已经过期的 verdict 必须丢弃。
-- [ ] DataChannel 和心跳重复送达同一消息，只生成一个确定性的控制 ID。
-- [ ] HTTP 响应直接携带 verdict 时立即应用。
-- [ ] mission event 恢复后按相同 `eventId` 补发，不重复触发平台动作。
-- [ ] 命令 ACK 文案明确区分 `queued` 与 `applied`。
-- [ ] 现有本地人工点位流程、LiveKit、导航和平台命令回归测试全部保持通过。
+- [x] 没有预存 `announcementId`，但任务、点位、attempt 全匹配：接受终态并记住 ID。
+- [x] 错误任务、错误点位、错误 attempt 的播报终态不得推进。
+- [x] 错误地图、错误路线或已经过期的 verdict 必须丢弃。
+- [x] DataChannel 和心跳重复送达同一消息，只生成一个确定性的控制 ID。
+- [x] HTTP 响应直接携带 verdict 时立即应用。
+- [x] mission event 恢复后按相同 `eventId` 补发，不重复触发平台动作。
+- [x] mission event 持续返回 401 时按预期退避，且本地云台、播报终态和
+      verdict 应用仍正常。
+- [x] 命令 ACK 文案明确区分 `queued` 与 `applied`。
+- [x] 现有本地人工点位流程、LiveKit、导航和平台命令自动化回归测试全部保持通过。
 
-## 机器狗下次上线后的取证清单
+## 已完成的狗端取证
 
-在安装新版本之前，先只读复制以下文件；不要启动定位或 Nav2：
+2026-08-17 已在不再启动导航的情况下只读复制以下文件：
 
 1. `/var/lib/gogoguard/platform/checkpoint-state.json`
 2. `/var/lib/gogoguard/platform/checkpoint-inbox.jsonl`
 3. `/var/lib/gogoguard/platform/checkpoint-control.json`
 4. `/var/lib/gogoguard/platform/command-ledger.json`
 5. `/var/lib/gogoguard/runtime-logs/platform-heartbeat.log`
-6. 22:10 那趟对应的最新导航 runtime trace 和 navigation status
+6. 23:17 新任务对应的导航 runtime trace 和 navigation status
 
-取证目标：确定最早失败的是哪个 mission-event phase、HTTP 返回状态是什么、
-协调器当时的 stage/announcementId 是什么，以及收件箱四条消息的完整相关字段。
+除旧版本未保存的精确 HTTP 状态码和失败 event phase 外，狗端证据
+已齐全。新版必须在状态中保存这两项安全化诊断，不得依赖下次再猜。
 
 ## 开发和部署顺序
 
 1. 读取本文件、`PROJECT_STATE.md` 和 `architecture/modules/platform_edge.json`。
-2. 先拉上述旧版本证据，复制到忽略的 `runtime-data/analysis/`，不提交真实日志。
+2. 使用已归档的 `runtime-data/analysis/platform-checkpoint-20260817-232116/`
+   做回放和对照，不提交真实日志。
 3. 修改主责模块 `services/platform_edge`；没有证据不得改 Nav2、MPPI 或定位参数。
 4. 先用 fake poster 离线模拟 mission event 全部失败，同时向收件箱注入终态。
 5. 跑全量测试、编译、知识索引和容器契约检查。

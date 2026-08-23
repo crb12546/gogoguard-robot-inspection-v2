@@ -1,0 +1,104 @@
+{
+  "$comment": "到点取证事务 v1 的黄金向量。双方各自跑，行为必须一致。⚠️ 向量证明的是**行为**，不是**枚举全集** —— 全集由集合等价测试保证，两者缺一不可。",
+  "schemaVersion": 1,
+
+  "admission_rejections": [
+    {
+      "id": "R-01",
+      "why": "狗端 pin 的是 v1，平台发了 v2 —— 不认识的版本必须拒，且不可重试",
+      "input": { "contract": { "schema": "gogoguard.evidence_txn.v1", "version": 2, "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000" } },
+      "expect": { "accepted": false, "rejection": { "class": "contract", "code": "UNSUPPORTED_CONTRACT_VERSION", "retryable": false }, "mustNotContain": ["state", "failureCode", "receipt"], "http": 422 }
+    },
+    {
+      "id": "R-02",
+      "why": "枚举里出现了本版本不认识的值。隔离，不能静默塞进某个现有类型",
+      "input": { "evidenceOrigin": "some_future_source", "evidenceScope": "checkpoint_verdict" },
+      "expect": { "accepted": false, "rejection": { "class": "contract", "code": "UNSUPPORTED_CONTRACT_VALUE", "retryable": false }, "mustNotContain": ["state", "failureCode", "receipt"], "http": 422 }
+    },
+    {
+      "id": "R-03",
+      "why": "双方 pin 的 artifact 哈希不一致 —— 绝不按自己那份执行",
+      "input": { "contract": { "schema": "gogoguard.evidence_txn.v1", "version": 1, "manifestSha256": "deadbeef00000000000000000000000000000000000000000000000000000000" } },
+      "expect": { "accepted": false, "rejection": { "class": "contract", "code": "CONTRACT_HASH_MISMATCH", "retryable": false }, "http": 422 }
+    },
+    {
+      "id": "R-04",
+      "why": "同一个 captureRequestId 配了不同的绑定 —— 绝不能把旧 receipt 给另一个任务",
+      "input": { "captureRequestId": "cr-abc", "checkpointId": "cp_02", "note": "该 ID 首次出现时绑定的是 cp_01" },
+      "expect": { "accepted": false, "rejection": { "class": "identity", "code": "IDEMPOTENCY_KEY_REUSED", "retryable": false }, "http": 422 }
+    },
+    {
+      "id": "R-05",
+      "why": "遗留路径的记录，即使 label 文本恰好等于 checkpointId，也不得满足点位证据终局",
+      "input": { "evidenceOrigin": "legacy_segment_nearest_landmark", "evidenceScope": "checkpoint_verdict" },
+      "expect": { "accepted": false, "rejection": { "class": "binding", "code": "EVIDENCE_BINDING_NOT_ALLOWED", "retryable": false }, "http": 422 }
+    }
+  ],
+
+  "allowed_bindings": [
+    { "id": "B-01", "origin": "evidence_ingress", "scope": "checkpoint_verdict", "expect": "allowed" },
+    { "id": "B-02", "origin": "evidence_ingress", "scope": "along_route_anomaly", "expect": "allowed" },
+    { "id": "B-03", "origin": "legacy_segment_nearest_landmark", "scope": "along_route_anomaly", "expect": "allowed" },
+    { "id": "B-04", "origin": "legacy_segment_nearest_landmark", "scope": "checkpoint_verdict", "expect": "rejected", "code": "EVIDENCE_BINDING_NOT_ALLOWED" }
+  ],
+
+  "business_outcomes": [
+    {
+      "id": "F-01",
+      "why": "窗口内一帧都没到。确定性失败，狗保持停稳，允许显式重拍（新 attempt、新 captureRequestId）",
+      "expect": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_NO_FRESH_FRAME", "terminal": true, "autoRetryable": false, "explicitRetakeAllowed": true, "dogPhase": "CAPTURE_FAILED", "dogMustHoldPosition": true, "http": 200 }
+    },
+    {
+      "id": "F-02",
+      "why": "HTTP 超时/连接失败 —— 结果未知，不是立即假定没抓到",
+      "expect": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_TRANSPORT_UNAVAILABLE", "terminal": true, "dogPhaseBefore": "CAPTURE_RECONCILING", "dogMustReuseSameRequestId": true, "dogMustNotBlindRetryWithNewId": true, "dogPhase": "CAPTURE_FAILED" }
+    },
+    { "id": "F-03", "why": "上游 5xx", "expect": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_UPSTREAM_ERROR", "dogPhaseBefore": "CAPTURE_RECONCILING" } },
+    {
+      "id": "F-04",
+      "why": "对账不出来。必须显式 unknown，**绝不能伪装成 NO_FRESH_FRAME**",
+      "expect": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_OUTCOME_UNKNOWN", "mustNotBeReportedAs": "CAPTURE_NO_FRESH_FRAME" }
+    },
+    {
+      "id": "F-05",
+      "why": "owner 崩了且没有耐久 candidate。接管者只能终局 unknown/infra，绝不另选一帧",
+      "expect": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_INFRA_FAILURE", "takeoverMustNotReselect": true }
+    },
+    { "id": "F-06", "why": "狗端校验 receipt：captureId 对不上", "expect": { "accepted": true, "state": "failed", "failureCode": "RECEIPT_CAPTURE_ID_MISMATCH", "autoRetryable": false, "emittedBy": "dog" } },
+    { "id": "F-07", "why": "receipt 的 frameReceivedAt 超出窗口", "expect": { "accepted": true, "state": "failed", "failureCode": "RECEIPT_STALE", "autoRetryable": false, "emittedBy": "dog" } },
+    { "id": "F-08", "why": "receipt 的 mission/checkpoint/attempt 绑定对不上", "expect": { "accepted": true, "state": "failed", "failureCode": "RECEIPT_BINDING_MISMATCH", "autoRetryable": false, "emittedBy": "dog" } },
+    { "id": "F-09", "why": "receipt 本身不合 schema", "expect": { "accepted": true, "state": "failed", "failureCode": "RECEIPT_SCHEMA_INVALID", "autoRetryable": false, "emittedBy": "dog" } },
+    {
+      "id": "S-01",
+      "why": "正常成功。captured 必须携带平台真实 captureId，不得再合成 evidenceId",
+      "expect": { "accepted": true, "state": "succeeded", "receiptRequired": true, "dogCapturedMustCarryPlatformCaptureId": true, "dogMustNotSynthesizeEvidenceId": true, "http": 200 }
+    },
+    {
+      "id": "P-01",
+      "why": "waiter 等到窗口过了仍未见终局。CAPTURE_PENDING **不是终局**",
+      "expect": { "accepted": true, "state": "selecting", "retryAfterMsRequired": true, "isTerminal": false, "dogPhase": "CAPTURE_RECONCILING", "http": 202 }
+    }
+  ],
+
+  "mutual_exclusion": [
+    { "id": "X-01", "why": "admission 拒绝的请求不得带任何业务字段", "input": { "accepted": false, "rejection": { "class": "contract", "code": "INVALID_CONTRACT", "retryable": false }, "state": "failed" }, "expect": "schema_invalid" },
+    { "id": "X-02", "why": "**UNSUPPORTED_CONTRACT_* 绝不能出现在 failureCode 位置**", "input": { "accepted": true, "state": "failed", "failureCode": "UNSUPPORTED_CONTRACT_VERSION" }, "expect": "schema_invalid" },
+    { "id": "X-03", "why": "业务失败码不得出现在 rejection 位置", "input": { "accepted": false, "rejection": { "class": "contract", "code": "CAPTURE_NO_FRESH_FRAME", "retryable": false } }, "expect": "schema_invalid" },
+    { "id": "X-04", "why": "succeeded 必须带 receipt", "input": { "accepted": true, "state": "succeeded" }, "expect": "schema_invalid" },
+    { "id": "X-05", "why": "failed 不得带 receipt", "input": { "accepted": true, "state": "failed", "failureCode": "CAPTURE_NO_FRESH_FRAME", "receipt": {} }, "expect": "schema_invalid" },
+    { "id": "X-06", "why": "accepted=true 不得带 rejection", "input": { "accepted": true, "state": "selecting", "rejection": { "class": "contract", "code": "INVALID_CONTRACT", "retryable": false } }, "expect": "schema_invalid" }
+  ],
+
+  "risk_vectors": [
+    { "id": "V-01", "why": "围栏：旧 owner 复活后写终局", "scenario": "ownerEpoch=1 的 owner 暂停，接管者升到 2 并终局；旧 owner 恢复后尝试用 epoch=1 提交", "expect": "旧 owner 的写入被拒；终局仍是 epoch=2 那份" },
+    { "id": "V-02", "why": "接管禁止另选一帧", "scenario": "owner 崩溃，无耐久 candidate", "expect": "终局 CAPTURE_INFRA_FAILURE；MUST NOT 出现新的 frameId" },
+    { "id": "V-03", "why": "接管可继续同一 candidate", "scenario": "owner 已耐久化 candidate 与元数据后崩溃", "expect": "接管者 fence 校验后终局化**同一个** captureId/frameId，不产生第二个" },
+    { "id": "V-04", "why": "对象发布只保证可见性", "scenario": "两个 owner 都写了临时对象", "expect": "只有 fence 胜出者的 DB 指针成为权威；败者对象由 GC 清理，绝不覆盖同一最终键" },
+    { "id": "V-05", "why": "选择截止 ≠ 处理截止", "scenario": "帧在窗口内到达，但编码+上传耗时 5 秒（超过 selectionWindowMs）", "expect": "**成功**。不得因处理慢判成 NO_FRESH_FRAME —— 那是制造假失败" },
+    { "id": "V-06", "why": "ingressAcceptedAt 不因接管刷新", "scenario": "接管发生在 accept 之后 4 秒", "expect": "窗口仍是最初那个；此时窗口已过 → 终局失败，而不是重新开窗" },
+    { "id": "V-07", "why": "重复请求落到同一终局", "scenario": "同一 captureRequestId 并发 5 次", "expect": "5 次返回同一个 receipt（或同一确定性失败）；只产生一个 captureId" },
+    { "id": "V-08", "why": "未知输入隔离而不是崩溃", "scenario": "收到一个完全无法解析的报文", "expect": "隔离成 INVALID_CONTRACT 并留最小审计（requestId/schema/version/hash/时间），服务不得崩溃，也不得静默归入任何业务类型" },
+    { "id": "V-09", "why": "participant 必须精确匹配", "scenario": "房间里有第二台狗，报文自称是本任务的 robotId", "expect": "拒绝。sender participant identity 必须精确等于 robot:<expectedRobotId>，不能只判前缀，payload 里的 robotId 是自报不可单独采信" },
+    { "id": "V-10", "why": "transport ACK ≠ contract acceptance", "scenario": "HTTP 200 但 accepted=false", "expect": "狗端必须按 rejection 处理，不得因为 HTTP 成功就认为被接纳" }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import tempfile
 import threading
@@ -126,10 +127,27 @@ class InteractionEdgeServiceTest(unittest.TestCase):
     def test_livekit_data_transcript_updates_the_same_wake_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service = self.create_service(Path(temporary))
-            service.transport.wake_transcript(
-                {"action": "wake_transcript", "text": "小玖小玖"}
+            result = service.transport.wake_transcript(
+                {
+                    "action": "wake_transcript",
+                    "eventId": "wake-event-1",
+                    "text": "今天不需要唤醒",
+                }
             )
-            self.assertEqual(service.status()["wake"]["state"], "awake")
+            self.assertEqual(service.status()["wake"]["state"], "sleeping")
+            self.assertEqual(result["schema"], "gogoguard.wake_gate_result.v1")
+            self.assertEqual(result["eventId"], "wake-event-1")
+            self.assertEqual(result["action"], "ignore")
+            self.assertEqual(result["reason"], "wake_phrase_not_matched")
+            self.assertEqual(
+                result["transcriptHash"],
+                hashlib.sha256("今天不需要唤醒".encode("utf-8")).hexdigest(),
+            )
+            self.assertNotIn("今天不需要唤醒", json.dumps(result, ensure_ascii=False))
+            self.assertEqual(
+                service.transport.published_data,
+                [(result, "gogoguard.wake_gate_result.v1", True)],
+            )
 
     def test_map_bound_pose_is_forwarded_unreliably_without_motion_access(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

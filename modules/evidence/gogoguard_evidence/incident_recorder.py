@@ -34,6 +34,7 @@ ACTIVE_STATES = {
 TRIGGER_STATES = {
     "BLOCKED", "FAULT", "HOLDING", "RECOVERING", "SEARCHING_PATH",
 }
+AUTOMATIC_TRIGGER_COOLDOWN_S = 30.0
 TERMINAL_STATES = {
     "IDLE", "STOPPED", "COMPLETE", "COMPLETED", "BLOCKED", "FAULT",
 }
@@ -52,6 +53,48 @@ LIGHTWEIGHT_PRODUCTION_TOPICS = frozenset(
         "/cmd_vel",
     }
 )
+
+
+def automatic_trigger_key(state: str, payload: dict[str, Any]) -> tuple[str, ...]:
+    """Group repeated recovery transitions from the same patrol leg.
+
+    SEARCHING_PATH may alternate with REPLANNING/PATROLLING many times while
+    one obstacle remains present.  Those transitions are one field incident,
+    not a new incident every controller cycle.
+    """
+
+    checkpoint = payload.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        checkpoint = {}
+    active_checkpoint = str(
+        checkpoint.get("activeCheckpointId")
+        or payload.get("activeCheckpointId")
+        or ""
+    )
+    goal_identity = str(
+        payload.get("activeGoalIndex")
+        or payload.get("targetRouteIndex")
+        or payload.get("routeIndex")
+        or ""
+    )
+    return (
+        str(state).upper(),
+        str(payload.get("runtimeInstanceId") or ""),
+        str(payload.get("missionId") or checkpoint.get("missionId") or ""),
+        active_checkpoint,
+        goal_identity,
+    )
+
+
+def automatic_trigger_due(
+    last_triggered: dict[tuple[str, ...], float],
+    key: tuple[str, ...],
+    *,
+    now: float,
+    cooldown_s: float = AUTOMATIC_TRIGGER_COOLDOWN_S,
+) -> bool:
+    previous = last_triggered.get(key)
+    return previous is None or now - previous >= cooldown_s
 
 
 @dataclass(frozen=True)
@@ -201,6 +244,7 @@ class IncidentRecorder:
         self._patrol_profile = None
         self._pending = False
         self._pending_lock = threading.Lock()
+        self._automatic_trigger_times: dict[tuple[str, ...], float] = {}
         self._current_pose: dict[str, Any] | None = None
         self._current_route: list[list[float]] = []
         self._current_runtime: dict[str, Any] = {}
@@ -283,10 +327,15 @@ class IncidentRecorder:
             # still use the profile that was active at patrol start.
             self._patrol_profile = self.profile_store.get()
             self._patrol_active = True
+            self._automatic_trigger_times.clear()
             if self._profile().record_camera:
                 self.camera.start()
         if state in TRIGGER_STATES and state != self._last_runtime_state:
-            self.trigger(state.lower(), payload)
+            key = automatic_trigger_key(state, payload)
+            now = time.monotonic()
+            if automatic_trigger_due(self._automatic_trigger_times, key, now=now):
+                if self.trigger(state.lower(), payload):
+                    self._automatic_trigger_times[key] = now
         if state in TERMINAL_STATES and self._last_runtime_state in ACTIVE_STATES:
             self.profile_store.consume_patrol()
             if not self._pending:
@@ -363,10 +412,10 @@ class IncidentRecorder:
             keep_s=profile.pre_trigger_s,
         )
 
-    def trigger(self, trigger: str, payload: dict[str, Any] | None = None) -> None:
+    def trigger(self, trigger: str, payload: dict[str, Any] | None = None) -> bool:
         with self._pending_lock:
             if self._pending:
-                return
+                return False
             self._pending = True
         profile = self._profile()
         before_samples = self.samples.snapshot()
@@ -378,6 +427,7 @@ class IncidentRecorder:
             name="incident-sealer",
             daemon=True,
         ).start()
+        return True
 
     def _finish(self, trigger, payload, profile, before_samples, before_preview, triggered_epoch) -> None:
         try:

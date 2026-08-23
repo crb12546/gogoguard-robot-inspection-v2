@@ -15,11 +15,14 @@ from gogoguard_evidence import (
 )
 from gogoguard_evidence.incident_recorder import (
     ACTIVE_STATES,
+    AUTOMATIC_TRIGGER_COOLDOWN_S,
     LIGHTWEIGHT_PRODUCTION_TOPICS,
     TERMINAL_STATES,
     TRIGGER_STATES,
     RollingSamples,
     SerializedSample,
+    automatic_trigger_due,
+    automatic_trigger_key,
 )
 
 
@@ -55,6 +58,29 @@ class IncidentEvidenceTest(unittest.TestCase):
         values.append(SerializedSample("/cloud", "type", 2_000_000_000, b"5678"), keep_s=2, byte_limit=8)
         values.append(SerializedSample("/cloud", "type", 4_100_000_000, b"abcd"), keep_s=2, byte_limit=8)
         self.assertEqual([item.timestamp_ns for item in values.snapshot()], [4_100_000_000])
+
+    def test_repeated_searching_path_transitions_share_one_incident_window(self) -> None:
+        payload = {
+            "runtimeInstanceId": "runtime-1",
+            "missionId": "mission-1",
+            "checkpoint": {"activeCheckpointId": "cp_02"},
+            "targetRouteIndex": 61,
+        }
+        key = automatic_trigger_key("SEARCHING_PATH", payload)
+        history = {key: 100.0}
+        self.assertFalse(automatic_trigger_due(history, key, now=105.0))
+        self.assertTrue(
+            automatic_trigger_due(
+                history,
+                key,
+                now=100.0 + AUTOMATIC_TRIGGER_COOLDOWN_S,
+            )
+        )
+        other_leg = automatic_trigger_key(
+            "SEARCHING_PATH",
+            {**payload, "checkpoint": {"activeCheckpointId": "cp_03"}},
+        )
+        self.assertTrue(automatic_trigger_due(history, other_leg, now=105.0))
 
     def test_development_profile_falls_back_after_the_requested_patrol(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

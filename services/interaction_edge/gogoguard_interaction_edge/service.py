@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 import re
 import socket
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -196,9 +198,48 @@ class InteractionEdgeService:
 
     def _wake_transcript_received(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._command_lock:
-            result = self.wake.handle_transcript(str(payload.get("text", "")))
+            result = self._handle_wake_transcript(payload)
             self._write_status()
             return result
+
+    def _handle_wake_transcript(self, payload: dict[str, Any]) -> dict[str, Any]:
+        text = payload.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 4096:
+            raise ValueError("wake transcript is invalid")
+        event_id = payload.get("eventId")
+        if event_id is None:
+            event_id = "wake_" + uuid.uuid4().hex
+        if not is_safe_external_id(event_id):
+            raise ValueError("wake transcript event identity is invalid")
+        gate_result = self.wake.handle_transcript(text)
+        wake_status = self.wake.status()
+        action = str(gate_result.get("action") or "ignore")
+        reason = str(gate_result.get("reason") or "")
+        if not reason:
+            reason = {
+                "ignore": "wake_phrase_not_matched",
+                "wake": "wake_phrase_matched",
+                "continue": "conversation_active",
+                "sleep": "conversation_closed",
+            }.get(action, "wake_gate_evaluated")
+        receipt = {
+            "schema": "gogoguard.wake_gate_result.v1",
+            "eventId": str(event_id),
+            "accepted": gate_result.get("accepted") is True,
+            "action": action,
+            "state": wake_status.state.value,
+            "wakeSequence": int(wake_status.wake_sequence),
+            "reason": reason,
+            "transcriptHash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+        publisher = getattr(self.transport, "publish_data", None)
+        if publisher is not None:
+            publisher(
+                receipt,
+                topic="gogoguard.wake_gate_result.v1",
+                reliable=True,
+            )
+        return receipt
 
     def _playback_state_changed(self, active: bool) -> None:
         try:
@@ -252,7 +293,7 @@ class InteractionEdgeService:
             self.wake.sleep("media_stopped")
             result = {"live": json_ready(self.manager.stop()), "wake": json_ready(self.wake.status())}
         elif action == "wake_transcript":
-            result = self.wake.handle_transcript(str(payload.get("text", "")))
+            result = self._handle_wake_transcript(payload)
         elif action == "wake_tick":
             transition = self.wake.tick()
             result = transition or {"action": "none", "state": self.wake.status().state.value}

@@ -175,6 +175,7 @@ class CheckpointRuntimeTest(unittest.TestCase):
                 "routeId": "route-v1",
                 "verdictTimeoutSec": 15,
                 "maxRetakeAttempts": 2,
+                "evidenceTransactionVersion": 1,
                 "checkpoints": [
                     {
                         "checkpointId": "cp_01",
@@ -200,6 +201,7 @@ class CheckpointRuntimeTest(unittest.TestCase):
                 route_point_count=20,
             )
         executor = CheckpointExecutor(mission)
+        self.assertEqual(executor.status()["evidenceTransactionVersion"], 1)
         executor.observe_progress(10)
         executor.route_goal_cancelled()
         executor.observe_stop(
@@ -214,11 +216,29 @@ class CheckpointRuntimeTest(unittest.TestCase):
         )
         self.assertEqual(executor.phase, "POSE_REQUESTED")
         executor.pose_completed()
+        failed_control = {
+            "controlId": "cc-capture-failed",
+            "missionId": "mission-2",
+            "checkpointId": "cp_01",
+            "attempt": 1,
+            "action": "capture_failed",
+        }
+        self.assertEqual(
+            executor.apply_platform_control(failed_control), "capture_failed"
+        )
+        self.assertEqual(executor.phase, "WAITING_VERDICT")
+        self.assertEqual(
+            executor.apply_platform_control(
+                {**failed_control, "controlId": "cc-retake", "action": "retake"}
+            ),
+            "retake",
+        )
+        self.assertEqual(executor.phase, "WAITING_PLATFORM")
         control = {
             "controlId": "cc-capture",
             "missionId": "mission-2",
             "checkpointId": "cp_01",
-            "attempt": 1,
+            "attempt": 2,
             "action": "capture",
         }
         self.assertEqual(executor.apply_platform_control(control), "capture")

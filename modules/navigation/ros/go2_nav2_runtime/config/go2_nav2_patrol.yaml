@@ -79,10 +79,10 @@ controller_server:
         cost_power: 1
         cost_weight: 3.81
         critical_cost: 300.0
-        # The costmaps model the robot with one 0.48 m circle and inflate
-        # obstacles around that radius. Humble's footprint mode requires an
-        # explicit polygon and rejects a radius-only costmap during configure.
-        consider_footprint: false
+        # Collision-check the same padded rectangular body used by both
+        # costmaps.  The former 0.48 m circle turned the Go2's front/back
+        # length into excessive lateral width and rejected passable gaps.
+        consider_footprint: true
         collision_cost: 1000000.0
         near_goal_distance: 0.6
         inflation_layer_name: inflation_layer
@@ -180,7 +180,11 @@ global_costmap:
       # MPPI horizon instead of searching only inside a rolling square.
       rolling_window: false
       resolution: 0.10
-      robot_radius: 0.48
+      # Measured rigid body: front 0.40 m, rear 0.33 m, half-width 0.20 m.
+      # A single 0.10 m padding gives the operator-agreed shoulder clearance;
+      # the resulting hard envelope is x [-0.43, 0.50], y +/-0.30 m.
+      footprint: "[[0.40, 0.20], [0.40, -0.20], [-0.33, -0.20], [-0.33, 0.20]]"
+      footprint_padding: 0.10
       track_unknown_space: true
       always_send_full_costmap: true
       plugins: [static_layer, obstacle_layer, inflation_layer]
@@ -200,7 +204,7 @@ global_costmap:
         combination_method: 1
         observation_sources: mid360_body
         mid360_body:
-          topic: /navigation/cloud_body
+          topic: /navigation/cloud_obstacles
           data_type: PointCloud2
           min_obstacle_height: 0.05
           max_obstacle_height: 1.45
@@ -213,7 +217,10 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.65
+        # This is a soft preference outside the 0.30 m padded side boundary,
+        # not a second hard robot body.  It may be crossed when it is the only
+        # collision-free route through a reviewed gap.
+        inflation_radius: 0.45
         cost_scaling_factor: 3.0
       keepout_filter:
         plugin: nav2_costmap_2d::KeepoutFilter
@@ -261,10 +268,9 @@ local_costmap:
       width: 8
       height: 8
       resolution: 0.08
-      # One visible physical envelope is shared with the allowed-area editor
-      # and emergency collision monitor. Inflation is a cost preference, not a
-      # second hard body shape.
-      robot_radius: 0.48
+      # Keep exactly the same rectangular body and padding as the global map.
+      footprint: "[[0.40, 0.20], [0.40, -0.20], [-0.33, -0.20], [-0.33, 0.20]]"
+      footprint_padding: 0.10
       track_unknown_space: false
       # The patrol health gate consumes /local_costmap/costmap as a heartbeat.
       # With incremental publishing a static scene emits one full grid and then
@@ -291,7 +297,7 @@ local_costmap:
         combination_method: 1
         observation_sources: mid360_body
         mid360_body:
-          topic: /navigation/cloud_body
+          topic: /navigation/cloud_obstacles
           data_type: PointCloud2
           # Ignore the floor-return band around z=0. The commissioned incident
           # showed a one-frame StopZone hit with no persistent obstacle; real
@@ -307,10 +313,9 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        # Footprint remains the hard collision boundary. A 0.65 m inflation
-        # field leaves about 0.16 m preference margin without declaring an
-        # ordinary doorway impassable.
-        inflation_radius: 0.65
+        # Fifteen centimetres beyond the padded shoulder is a soft preference.
+        # It does not recreate the former 0.48 m hard lateral circle.
+        inflation_radius: 0.45
         cost_scaling_factor: 3.0
       keepout_filter:
         plugin: nav2_costmap_2d::KeepoutFilter
@@ -345,8 +350,10 @@ collision_monitor:
     stop_pub_timeout: 1.0
     polygons: [SafetyEnvelope]
     SafetyEnvelope:
-      type: circle
-      radius: 0.48
+      type: polygon
+      # One final hard envelope, identical to the padded costmap footprint.
+      # Front edge is 0.50 m from base_link; shoulders have 0.10 m clearance.
+      points: [0.50, 0.30, 0.50, -0.30, -0.43, -0.30, -0.43, 0.30]
       action_type: stop
       # Humble triggers when the in-zone count is greater than max_points.
       # Nine coherent returns still react immediately to a physical object,
@@ -358,7 +365,7 @@ collision_monitor:
     observation_sources: [mid360_body]
     mid360_body:
       type: pointcloud
-      topic: /navigation/cloud_body
+      topic: /navigation/cloud_obstacles
       min_height: 0.05
       max_height: 1.45
       enabled: true

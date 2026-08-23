@@ -35,6 +35,19 @@ class NavigationWorkspaceTest(unittest.TestCase):
         with self.assertRaisesRegex(NavigationWorkspaceError, "robot radius"):
             validate_workspace(value, require_ready=True)
 
+    def test_rectangular_front_corner_must_remain_inside_green_boundary(self):
+        value = self.value()
+        value["allowedArea"] = [
+            [-1.0, -1.0],
+            [1.49, -1.0],
+            [1.49, 1.0],
+            [-1.0, 1.0],
+        ]
+        # The historical 0.48 m circle passes at the endpoint, but the shared
+        # padded Nav2 footprint reaches 0.50 m forward and must fail closed.
+        with self.assertRaisesRegex(NavigationWorkspaceError, "rectangular"):
+            validate_workspace(value, require_ready=True)
+
     def test_self_crossing_green_boundary_is_rejected(self):
         value = self.value()
         value["allowedArea"] = [[-1.0, -1.0], [2.0, 1.0], [-1.0, 1.0], [2.0, -1.0]]

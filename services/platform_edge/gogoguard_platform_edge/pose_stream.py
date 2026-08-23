@@ -32,6 +32,7 @@ def build_pose_stream_payload(
     *,
     robot_id: str,
     sequence: int,
+    runtime_instance_id: str,
     map_version: str,
     route_id: str,
     frame_id: str,
@@ -43,8 +44,8 @@ def build_pose_stream_payload(
     localization: dict[str, Any],
     mission: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not robot_id or not map_version or not route_id:
-        raise ValueError("pose identity and map binding are required")
+    if not robot_id or not runtime_instance_id or not map_version or not route_id:
+        raise ValueError("pose identity, runtime, and map binding are required")
     if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
         raise ValueError("pose sequence is invalid")
     if frame_id != "map" or not source_at:
@@ -56,6 +57,7 @@ def build_pose_stream_payload(
         "schema": "gogoguard.robot_pose.v1",
         "robotId": robot_id,
         "sequence": sequence,
+        "runtimeInstanceId": runtime_instance_id,
         "mapVersion": map_version,
         "routeId": route_id,
         "frameId": "map",
@@ -224,7 +226,13 @@ def main() -> None:
         localization = localization if isinstance(localization, dict) else {}
         map_version = str(runtime.get("mapVersion") or "")
         route_id = str(runtime.get("routeId") or "")
-        if localization.get("usable") is not True or not map_version or not route_id:
+        runtime_instance_id = str(runtime.get("runtimeInstanceId") or "")
+        if (
+            localization.get("usable") is not True
+            or not runtime_instance_id
+            or not map_version
+            or not route_id
+        ):
             return
         pose = message.pose.pose
         orientation = pose.orientation
@@ -247,6 +255,7 @@ def main() -> None:
             payload = build_pose_stream_payload(
                 robot_id=args.robot_id,
                 sequence=sequence,
+                runtime_instance_id=runtime_instance_id,
                 map_version=map_version,
                 route_id=route_id,
                 frame_id=str(message.header.frame_id),

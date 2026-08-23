@@ -6,6 +6,7 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import datetime
+from importlib import resources
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
@@ -17,6 +18,25 @@ SCHEMA = "go2.mount_calibration.v2"
 FIXED_GEOMETRY_SCHEMA = "go2.mount_calibration.v3"
 LEGACY_SCHEMA = "go2.mount_calibration.v1"
 VALID_STATES = {"draft", "measured", "validated", "retired"}
+
+
+def load_commissioned_mount_calibration(sensor_id: str) -> "MountCalibration":
+    """Load the validated packaged mount calibration for one physical sensor."""
+
+    normalized = _nonempty(sensor_id, "sensor_id")
+    resource = resources.files("gogoguard_calibration").joinpath(
+        "config", f"go2-u2-mid360s-{normalized}.json"
+    )
+    try:
+        data = json.loads(resource.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise ContractError(
+            "commissioned mount calibration is unavailable for sensor %s" % normalized
+        ) from exc
+    calibration = MountCalibration.from_dict(data, require_validated=True)
+    if calibration.raw.get("sensor_id") != normalized:
+        raise ContractError("commissioned mount calibration sensor identity mismatch")
+    return calibration
 
 
 def _nonempty(value: Any, label: str) -> str:

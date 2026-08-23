@@ -45,7 +45,21 @@ class OperationRegistry:
             try:
                 result = action()
             except Exception as exc:
-                self._change(operation_id, state="failed", message=str(exc), error=str(exc))
+                message = str(exc)
+                error_code = getattr(exc, "code", None)
+                if message in {
+                    "MISSION_CONFLICT_ACTIVE",
+                    "MISSION_CONFLICT_MUTATED",
+                }:
+                    error_code = message
+                values = {
+                    "state": "failed",
+                    "message": message,
+                    "error": message,
+                }
+                if isinstance(error_code, str) and error_code:
+                    values["errorCode"] = error_code
+                self._change(operation_id, **values)
             else:
                 completion_messages = {
                     "runtime.start": "运行进程启动请求已完成；定位是否可用以实时状态为准",

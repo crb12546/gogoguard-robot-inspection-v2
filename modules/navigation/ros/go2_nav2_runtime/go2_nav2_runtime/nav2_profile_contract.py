@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Tuple
 
 try:
     import yaml
@@ -45,6 +46,51 @@ def _positive_int(value: Any, label: str) -> int:
     if result != integer:
         raise Nav2ProfileError("%s must be an integer" % label)
     return integer
+
+
+def _points(value: Any, label: str) -> Tuple[Tuple[float, float], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise Nav2ProfileError("%s must be a flat coordinate list" % label)
+    if len(value) < 6 or len(value) % 2:
+        raise Nav2ProfileError("%s must contain at least three x/y pairs" % label)
+    numbers = tuple(_finite(item, label) for item in value)
+    return tuple(zip(numbers[0::2], numbers[1::2]))
+
+
+def _bounds(points: Sequence[Tuple[float, float]]) -> Tuple[float, float, float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _footprint(value: Any, label: str) -> Tuple[Tuple[float, float], ...]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError) as exc:
+            raise Nav2ProfileError("%s is invalid JSON" % label) from exc
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise Nav2ProfileError("%s must be a point list" % label)
+    points = []
+    for item in value:
+        if not isinstance(item, Sequence) or len(item) != 2:
+            raise Nav2ProfileError("%s points must be [x, y]" % label)
+        points.append((_finite(item[0], label), _finite(item[1], label)))
+    if len(points) < 3:
+        raise Nav2ProfileError("%s needs at least three points" % label)
+    return tuple(points)
+
+
+def _padded_bounds(
+    footprint: Sequence[Tuple[float, float]], padding: float
+) -> Tuple[float, float, float, float]:
+    minimum_x, maximum_x, minimum_y, maximum_y = _bounds(footprint)
+    return (
+        minimum_x - padding,
+        maximum_x + padding,
+        minimum_y - padding,
+        maximum_y + padding,
+    )
 
 
 def load_nav2_profile(path: Path) -> Mapping[str, Any]:
@@ -131,9 +177,9 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     cost_critic = _mapping(follow.get("CostCritic"), "FollowPath.CostCritic")
     if cost_critic.get("enabled") is not True:
         raise Nav2ProfileError("CostCritic must remain enabled")
-    if cost_critic.get("consider_footprint") is not False:
+    if cost_critic.get("consider_footprint") is not True:
         raise Nav2ProfileError(
-            "the circular robot contract requires CostCritic to use the inflation-expanded costmap"
+            "CostCritic must collision-check the shared rectangular footprint"
         )
     if cost_critic.get("inflation_layer_name") != "inflation_layer":
         raise Nav2ProfileError("CostCritic must bind the configured inflation layer")
@@ -156,20 +202,40 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         raise Nav2ProfileError(
             "local costmap must publish deterministic full-grid health frames"
         )
-    robot_radius = _positive(local.get("robot_radius"), "local_costmap.robot_radius")
-    if not math.isclose(robot_radius, 0.48, rel_tol=0.0, abs_tol=1.0e-9):
-        raise Nav2ProfileError("local costmap must use the one 0.48m robot radius")
-    if "footprint" in local:
+    if "robot_radius" in local:
         raise Nav2ProfileError(
-            "local costmap must not define a second polygon footprint beside robot_radius"
+            "local costmap must not define a circular radius beside the footprint"
         )
+    footprint = _footprint(local.get("footprint"), "local_costmap.footprint")
+    footprint_padding = _finite(
+        local.get("footprint_padding"), "local_costmap.footprint_padding"
+    )
+    if not math.isclose(footprint_padding, 0.10, rel_tol=0.0, abs_tol=1.0e-9):
+        raise Nav2ProfileError("planning footprint must keep 0.10m shoulder padding")
+    physical_bounds = _bounds(footprint)
+    expected_physical_bounds = (-0.33, 0.40, -0.20, 0.20)
+    if any(
+        not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-9)
+        for actual, expected in zip(physical_bounds, expected_physical_bounds)
+    ):
+        raise Nav2ProfileError("planning footprint does not match the measured Go2 body")
+    padded_bounds = _padded_bounds(footprint, footprint_padding)
+    expected_padded_bounds = (-0.43, 0.50, -0.30, 0.30)
+    if any(
+        not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-9)
+        for actual, expected in zip(padded_bounds, expected_padded_bounds)
+    ):
+        raise Nav2ProfileError("padded planning envelope is inconsistent")
+    lateral_half_width = max(abs(padded_bounds[2]), abs(padded_bounds[3]))
     inflation = _mapping(local.get("inflation_layer"), "inflation_layer")
     inflation_radius = _positive(inflation.get("inflation_radius"), "inflation_radius")
-    clearance_envelope = inflation_radius - robot_radius
+    clearance_envelope = inflation_radius - lateral_half_width
     if clearance_envelope + 1.0e-9 < 0.15:
         raise Nav2ProfileError(
-            "inflation radius must cover the padded robot footprint plus 0.15m preference margin"
+            "inflation radius must retain a 0.15m soft shoulder preference"
         )
+    if clearance_envelope > 0.20 + 1.0e-9:
+        raise Nav2ProfileError("soft inflation must not recreate the oversized hard circle")
     inflation_cost_scaling = _positive(
         inflation.get("cost_scaling_factor"), "cost_scaling_factor"
     )
@@ -201,8 +267,8 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if obstacle.get("plugin") != "nav2_costmap_2d::ObstacleLayer":
         raise Nav2ProfileError("local obstacle owner must be the 2D ObstacleLayer")
     source = _mapping(obstacle.get("mid360_body"), "obstacle_layer.mid360_body")
-    if source.get("topic") != "/navigation/cloud_body" or source.get("data_type") != "PointCloud2":
-        raise Nav2ProfileError("local costmap must use the calibrated body cloud")
+    if source.get("topic") != "/navigation/cloud_obstacles" or source.get("data_type") != "PointCloud2":
+        raise Nav2ProfileError("local costmap must use the self-filtered obstacle cloud")
     if source.get("clearing") is not True or source.get("marking") is not True:
         raise Nav2ProfileError("body cloud must both clear and mark the rolling costmap")
 
@@ -223,11 +289,21 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     global_costmap = _mapping(
         global_costmap.get("ros__parameters"), "global costmap parameters"
     )
-    global_radius = _positive(
-        global_costmap.get("robot_radius"), "global_costmap.robot_radius"
+    if "robot_radius" in global_costmap:
+        raise Nav2ProfileError(
+            "global costmap must not define a circular radius beside the footprint"
+        )
+    global_footprint = _footprint(
+        global_costmap.get("footprint"), "global_costmap.footprint"
     )
-    if not math.isclose(global_radius, robot_radius, rel_tol=0.0, abs_tol=1.0e-9):
-        raise Nav2ProfileError("local and global costmaps must share one robot radius")
+    global_padding = _finite(
+        global_costmap.get("footprint_padding"),
+        "global_costmap.footprint_padding",
+    )
+    if global_footprint != footprint or not math.isclose(
+        global_padding, footprint_padding, rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise Nav2ProfileError("local and global costmaps must share one footprint")
     if global_costmap.get("rolling_window") is not False:
         raise Nav2ProfileError(
             "global planning must use the full reviewed static navigation map"
@@ -261,19 +337,25 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
     if collision.get("base_frame_id") != "base_link" or collision.get("odom_frame_id") != "odom":
         raise Nav2ProfileError("collision monitor frames must be odom -> base_link")
     collision_source = _mapping(collision.get("mid360_body"), "collision mid360_body")
-    if collision_source.get("type") != "pointcloud" or collision_source.get("topic") != "/navigation/cloud_body":
-        raise Nav2ProfileError("collision monitor must use the calibrated body cloud")
+    if collision_source.get("type") != "pointcloud" or collision_source.get("topic") != "/navigation/cloud_obstacles":
+        raise Nav2ProfileError("collision monitor must use the self-filtered obstacle cloud")
 
     if collision.get("polygons") != ["SafetyEnvelope"]:
         raise Nav2ProfileError("collision monitor must expose one safety envelope")
     safety_envelope = _mapping(
         collision.get("SafetyEnvelope"), "SafetyEnvelope"
     )
-    if safety_envelope.get("type") != "circle":
-        raise Nav2ProfileError("SafetyEnvelope must be circular")
-    safety_radius = _positive(safety_envelope.get("radius"), "SafetyEnvelope.radius")
-    if not math.isclose(safety_radius, robot_radius, rel_tol=0.0, abs_tol=1.0e-9):
-        raise Nav2ProfileError("collision monitor and costmaps must share one radius")
+    if safety_envelope.get("type") != "polygon":
+        raise Nav2ProfileError("SafetyEnvelope must use the rectangular body")
+    safety_points = _points(safety_envelope.get("points"), "SafetyEnvelope.points")
+    safety_bounds = _bounds(safety_points)
+    if any(
+        not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-9)
+        for actual, expected in zip(safety_bounds, padded_bounds)
+    ):
+        raise Nav2ProfileError(
+            "collision monitor and costmaps must share one padded envelope"
+        )
     max_points = safety_envelope.get("max_points")
     if not isinstance(max_points, int) or isinstance(max_points, bool) or not 3 <= max_points <= 12:
         raise Nav2ProfileError(
@@ -328,12 +410,15 @@ def validate_nav2_profile(path: Path) -> Mapping[str, float]:
         "predictionDistanceM": prediction_distance,
         "lateralAuthorityMps": vy_max,
         "requiredMovementAngleRad": required_movement_angle,
-        "robotRadiusM": robot_radius,
+        "physicalFootprintBoundsM": physical_bounds,
+        "paddedFootprintBoundsM": padded_bounds,
+        "shoulderClearanceM": footprint_padding,
+        "lateralHalfWidthM": lateral_half_width,
         "inflationRadiusM": inflation_radius,
         "inflationClearanceEnvelopeM": clearance_envelope,
         "inflationCostScalingFactor": inflation_cost_scaling,
         "globalCostmapSource": "/navigation_static_map",
-        "safetyEnvelopeRadiusM": safety_radius,
+        "safetyEnvelopeBoundsM": safety_bounds,
         "batchSize": batch_size,
         "iterationCount": iteration_count,
         "rolloutStatesPerSecond": rollout_states_per_second,

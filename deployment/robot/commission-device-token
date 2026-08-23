@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "commission-device-token must run as root" >&2
+  exit 1
+fi
+
+readonly RUNTIME_ENV=${1:-/etc/gogoguard/runtime.env}
+readonly SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+validator=/opt/gogoguard/bin/validate-runtime-env
+if [[ ! -x $validator ]]; then
+  validator="$SCRIPT_ROOT/validate-runtime-env"
+fi
+if [[ ! -x $validator ]]; then
+  echo "validate-runtime-env is unavailable" >&2
+  exit 2
+fi
+if [[ ! -f $RUNTIME_ENV ]]; then
+  echo "missing commissioned runtime environment: $RUNTIME_ENV" >&2
+  exit 2
+fi
+
+if [[ -t 0 ]]; then
+  IFS= read -r -s -p "Enter the GoGoGuard device token: " device_token
+  printf '\n' >&2
+else
+  IFS= read -r device_token
+fi
+if [[ ! $device_token =~ ^[A-Za-z0-9._-]{16,}$ ]]; then
+  echo "device token has an invalid format" >&2
+  exit 3
+fi
+
+readonly TEMPORARY_ENV=$(mktemp /etc/gogoguard/.runtime.env.token.XXXXXX)
+cleanup() {
+  rm -f "$TEMPORARY_ENV"
+  unset device_token
+}
+trap cleanup EXIT
+
+token_written=0
+robot_written=0
+while IFS= read -r line || [[ -n $line ]]; do
+  case $line in
+    GOGOGUARD_DEVICE_TOKEN=*)
+      if [[ $token_written == 0 ]]; then
+        printf 'GOGOGUARD_DEVICE_TOKEN=%s\n' "$device_token"
+        token_written=1
+      fi
+      ;;
+    GOGOGUARD_ROBOT_ID=*)
+      if [[ $robot_written == 0 ]]; then
+        printf 'GOGOGUARD_ROBOT_ID=LLYJ0001\n'
+        robot_written=1
+      fi
+      ;;
+    *) printf '%s\n' "$line" ;;
+  esac
+done < "$RUNTIME_ENV" > "$TEMPORARY_ENV"
+if [[ $robot_written == 0 ]]; then
+  printf 'GOGOGUARD_ROBOT_ID=LLYJ0001\n' >> "$TEMPORARY_ENV"
+fi
+if [[ $token_written == 0 ]]; then
+  printf 'GOGOGUARD_DEVICE_TOKEN=%s\n' "$device_token" >> "$TEMPORARY_ENV"
+fi
+
+install -o root -g root -m 0600 "$TEMPORARY_ENV" "$RUNTIME_ENV"
+unset device_token
+"$validator" "$RUNTIME_ENV"
+trap - EXIT
+rm -f "$TEMPORARY_ENV"
+
+echo "GoGoGuard device token commissioned."

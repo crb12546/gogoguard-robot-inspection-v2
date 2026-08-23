@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gogoguard.cn/contracts/evidence-txn/v1/contract.schema.json",
+  "title": "到点取证事务 v1 —— 双方唯一规范源",
+  "description": "平台与狗端共同消费。任何一侧的枚举常量都必须与本文件的 $defs 集合精确相等（集合等价测试）。双方都没有 codegen，所以一致性只能靠测试保证，样例向量不能替代全集校验。",
+
+  "x-contract": {
+    "schemaVersion": 1,
+    "evidenceTransactionVersion": 1,
+
+    "x-negotiation": {
+      "说明": "同名 feature gate 不算兼容协商。必须双向显式声明版本，任一侧不支持就不走 v1。",
+      "平台声明": {
+        "载体": "start_patrol 的 missionPlan",
+        "字段": "evidenceTransactionVersion: 1",
+        "规则": "只有在（a）狗端 capabilities 声明支持 v1 且（b）平台自身 gate 开启时才下发。任一不满足则不带该字段，双方回落旧路径。"
+      },
+      "狗端声明": {
+        "载体": "heartbeat 的 capabilities",
+        "字段": "evidenceTransaction: { supported: bool, versions: [int], manifestSha256: string }",
+        "规则": "versions 列出所有能处理的版本。manifestSha256 是狗端 pin 的 artifact 哈希。"
+      },
+      "gate 名": {
+        "逻辑名": "CHECKPOINT_EVIDENCE_TXN",
+        "平台环境变量": "CHECKPOINT_EVIDENCE_TXN",
+        "狗端环境变量": "GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED",
+        "默认": "关闭"
+      },
+      "哈希不一致时": "狗端收到 evidenceTransactionVersion=1 但自身 pin 的 manifestSha256 与平台声明不符 → admission 拒绝 CONTRACT_HASH_MISMATCH，不静默按自己那份执行。"
+    },
+
+    "x-two-layers": {
+      "说明": "admission（这条请求有没有被本版本理解并接纳）与 business（已接纳的事务执行结果）是两个命名空间，绝不共用枚举。",
+      "理由": "混在一起迟早有人给 UNSUPPORTED_CONTRACT 配一条重试策略 —— 那会对着一个我们根本不认识的协议不停重试。",
+      "硬约束": [
+        "accepted=false ⇒ rejection 必填，且禁止出现 state / failureCode / receipt",
+        "accepted=true  ⇒ 禁止出现 rejection",
+        "state=failed   ⇒ failureCode 必填",
+        "state≠failed   ⇒ 禁止出现 failureCode",
+        "state=succeeded ⇒ receipt 必填",
+        "state≠succeeded ⇒ 禁止出现 receipt",
+        "被 rejected 的请求不得创建或推进任何业务终局，不得进入判定"
+      ]
+    },
+
+    "x-clock-domain": {
+      "说明": "窗口判断全部在 evidence-ingress 一个时钟域内完成，不做跨进程时钟比较。",
+      "权威时刻": "ingressAcceptedAt —— 由 evidence-ingress 在收到内部请求那一刻打",
+      "合格判据": "ingressAcceptedAt <= frameReceivedAt <= ingressAcceptedAt + selectionWindowMs",
+      "仅供审计不参与比较": ["sourceCapturedAt", "backendReceivedAt", "RTP timestamp"],
+      "为什么不需要历史缓冲": "窗口从入口接受那一刻起算，而狗在终局前保持停止、相机姿态不变 —— 所以接受之后的下一帧必然是合格候选，不存在历史帧缺口。内部 RPC 延迟只影响 deadline sizing 和告警，不影响正确性。"
+    },
+
+    "x-deadlines": {
+      "selectionWindowMs": 3000,
+      "说明": "selection 与 processing 分开。selectionWindowMs 只决定**哪一帧合格**；编码/哈希/落对象存储由 processing lease 约束，可以超过它。",
+      "为什么必须分开": "合在一起的话，一张完全合格的帧会因为存图慢被判成『无新鲜帧』—— 那是在制造假的失败。"
+    },
+
+    "x-fencing": {
+      "说明": "单实例也需要 fencing —— 重启、部署交叠、旧进程迟到都会触发，不依赖多实例。",
+      "字段": ["ownerInstance", "ownerEpoch", "leaseExpiresAt"],
+      "接管规则": "仅当 state=selecting 且 lease 已过期时可接管，原子 ownerEpoch+1。所有续租与终局提交都必须带 (ownerInstance, ownerEpoch) 条件，旧 owner 即使复活也写不进。",
+      "MUST NOT": [
+        "接管者 MUST NOT 重新选择另一帧。",
+        "若原 owner 已把同一 candidate 的不可变对象与元数据耐久化，接管者可在 fence 校验后继续处理并终局化**同一个** candidate；",
+        "没有耐久 candidate 时必须终局为 CAPTURE_OUTCOME_UNKNOWN 或 CAPTURE_INFRA_FAILURE，绝不另选一帧。",
+        "ingressAcceptedAt MUST NOT 因接管而刷新 —— 时间窗仍是最初那个。"
+      ]
+    },
+
+    "x-idempotency": {
+      "键": "captureRequestId",
+      "生成": "狗端确定性生成 H(missionId, mapVersion, routeId, checkpointId, attempt)。同一 attempt 重试必须同 ID。",
+      "规则": [
+        "相同 captureRequestId 的重复请求必须落到**同一终局**（同一 receipt 或同一确定性失败），不得再抽一帧。",
+        "不得只在进程内做缓存 —— 必须是数据库级的。",
+        "相同 captureRequestId 但绑定字段不同（robot/mission/checkpoint/attempt/track）→ admission 拒绝 IDEMPOTENCY_KEY_REUSED，绝不把旧 receipt 给另一个任务。",
+        "waiter 超时返回 CAPTURE_PENDING 不是终局；狗端用同一 ID 有界幂等查询，绝不换 ID 盲重试（换 ID 会产生两份证据）。"
+      ]
+    },
+
+    "x-evidence-binding": {
+      "说明": "证据的身份关系必须由结构化字段表达，显示名只用于 UI。",
+      "禁止": "不得用 Capture.point 这类自由字符串表达绑定关系。历史上 legacy 路径按最近地标写 label，而 label 有时恰好等于 checkpointId —— 那会让一段沿路视频里的某一帧冒充点位证据。",
+      "必需字段": ["evidenceOrigin", "evidenceScope", "missionId", "patrolId", "checkpointId", "captureRequestId", "captureId", "mapVersion", "routeId", "attempt"]
+    }
+  },
+
+  "$defs": {
+
+    "rejectionCode": {
+      "description": "admission 层。请求没有被本版本理解并接纳。禁止出现在 failureCode 位置。",
+      "type": "string",
+      "enum": [
+        "UNSUPPORTED_CONTRACT_VERSION",
+        "UNSUPPORTED_CONTRACT_VALUE",
+        "INVALID_CONTRACT",
+        "CONTRACT_HASH_MISMATCH",
+        "IDEMPOTENCY_KEY_REUSED",
+        "EVIDENCE_BINDING_NOT_ALLOWED"
+      ]
+    },
+
+    "rejectionClass": {
+      "type": "string",
+      "enum": ["contract", "identity", "binding"]
+    },
+
+    "failureCode": {
+      "description": "business 层。请求已被接纳，但事务执行失败。",
+      "type": "string",
+      "enum": [
+        "CAPTURE_NO_FRESH_FRAME",
+        "CAPTURE_TRANSPORT_UNAVAILABLE",
+        "CAPTURE_UPSTREAM_ERROR",
+        "CAPTURE_OUTCOME_UNKNOWN",
+        "CAPTURE_INFRA_FAILURE",
+        "RECEIPT_CAPTURE_ID_MISMATCH",
+        "RECEIPT_STALE",
+        "RECEIPT_BINDING_MISMATCH",
+        "RECEIPT_SCHEMA_INVALID"
+      ]
+    },
+
+    "evidenceOrigin": {
+      "type": "string",
+      "enum": ["evidence_ingress", "legacy_segment_nearest_landmark"]
+    },
+
+    "evidenceScope": {
+      "type": "string",
+      "enum": ["checkpoint_verdict", "along_route_anomaly"]
+    },
+
+    "allowedEvidenceBindings": {
+      "description": "origin × scope 的**允许组合**，机器可读。未列出的组合一律 fail closed（拒绝码 EVIDENCE_BINDING_NOT_ALLOWED）。消费者必须用这张表判定，不许各自写 if。",
+      "type": "array",
+      "const": [
+        { "origin": "evidence_ingress", "scope": "checkpoint_verdict" },
+        { "origin": "evidence_ingress", "scope": "along_route_anomaly" },
+        { "origin": "legacy_segment_nearest_landmark", "scope": "along_route_anomaly" }
+      ]
+    },
+
+    "captureState": {
+      "type": "string",
+      "enum": ["selecting", "processing", "succeeded", "failed"]
+    },
+
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureRequestId", "captureId", "frameId",
+        "ingressAcceptedAt", "frameReceivedAt",
+        "streamInstanceId", "frameSequence",
+        "participant", "track",
+        "width", "height", "mime", "bytes", "sha256",
+        "missionId", "checkpointId", "attempt", "mapVersion", "routeId",
+        "evidenceOrigin", "evidenceScope"
+      ],
+      "properties": {
+        "captureRequestId": { "type": "string" },
+        "captureId":        { "type": "string", "description": "平台生成，全局唯一。狗端 captured 事件必须原样携带它，不得再合成。" },
+        "frameId":          { "type": "string" },
+        "ingressAcceptedAt": { "type": "string", "format": "date-time", "description": "必须带时区。窗口起点，由 evidence-ingress 打。" },
+        "frameReceivedAt":   { "type": "string", "format": "date-time" },
+        "sourceCapturedAt":  { "type": ["string", "null"], "format": "date-time", "description": "狗端时钟，仅供审计，不参与窗口比较。" },
+        "backendReceivedAt": { "type": ["string", "null"], "format": "date-time", "description": "仅供监控内部 RPC 传播延迟。" },
+        "streamInstanceId":  { "type": "string", "description": "取证订阅进程的代际。frameSequence 只在 (participant, streamInstanceId) 内单调。" },
+        "frameSequence":     { "type": "integer", "minimum": 0 },
+        "participant":       { "type": "string", "description": "LiveKit participant identity，形如 robot:<robotId>。必须精确等于本任务允许的那台狗，不能只判前缀。" },
+        "track":             { "type": "string" },
+        "width":             { "type": "integer", "minimum": 1, "description": "实际解码尺寸，不是假定值。" },
+        "height":            { "type": "integer", "minimum": 1 },
+        "mime":              { "type": "string" },
+        "bytes":             { "type": "integer", "minimum": 1 },
+        "sha256":            { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "missionId":         { "type": "string" },
+        "patrolId":          { "type": ["integer", "null"] },
+        "checkpointId":      { "type": "string" },
+        "attempt":           { "type": "integer", "minimum": 1, "maximum": 6 },
+        "mapVersion":        { "type": "string" },
+        "routeId":           { "type": "string" },
+        "evidenceOrigin":    { "$ref": "#/$defs/evidenceOrigin" },
+        "evidenceScope":     { "$ref": "#/$defs/evidenceScope" }
+      }
+    },
+
+    "rejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "code", "retryable"],
+      "properties": {
+        "class":     { "$ref": "#/$defs/rejectionClass" },
+        "code":      { "$ref": "#/$defs/rejectionCode" },
+        "retryable": { "type": "boolean", "description": "未知版本/未知值一律 false —— 避免对着一个我们不认识的协议重试风暴。" },
+        "path":      { "type": ["string", "null"] },
+        "observed":  { "type": ["string", "null"] },
+        "supported": { "type": ["array", "null"], "items": { "type": "string" } }
+      }
+    },
+
+    "contractRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "manifestSha256"],
+      "properties": {
+        "schema":         { "type": "string", "const": "gogoguard.evidence_txn.v1" },
+        "version":        { "type": "integer", "const": 1 },
+        "manifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+
+    "captureResponse": {
+      "description": "capture_ready 的响应。两层结构，admission 与 business 互斥。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "captureRequestId", "contract"],
+      "properties": {
+        "accepted":         { "type": "boolean" },
+        "captureRequestId": { "type": "string" },
+        "contract":         { "$ref": "#/$defs/contractRef" },
+        "rejection":        { "$ref": "#/$defs/rejection" },
+        "state":            { "$ref": "#/$defs/captureState" },
+        "receipt":          { "$ref": "#/$defs/receipt" },
+        "failureCode":      { "$ref": "#/$defs/failureCode" },
+        "retryAfterMs":     { "type": ["integer", "null"], "description": "state=selecting/processing 时给出，狗端据此有界重查。" }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "accepted": { "const": false } }, "required": ["accepted"] },
+          "then": {
+            "required": ["rejection"],
+            "not": { "anyOf": [
+              { "required": ["state"] },
+              { "required": ["failureCode"] },
+              { "required": ["receipt"] }
+            ] }
+          }
+        },
+        {
+          "if":   { "properties": { "accepted": { "const": true } }, "required": ["accepted"] },
+          "then": { "required": ["state"], "not": { "required": ["rejection"] } }
+        },
+        {
+          "if":   { "properties": { "state": { "const": "failed" } }, "required": ["state"] },
+          "then": { "required": ["failureCode"] }
+        },
+        {
+          "if":   { "properties": { "state": { "enum": ["selecting", "processing", "succeeded"] } }, "required": ["state"] },
+          "then": { "not": { "required": ["failureCode"] } }
+        },
+        {
+          "if":   { "properties": { "state": { "const": "succeeded" } }, "required": ["state"] },
+          "then": { "required": ["receipt"] }
+        },
+        {
+          "if":   { "properties": { "state": { "enum": ["selecting", "processing", "failed"] } }, "required": ["state"] },
+          "then": { "not": { "required": ["receipt"] } }
+        }
+      ]
+    }
+  }
+}

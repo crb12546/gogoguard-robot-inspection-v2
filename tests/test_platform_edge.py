@@ -118,6 +118,37 @@ class ResponseQueue:
 
 
 class PlatformHeartbeatServiceTest(unittest.TestCase):
+    def test_release_pipeline_injects_build_identity_and_keeps_v1_gate_off(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        prepare = (
+            repository / "deployment/workstation/prepare-robot-release"
+        ).read_text(encoding="utf-8")
+        run_edge = (repository / "deployment/robot/run-edge").read_text(
+            encoding="utf-8"
+        )
+        service = (repository / "deployment/robot/gogoguard-edge.service").read_text(
+            encoding="utf-8"
+        )
+        installer = (repository / "deployment/robot/install-release").read_text(
+            encoding="utf-8"
+        )
+        runtime_env = (
+            repository / "deployment/robot/runtime.env.example"
+        ).read_text(encoding="utf-8")
+        for name in (
+            "GOGOGUARD_SOFTWARE_VERSION",
+            "GOGOGUARD_GIT_COMMIT",
+            "GOGOGUARD_IMAGE_DIGEST",
+            "GOGOGUARD_BUILD_ID",
+        ):
+            self.assertIn(name, prepare)
+        self.assertIn("--env-file /etc/gogoguard/release.env", run_edge)
+        self.assertIn("GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED=0", runtime_env)
+        self.assertIn("GOGOGUARD_ROBOT_ID=LLYJ0001", runtime_env)
+        self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", service)
+        self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", installer)
+        self.assertIn("commission-device-token", installer)
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -135,6 +166,7 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
                         "reason": "FOLLOWING_ROUTE",
                         "mapVersion": "map-6855ba54ae11",
                         "routeId": "route-r7",
+                        "runtimeInstanceId": "runtime-1234",
                         "routeProgressIndex": 12,
                         "routeProgressPercent": 25.0,
                     },
@@ -161,6 +193,14 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
                         "room": "",
                         "token": "must-not-leak",
                         "url": "must-not-leak",
+                    },
+                    "wake": {
+                        "schema": "gogoguard.conversation_wake_status.v1",
+                        "state": "awake",
+                        "wakePhrase": "小玖小玖",
+                        "wakeSequence": 7,
+                        "observedAt": "2026-08-11T12:00:00Z",
+                        "privateDebug": "must-not-leak",
                     },
                 }
             ),
@@ -200,6 +240,7 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         navigation: FakeNavigationClient | None = None,
         *,
         post_result=None,
+        **service_kwargs,
     ):
         return PlatformHeartbeatService(
             robot_id="LLYJ0001",
@@ -219,6 +260,7 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
                 else ""
             ),
             post_result=post_result,
+            **service_kwargs,
         )
 
     def test_builds_platform_compatible_read_only_heartbeat(self) -> None:
@@ -231,13 +273,223 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertEqual(payload["motion"]["position"]["x"], 12.4)
         self.assertEqual(payload["motion"]["twist"]["linear"]["x"], 0.4)
         self.assertEqual(payload["patrol"]["routeProgressIndex"], 12)
+        self.assertTrue(payload["patrol"]["navigationReady"])
         self.assertEqual(payload["battery"]["percent"], 87.0)
         self.assertEqual(payload["battery"]["voltage"], 32.14)
         self.assertEqual(payload["capabilities"]["revision"], 1)
+        self.assertEqual(
+            payload["capabilities"]["evidenceTransaction"],
+            {
+                "supported": False,
+                "versions": [],
+                "manifestSha256": "58230fa7782fb5c4921a5ba730eb359f06b56b57eff57494732caac341281eb0",
+            },
+        )
+        self.assertEqual(payload["runtimeInstanceId"], "runtime-1234")
+        self.assertEqual(payload["interaction"]["wake"]["wakeSequence"], 7)
+        self.assertNotIn("privateDebug", payload["interaction"]["wake"])
+        for field in (
+            "bootId", "edgeInstanceId", "edgeStartedAt", "softwareVersion",
+            "gitCommit", "imageDigest", "buildId",
+        ):
+            self.assertIn(field, payload)
         encoded = json.dumps(payload)
         self.assertNotIn("must-not-leak", encoded)
         self.assertNotIn('"token"', encoded)
         self.assertNotIn('"url"', encoded)
+
+    def test_stale_navigation_generation_fails_closed_and_is_visible(self) -> None:
+        navigation = json.loads(self.navigation.read_text(encoding="utf-8"))
+        navigation["edge_generation_id"] = "previous-generation"
+        self.navigation.write_text(json.dumps(navigation), encoding="utf-8")
+        responses = ResponseQueue(
+            {"ok": True, "robotId": "LLYJ0001", "commands": []}
+        )
+        service = self.service(
+            responses,
+            FakeInteractionClient(),
+            navigation_generation_id="current-generation",
+        )
+        self.assertTrue(service.poll_once()["ok"])
+        payload = responses.payloads[0]
+        self.assertEqual(payload["status"], "idle")
+        self.assertIsNone(payload["runtimeInstanceId"])
+        self.assertFalse(payload["patrol"]["running"])
+        self.assertFalse(payload["patrol"]["navigationReady"])
+        self.assertEqual(
+            payload["patrol"]["navigationReasonCode"],
+            "NAVIGATION_SNAPSHOT_GENERATION_MISMATCH",
+        )
+        persisted = json.loads(self.status.read_text(encoding="utf-8"))
+        self.assertFalse(persisted["navigationReady"])
+        self.assertEqual(
+            persisted["navigationReasonCode"],
+            "NAVIGATION_SNAPSHOT_GENERATION_MISMATCH",
+        )
+        self.assertEqual(payload["edgeInstanceId"], "current-generation")
+
+    def test_missing_navigation_generation_rejects_queued_start_with_receipt(self) -> None:
+        result_calls = []
+
+        def post_result(url, payload, timeout_s):
+            result_calls.append((url, payload, timeout_s))
+            return {"ok": True}
+
+        responses = ResponseQueue(
+            {
+                "ok": True,
+                "robotId": "LLYJ0001",
+                "commands": [{"id": 902, "action": "start_patrol", "params": {}}],
+            }
+        )
+        navigation = FakeNavigationClient()
+        service = self.service(
+            responses,
+            FakeInteractionClient(),
+            navigation,
+            post_result=post_result,
+            navigation_generation_id="current-generation",
+        )
+        outcome = service.poll_once()["commands"][0]
+        self.assertFalse(outcome["ok"])
+        self.assertEqual(outcome["status"], "NAVIGATION_NOT_READY")
+        self.assertEqual(outcome["reasonCode"], "NAVIGATION_SNAPSHOT_MISSING")
+        self.assertEqual(navigation.commands, [])
+        self.assertEqual(
+            result_calls[0][1]["result"]["reason_code"],
+            "NAVIGATION_SNAPSHOT_MISSING",
+        )
+        self.assertFalse(result_calls[0][1]["result"]["ok"])
+
+    def test_lost_runtime_is_not_ready_and_rejects_queued_start(self) -> None:
+        navigation_status = json.loads(self.navigation.read_text(encoding="utf-8"))
+        navigation_status["edge_generation_id"] = "current-generation"
+        navigation_status["runtime"].update(
+            {
+                "state": "INTERRUPTED",
+                "reason": "NAV_RUNTIME_LOST",
+                "motionAuthorized": False,
+                "runtimeStatusStale": True,
+            }
+        )
+        self.navigation.write_text(
+            json.dumps(navigation_status), encoding="utf-8"
+        )
+        result_calls = []
+
+        def post_result(url, payload, timeout_s):
+            result_calls.append((url, payload, timeout_s))
+            return {"ok": True}
+
+        responses = ResponseQueue(
+            {
+                "ok": True,
+                "robotId": "LLYJ0001",
+                "commands": [{"id": 903, "action": "start_patrol", "params": {}}],
+            }
+        )
+        navigation = FakeNavigationClient()
+        service = self.service(
+            responses,
+            FakeInteractionClient(),
+            navigation,
+            post_result=post_result,
+            navigation_generation_id="current-generation",
+        )
+
+        outcome = service.poll_once()["commands"][0]
+        payload = responses.payloads[0]
+        self.assertFalse(payload["patrol"]["running"])
+        self.assertFalse(payload["patrol"]["navigationReady"])
+        self.assertEqual(payload["patrol"]["reason"], "NAV_RUNTIME_LOST")
+        self.assertEqual(
+            payload["patrol"]["navigationReasonCode"], "NAV_RUNTIME_LOST"
+        )
+        self.assertFalse(outcome["ok"])
+        self.assertEqual(outcome["status"], "NAVIGATION_NOT_READY")
+        self.assertEqual(outcome["reasonCode"], "NAV_RUNTIME_LOST")
+        self.assertEqual(navigation.commands, [])
+        self.assertEqual(
+            result_calls[0][1]["result"]["reason_code"], "NAV_RUNTIME_LOST"
+        )
+        persisted = json.loads(self.status.read_text(encoding="utf-8"))
+        self.assertFalse(persisted["navigationReady"])
+        self.assertEqual(persisted["navigationReasonCode"], "NAV_RUNTIME_LOST")
+
+    def test_evidence_transaction_capability_requires_explicit_gate(self) -> None:
+        payload = self.service(
+            ResponseQueue(),
+            FakeInteractionClient(),
+            evidence_transaction_enabled=True,
+        ).build_payload()
+        self.assertEqual(
+            payload["capabilities"]["evidenceTransaction"],
+            {
+                "supported": True,
+                "versions": [1],
+                "manifestSha256": "58230fa7782fb5c4921a5ba730eb359f06b56b57eff57494732caac341281eb0",
+            },
+        )
+
+    def test_mission_command_ack_distinguishes_queued_from_applied(self) -> None:
+        responses = ResponseQueue(
+            {
+                "ok": True,
+                "robotId": "LLYJ0001",
+                "commands": [
+                    {
+                        "id": 901,
+                        "action": "announcement_completed",
+                        "payload": {
+                            "schema": "gogoguard.announcement_completed.v1",
+                            "announcementId": "ann_901",
+                            "missionId": "mission-1",
+                            "checkpointId": "cp_01",
+                            "attempt": 1,
+                            "status": "completed",
+                        },
+                    }
+                ],
+            }
+        )
+        service = self.service(
+            responses,
+            FakeInteractionClient(),
+            mission_inbox_path=self.root / "checkpoint-inbox.jsonl",
+        )
+        outcome = service.poll_once()["commands"][0]
+        self.assertEqual(outcome["status"], "queued")
+        self.assertEqual(outcome["message"], "mission message validated and queued")
+        queued = json.loads(service.mission_inbox_path.read_text().strip())
+        self.assertEqual(queued["announcementId"], "ann_901")
+
+    def test_four_layer_identity_is_stable_across_edge_restart_boundaries(self) -> None:
+        boot_id_path = self.root / "boot_id"
+        boot_id_path.write_text("11111111-2222-4333-8444-555555555555\n", encoding="utf-8")
+        build_identity = {
+            "softwareVersion": "2.4.0",
+            "gitCommit": "abc1234",
+            "imageDigest": "sha256:" + "a" * 64,
+            "buildId": "field-20260823",
+        }
+        responses = ResponseQueue()
+        first = self.service(
+            responses,
+            FakeInteractionClient(),
+            boot_id_path=boot_id_path,
+            build_identity=build_identity,
+        ).build_payload()
+        second = self.service(
+            responses,
+            FakeInteractionClient(),
+            boot_id_path=boot_id_path,
+            build_identity=build_identity,
+        ).build_payload()
+        self.assertEqual(first["bootId"], second["bootId"])
+        self.assertNotEqual(first["edgeInstanceId"], second["edgeInstanceId"])
+        self.assertEqual(first["runtimeInstanceId"], "runtime-1234")
+        for field, value in build_identity.items():
+            self.assertEqual(first[field], value)
 
     def test_unknown_pose_and_battery_values_are_null_not_fake_zero(self) -> None:
         self.navigation.write_text(
@@ -514,6 +766,33 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertIsNone(requests[0]["authorization"])
         self.assertEqual(requests[0]["device_token"], "device-token")
         self.assertEqual(requests[0]["body"], {"robotId": "LLYJ0001"})
+
+    def test_real_http_adapter_preserves_safe_http_status_for_backoff(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, format: str, *args) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            poster = UrllibJsonPoster(allow_insecure_http=True)
+            with self.assertRaisesRegex(RuntimeError, "HTTP 401") as caught:
+                poster(
+                    f"http://127.0.0.1:{server.server_port}/heartbeat",
+                    {"robotId": "LLYJ0001"},
+                    2.0,
+                )
+            self.assertEqual(getattr(caught.exception, "code", None), 401)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_complete_platform_to_unix_to_interaction_state_flow(self) -> None:
         repository = Path(__file__).resolve().parents[1]

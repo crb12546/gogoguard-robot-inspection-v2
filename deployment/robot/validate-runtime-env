@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly RUNTIME_ENV=${1:-/etc/gogoguard/runtime.env}
+
+if [[ ! -f $RUNTIME_ENV ]]; then
+  echo "missing commissioned runtime environment: $RUNTIME_ENV" >&2
+  exit 2
+fi
+
+duplicate_key=$(awk -F= '
+  /^[A-Z][A-Z0-9_]*=/ { count[$1]++ }
+  END { for (key in count) if (count[key] > 1) { print key; exit } }
+' "$RUNTIME_ENV")
+if [[ -n $duplicate_key ]]; then
+  echo "duplicate runtime key is not allowed: $duplicate_key" >&2
+  exit 3
+fi
+
+runtime_value() {
+  local key=$1
+  sed -n "s/^${key}=//p" "$RUNTIME_ENV"
+}
+
+heartbeat_enabled=$(runtime_value GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED)
+robot_id=$(runtime_value GOGOGUARD_ROBOT_ID)
+device_token=$(runtime_value GOGOGUARD_DEVICE_TOKEN)
+
+if [[ $heartbeat_enabled == 1 ]]; then
+  if [[ ! $robot_id =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    echo "GOGOGUARD_ROBOT_ID must be explicitly commissioned before heartbeat starts" >&2
+    exit 4
+  fi
+  if [[ -z $device_token ]]; then
+    echo "GOGOGUARD_DEVICE_TOKEN must be commissioned before heartbeat starts" >&2
+    exit 5
+  fi
+  if [[ ! $device_token =~ ^[A-Za-z0-9._-]{16,}$ ]]; then
+    echo "GOGOGUARD_DEVICE_TOKEN has an invalid format" >&2
+    exit 5
+  fi
+fi
+
+unset device_token
+
+if [[ $RUNTIME_ENV == /etc/gogoguard/runtime.env ]]; then
+  ownership_and_mode=$(stat -c '%U:%G:%a' "$RUNTIME_ENV")
+  if [[ $ownership_and_mode != root:root:600 ]]; then
+    echo "runtime environment must be root:root mode 0600" >&2
+    exit 6
+  fi
+fi
+
+echo "GoGoGuard runtime environment: valid"

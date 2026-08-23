@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 from unittest import mock
 
-from gogoguard_navigation.supervisor import NavigationSupervisorServer, SupervisorService
+from gogoguard_navigation.supervisor import (
+    NavigationSupervisorServer,
+    OperationRegistry,
+    SupervisorService,
+)
 from gogoguard_navigation.supervisor_client import NavigationSupervisorClient
 from gogoguard_navigation.manager import NavigationManager
 
@@ -44,6 +48,23 @@ class FakeManager:
 
 
 class NavigationSupervisorTest(unittest.TestCase):
+    def test_mission_conflict_operation_has_machine_readable_error_code(self):
+        registry = OperationRegistry()
+
+        def conflict():
+            raise RuntimeError("MISSION_CONFLICT_ACTIVE")
+
+        receipt = registry.submit("patrol.start_selected", conflict)
+        deadline = time.time() + 1.0
+        operation = receipt
+        while time.time() < deadline:
+            operation = registry.snapshot()[0]
+            if operation["state"] == "failed":
+                break
+            time.sleep(0.01)
+        self.assertEqual(operation["state"], "failed")
+        self.assertEqual(operation["errorCode"], "MISSION_CONFLICT_ACTIVE")
+
     def test_selected_patrol_waits_for_current_runtime_generation(self):
         manager = NavigationManager.__new__(NavigationManager)
         candidate = {
@@ -113,7 +134,7 @@ class NavigationSupervisorTest(unittest.TestCase):
     def test_new_route_prepare_invalidates_old_bound_mission(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = NavigationManager(
-                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
             )
             old_mission = {
                 "schema": "gogoguard.navigation_mission.v1",
@@ -142,7 +163,7 @@ class NavigationSupervisorTest(unittest.TestCase):
     def test_plain_runtime_start_never_inherits_persisted_mission(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = NavigationManager(
-                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
             )
             manager._atomic_json(
                 manager.mission_path,
@@ -182,14 +203,14 @@ class NavigationSupervisorTest(unittest.TestCase):
             candidate,
             site_id="site",
             robot_id="robot",
-            sensor_id="sensor",
+            sensor_id="ARMCP6B0035634",
             log_root=Path("/tmp/logs"),
         )
         mission_bound = NavigationManager._launch_arguments(
             candidate,
             site_id="site",
             robot_id="robot",
-            sensor_id="sensor",
+            sensor_id="ARMCP6B0035634",
             log_root=Path("/tmp/logs"),
             mission_plan_path=Path("/tmp/mission.json"),
         )
@@ -233,7 +254,7 @@ class NavigationSupervisorTest(unittest.TestCase):
     def test_checkpoint_mission_is_bound_to_execution_route_and_360_spin(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = NavigationManager(
-                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
             )
             candidate = {
                 "map_version": "map-123456789abc",
@@ -266,11 +287,48 @@ class NavigationSupervisorTest(unittest.TestCase):
                     },
                 )
 
+    def test_evidence_transaction_mission_is_default_off_and_persisted_when_enabled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = NavigationManager(
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
+            )
+            candidate = {
+                "map_version": "map-123456789abc",
+                "route_id": "route-r1",
+                "workspace_revision": 6,
+                "execution_route_point_count": 100,
+            }
+            plan = {
+                "missionId": "mission-v1",
+                "mapVersion": "map-123456789abc",
+                "routeId": "route-r1",
+                "evidenceTransactionVersion": 1,
+                "checkpoints": [],
+            }
+            with mock.patch.dict(
+                "os.environ",
+                {"GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED": ""},
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "UNSUPPORTED_CONTRACT_VERSION"
+                ):
+                    manager._configure_mission(candidate, plan)
+            with mock.patch.dict(
+                "os.environ",
+                {"GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED": "1"},
+            ):
+                mission = manager._configure_mission(candidate, plan)
+            self.assertEqual(mission["evidenceTransactionVersion"], 1)
+            self.assertEqual(
+                json.loads(manager.mission_path.read_text())["evidenceTransactionVersion"],
+                1,
+            )
+
     def test_activated_checkpoint_asset_is_authoritative_for_route_and_pose(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manager = NavigationManager(
-                root, site_id="site", robot_id="robot", sensor_id="sensor"
+                root, site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
             )
             asset_path = root / "checkpoints.json"
             asset_path.write_text(
@@ -322,7 +380,7 @@ class NavigationSupervisorTest(unittest.TestCase):
     def test_local_checkpoint_control_is_scoped_and_writes_correlated_control(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = NavigationManager(
-                Path(temporary), site_id="site", robot_id="robot", sensor_id="sensor"
+                Path(temporary), site_id="site", robot_id="robot", sensor_id="ARMCP6B0035634"
             )
             manager.status = lambda: {
                 "runtime": {

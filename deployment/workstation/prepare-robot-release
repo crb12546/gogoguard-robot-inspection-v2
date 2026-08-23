@@ -20,6 +20,22 @@ command -v docker >/dev/null
 docker image inspect "$IMAGE" >/dev/null
 mkdir -p "$OUTPUT_DIRECTORY"
 
+software_version=$(awk -F'"' '/^version = "/ {print $2; exit}' "$REPOSITORY_ROOT/pyproject.toml")
+git_commit=$(git -C "$REPOSITORY_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
+if [[ $git_commit != unknown ]] && [[ -n $(git -C "$REPOSITORY_ROOT" status --porcelain) ]]; then
+  # The image digest remains the immutable deployment identity.  Preserve the
+  # source commit too, but never pretend a worktree build was byte-for-byte the
+  # clean commit when field work intentionally includes reviewed local changes.
+  git_commit="${git_commit}-dirty"
+fi
+image_digest=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+if [[ -z $software_version || -z $git_commit || -z $image_digest ]]; then
+  echo "release build identity is incomplete" >&2
+  exit 4
+fi
+digest_suffix=${image_digest#sha256:}
+build_id="edge-${git_commit:0:12}-${digest_suffix:0:12}"
+
 docker save --output "$OUTPUT_DIRECTORY/gogoguard-edge-image.tar" "$IMAGE"
 (
   cd "$OUTPUT_DIRECTORY"
@@ -27,13 +43,23 @@ docker save --output "$OUTPUT_DIRECTORY/gogoguard-edge-image.tar" "$IMAGE"
 )
 
 cp "$REPOSITORY_ROOT/deployment/robot/run-edge" "$OUTPUT_DIRECTORY/run-edge"
+cp "$REPOSITORY_ROOT/deployment/robot/commission-device-token" \
+  "$OUTPUT_DIRECTORY/commission-device-token"
 cp "$REPOSITORY_ROOT/deployment/robot/configure-combined-joint-test" \
   "$OUTPUT_DIRECTORY/configure-combined-joint-test"
+cp "$REPOSITORY_ROOT/deployment/robot/validate-runtime-env" \
+  "$OUTPUT_DIRECTORY/validate-runtime-env"
 cp "$REPOSITORY_ROOT/deployment/robot/wait-clock-sync" "$OUTPUT_DIRECTORY/wait-clock-sync"
 cp "$REPOSITORY_ROOT/deployment/robot/gogoguard-edge.service" "$OUTPUT_DIRECTORY/gogoguard-edge.service"
 cp "$REPOSITORY_ROOT/deployment/robot/install-release" "$OUTPUT_DIRECTORY/install-release"
 cp "$REPOSITORY_ROOT/deployment/robot/runtime.env.example" "$OUTPUT_DIRECTORY/runtime.env"
 cp "$REPOSITORY_ROOT/config/default.json" "$OUTPUT_DIRECTORY/runtime.json"
-printf 'GOGOGUARD_IMAGE=%s\n' "$IMAGE" > "$OUTPUT_DIRECTORY/release.env"
+printf '%s\n' \
+  "GOGOGUARD_IMAGE=$IMAGE" \
+  "GOGOGUARD_SOFTWARE_VERSION=$software_version" \
+  "GOGOGUARD_GIT_COMMIT=$git_commit" \
+  "GOGOGUARD_IMAGE_DIGEST=$image_digest" \
+  "GOGOGUARD_BUILD_ID=$build_id" \
+  > "$OUTPUT_DIRECTORY/release.env"
 
 echo "Prepared immutable robot release: $OUTPUT_DIRECTORY"

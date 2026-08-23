@@ -44,7 +44,7 @@ required = {
         "DETOURING", "REJOINING", "RETRYING", "RECOVERING",
         "SEARCHING_PATH", "activeController",
         "/navigation-workspace", "/glim-editor/start", "/glim-editor/publish",
-        "robotRadiusM", "allowedArea", "candidateGeneration >= 9",
+        "robotRadiusM", "allowedArea", "candidateGeneration >= 10",
         "/navigation-surface", "/navigation-plan-preview",
         "visibleNavigationSurfaceCells", "planPreviewResult",
         "candidate.workspace_hash === state.navigationWorkspace.workspaceHash",

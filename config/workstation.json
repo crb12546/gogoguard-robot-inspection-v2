@@ -1,6 +1,7 @@
 {
   "schema": "gogoguard.workstation_config.v1",
   "site_id": "local-first-site",
+  "sensor_id": "ARMCP6B0035634",
   "robot": {
     "base_url": "http://192.168.123.18:8080",
     "timeout_s": 3
@@ -15,6 +16,7 @@
     "base_url": "http://39.96.37.187/api/v1",
     "allow_insecure_http": true,
     "device_token_env": "GOGOGUARD_DEVICE_TOKEN",
+    "device_token_keychain_service": "com.gogoguard.field-workstation.device-token",
     "timeout_s": 30
   }
 }

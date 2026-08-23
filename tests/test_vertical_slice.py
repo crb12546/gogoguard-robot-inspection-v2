@@ -62,6 +62,7 @@ class VerticalSliceTest(unittest.TestCase):
         workspace = self.app.navigation_workspace(job_id)
         self.assertEqual(workspace["mapJobId"], job_id)
         self.assertGreaterEqual(len(workspace["route"]), 2)
+        self.assertEqual(workspace["recordedRoute"], workspace["route"])
 
     def test_rejects_two_active_recordings(self) -> None:
         self.app.start_recording()
@@ -92,6 +93,13 @@ class VerticalSliceTest(unittest.TestCase):
         sample = self.root / "recordings" / session["session_id"] / checkpoint["sampleFrames"][0]
         self.assertTrue(sample.read_bytes().startswith(b"\xff\xd8"))
         self.assertTrue(sample.read_bytes().endswith(b"\xff\xd9"))
+        sample_metadata = checkpoint["sampleFrameMetadata"][0]
+        self.assertEqual(sample_metadata["width"], 1)
+        self.assertEqual(sample_metadata["height"], 1)
+        self.assertEqual(sample_metadata["bytes"], sample.stat().st_size)
+        self.assertEqual(
+            sample_metadata["sha256"], hashlib.sha256(sample.read_bytes()).hexdigest()
+        )
         snapshots = [
             json.loads(line)
             for line in (
@@ -111,7 +119,18 @@ class VerticalSliceTest(unittest.TestCase):
             1,
         )
         self.app.maps = None
-        self.app.stop_recording(session["session_id"])
+        stopped = self.app.stop_recording(session["session_id"])
+        recording_manifest = json.loads(
+            Path(stopped["session"]["bundle_manifest"]).read_text(encoding="utf-8")
+        )
+        manifest_entry = next(
+            item
+            for item in recording_manifest["files"]
+            if item["path"] == checkpoint["sampleFrames"][0]
+        )
+        self.assertEqual(manifest_entry["width"], 1)
+        self.assertEqual(manifest_entry["height"], 1)
+        self.assertEqual(manifest_entry["mime"], "image/jpeg")
 
     def test_demo_gimbal_rejects_non_finite_and_out_of_range_angles(self) -> None:
         with self.assertRaisesRegex(ValueError, "supported range"):

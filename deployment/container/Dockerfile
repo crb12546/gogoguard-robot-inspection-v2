@@ -99,6 +99,7 @@ RUN mkdir -p /opt/gogoguard/ros_ws/src \
     && test -x install/lib/go2_cmd_vel_bridge/go2_sdk2_udp_receiver \
     && test -x install/lib/go2_cmd_vel_bridge/go2_vui_control \
     && test -x install/lib/go2_nav2_runtime/patrol_runtime_manager \
+    && test -x install/lib/go2_nav2_runtime/obstacle_cloud_filter \
     && rm -rf build log /tmp/gogoguard-owned
 
 # H.264 incident video is remuxed without decode or encode. Keep this runtime
@@ -133,7 +134,8 @@ COPY config /opt/gogoguard/app/config
 COPY deployment/container/edge-entrypoint /tmp/gogoguard-edge-entrypoint
 COPY deployment/container/interaction-requirements.txt /tmp/interaction-requirements.txt
 
-RUN python3 -m pip install --no-cache-dir -r /tmp/interaction-requirements.txt \
+RUN python3 -m pip install --no-cache-dir --timeout 600 --retries 10 \
+      -r /tmp/interaction-requirements.txt \
     && python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
     && install -m 0755 /tmp/gogoguard-edge-entrypoint /usr/local/bin/gogoguard-edge-entrypoint \
     && install -D -m 0755 \

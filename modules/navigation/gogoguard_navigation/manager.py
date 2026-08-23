@@ -12,7 +12,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from gogoguard_contracts import is_safe_external_id
+from gogoguard_contracts import (
+    EVIDENCE_TRANSACTION_VERSION,
+    is_safe_external_id,
+    verify_evidence_artifact,
+)
 from gogoguard_route import RouteManager
 from .profiles import DEFAULT_PROFILE, NavigationProfileStore, validate_profile
 
@@ -42,12 +46,15 @@ class NavigationManager:
         self.status_path = self.root / "status.json"
         self.selected_path = self.root / "selected-candidate.json"
         self.mission_path = self.root / "mission-plan.json"
+        self.mission_claim_path = self.root / "active-mission-claim.json"
         self.checkpoint_control_path = (
             self.data_root / "platform" / "checkpoint-control.json"
         )
         self.root.mkdir(parents=True, exist_ok=True)
         self.log_root.mkdir(parents=True, exist_ok=True)
-        self.routes = RouteManager(self.data_root, site_id=site_id)
+        self.routes = RouteManager(
+            self.data_root, site_id=site_id, sensor_id=sensor_id
+        )
         self.profiles = NavigationProfileStore(self.data_root)
         self._process: subprocess.Popen | None = None
         self._log_handle = None
@@ -57,6 +64,7 @@ class NavigationManager:
         self._last_receiver_exit: int | None = None
         self._candidate: dict[str, Any] | None = self._read_json(self.selected_path)
         self._launched_mission_hash: str | None = None
+        self._mission_persist_deferred = False
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -162,9 +170,9 @@ class NavigationManager:
             generation = int(candidate.get("candidate_generation") or 0)
         except (TypeError, ValueError):
             generation = 0
-        if generation < 9 or missing:
+        if generation < 10 or missing:
             raise RuntimeError(
-                "当前地图与路线是旧版本，还没有经过复核的静态导航地图；"
+                "当前地图与路线是旧版本，还没有完成传感器轨迹到机身轨迹的校正；"
                 "请在 Mac 工作台确认红色障碍和绿色可走区后，"
                 "重新点击“发布所选地图与路线到机器狗”"
             )
@@ -553,20 +561,53 @@ class NavigationManager:
         if not 5.0 <= float(readiness_timeout_s) <= 300.0:
             raise ValueError("navigation readiness timeout is outside 5..300 seconds")
 
-        mission = self._configure_mission(candidate, mission_plan)
+        self._mission_persist_deferred = True
+        try:
+            mission = self._configure_mission(candidate, mission_plan)
+        finally:
+            self._mission_persist_deferred = False
         status = self.status()
         previous_runtime = status.get("runtime")
         previous_runtime = previous_runtime if isinstance(previous_runtime, dict) else {}
+        claim_path = getattr(self, "mission_claim_path", None)
+        claim_snapshot = self._read_json(claim_path) if claim_path is not None else {}
+        claim_snapshot = claim_snapshot or {}
+        if (
+            claim_snapshot.get("state") != "active"
+            and self._plain_idle_runtime_can_reload_mission(status)
+        ):
+            release = self.stop_runtime()
+            if release.get("remoteControlReleased") is not True:
+                raise RuntimeError(
+                    "空闲定位运行时未完整释放运动控制，未加载巡检任务"
+                )
+            status = self.status()
+            if status.get("runtime_process", {}).get("running"):
+                raise RuntimeError("空闲定位运行时未停止，未加载巡检任务")
+        claim = self._claim_mission(
+            mission,
+            runtime_running=bool(status.get("runtime_process", {}).get("running")),
+        )
+        if claim["duplicate"]:
+            runtime = status.get("runtime")
+            runtime = runtime if isinstance(runtime, dict) else {}
+            return {
+                "schema": "gogoguard.selected_patrol_start.v1",
+                "mapVersion": candidate["map_version"],
+                "routeId": candidate["route_id"],
+                "missionId": mission["missionId"],
+                "checkpointCount": len(mission["checkpoints"]),
+                "accepted": True,
+                "duplicate": True,
+                "runtimeRunning": bool(
+                    status.get("runtime_process", {}).get("running")
+                ),
+                "runtimeState": runtime.get("state"),
+            }
         previous_runtime_instance_id = str(
             previous_runtime.get("runtimeInstanceId") or ""
         )
         require_new_runtime_generation = False
-        if (
-            status.get("runtime_process", {}).get("running")
-            and self._launched_mission_hash != mission["missionHash"]
-        ):
-            self.stop_runtime()
-            status = self.status()
         if not status.get("runtime_process", {}).get("running"):
             require_new_runtime_generation = True
             self.start_runtime(str(candidate["candidate_id"]), mission=mission)
@@ -610,6 +651,7 @@ class NavigationManager:
                     "missionId": mission["missionId"],
                     "checkpointCount": len(mission["checkpoints"]),
                     "accepted": True,
+                    "duplicate": False,
                     "nav2": result,
                 }
             time.sleep(0.1)
@@ -617,6 +659,33 @@ class NavigationManager:
             "等待定位与代价地图就绪超时："
             f"localization={last_localization_reason}, costmap={last_costmap_reason}；"
             "未向机器狗提交巡检"
+        )
+
+    @staticmethod
+    def _plain_idle_runtime_can_reload_mission(status: dict[str, Any]) -> bool:
+        """Return true only for a proven mission-free, non-moving generation.
+
+        The workstation intentionally starts fixed-map localization before it
+        creates a local checkpoint mission.  Mission plans are launch-time
+        inputs, so that plain generation must be replaced before patrol starts.
+        An active/malformed/partially observed generation is never inferred to
+        be safe and remains protected by the durable mission-claim checks.
+        """
+        if not status.get("runtime_process", {}).get("running"):
+            return False
+        runtime = status.get("runtime")
+        runtime = runtime if isinstance(runtime, dict) else {}
+        checkpoint = runtime.get("checkpoint")
+        checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        checkpoint_count = checkpoint.get("checkpointCount")
+        return (
+            str(runtime.get("state") or "") in {"BOOTING", "POSITIONING", "READY"}
+            and runtime.get("motionAuthorized") is False
+            and not str(checkpoint.get("missionId") or "")
+            and not str(checkpoint.get("missionHash") or "")
+            and isinstance(checkpoint_count, int)
+            and not isinstance(checkpoint_count, bool)
+            and checkpoint_count == 0
         )
 
     def _configure_mission(
@@ -641,6 +710,22 @@ class NavigationManager:
         decision_mode = str(mission_plan.get("decisionMode") or "platform")
         if decision_mode not in {"platform", "local_operator"}:
             raise ValueError("decisionMode must be platform or local_operator")
+        evidence_version = mission_plan.get("evidenceTransactionVersion")
+        if evidence_version is not None:
+            if (
+                isinstance(evidence_version, bool)
+                or not isinstance(evidence_version, int)
+                or evidence_version != EVIDENCE_TRANSACTION_VERSION
+            ):
+                raise RuntimeError("UNSUPPORTED_CONTRACT_VERSION")
+            evidence_enabled = (
+                os.environ.get(
+                    "GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED", ""
+                ).strip()
+                == "1"
+            )
+            if not evidence_enabled or not verify_evidence_artifact():
+                raise RuntimeError("UNSUPPORTED_CONTRACT_VERSION")
         checkpoints = mission_plan.get("checkpoints", [])
         if not isinstance(checkpoints, list) or len(checkpoints) > 256:
             raise ValueError("mission checkpoints must be a list of at most 256 items")
@@ -746,13 +831,90 @@ class NavigationManager:
             "maxRetakeAttempts": max_retakes,
             "checkpoints": normalized,
         }
+        if evidence_version is not None:
+            canonical["evidenceTransactionVersion"] = evidence_version
         canonical["missionHash"] = hashlib.sha256(
             json.dumps(
                 canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")
         ).hexdigest()
-        self._atomic_json(self.mission_path, canonical)
+        if not getattr(self, "_mission_persist_deferred", False):
+            self._atomic_json(self.mission_path, canonical)
         return canonical
+
+    def _claim_mission(
+        self,
+        mission: dict[str, Any],
+        *,
+        runtime_running: bool,
+    ) -> dict[str, Any]:
+        mission_id = str(mission["missionId"])
+        mission_hash = str(mission["missionHash"])
+        claim_path = getattr(self, "mission_claim_path", None)
+        if claim_path is None or not hasattr(self, "_lock"):
+            # Lightweight compatibility harnesses constructed with __new__ do
+            # not own a durable navigation root. Production instances always
+            # initialize both fields in __init__.
+            return {"duplicate": False, "claim": None}
+        with self._lock:
+            claim = self._read_json(claim_path) or {}
+            if claim.get("state") != "active" and runtime_running:
+                persisted = self._read_json(self.mission_path) or {}
+                active_hash = str(
+                    self._launched_mission_hash
+                    or persisted.get("missionHash")
+                    or ""
+                )
+                active_id = str(persisted.get("missionId") or mission_id)
+                if active_hash:
+                    claim = {
+                        "schema": "gogoguard.active_mission_claim.v1",
+                        "missionId": active_id,
+                        "missionHash": active_hash,
+                        "state": "active",
+                        "claimedAt": time.time(),
+                        "recoveredFromRuntime": True,
+                    }
+                    self._atomic_json(claim_path, claim)
+            if claim.get("state") == "active":
+                claimed_id = str(claim.get("missionId") or "")
+                claimed_hash = str(claim.get("missionHash") or "")
+                if claimed_id == mission_id and claimed_hash == mission_hash:
+                    return {"duplicate": True, "claim": claim}
+                if claimed_id == mission_id:
+                    raise RuntimeError("MISSION_CONFLICT_MUTATED")
+                raise RuntimeError("MISSION_CONFLICT_ACTIVE")
+            # Persist the exact mission before publishing the claim.  A crash
+            # can therefore leave an unclaimed plan, never a claim whose plan
+            # is absent or belongs to another hash.
+            self._atomic_json(self.mission_path, mission)
+            claim = {
+                "schema": "gogoguard.active_mission_claim.v1",
+                "missionId": mission_id,
+                "missionHash": mission_hash,
+                "state": "active",
+                "claimedAt": time.time(),
+                "remoteControlReleased": False,
+            }
+            self._atomic_json(claim_path, claim)
+            return {"duplicate": False, "claim": claim}
+
+    def _release_mission_claim(self) -> None:
+        claim_path = getattr(self, "mission_claim_path", None)
+        if claim_path is None:
+            return
+        with self._lock:
+            claim = self._read_json(Path(claim_path)) or {}
+            if claim.get("state") != "active":
+                return
+            claim.update(
+                {
+                    "state": "released",
+                    "releasedAt": time.time(),
+                    "remoteControlReleased": True,
+                }
+            )
+            self._atomic_json(Path(claim_path), claim)
 
     def checkpoint_control(self, action: str) -> dict[str, Any]:
         """Apply an operator verdict to an active local checkpoint only."""
@@ -956,6 +1118,8 @@ class NavigationManager:
             receiver_process is None or receiver_process.poll() is not None
         )
         remote_control_released = runtime_stopped and bridge_stopped
+        if remote_control_released:
+            self._release_mission_claim()
         return {
             "schema": "gogoguard.motion_release.v1",
             "success": remote_control_released,

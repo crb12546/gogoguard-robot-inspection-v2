@@ -417,7 +417,10 @@ class LiveKitGo2Transport:
             handler = self._wake_transcript_handler
             if handler is None:
                 return False
-            result = handler({"action": "wake_transcript", "text": text})
+            forwarded = {"action": "wake_transcript", "text": text}
+            if payload.get("eventId") is not None:
+                forwarded["eventId"] = payload["eventId"]
+            result = handler(forwarded)
             if (
                 isinstance(result, dict)
                 and result.get("accepted") is True

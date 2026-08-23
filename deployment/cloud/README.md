@@ -23,6 +23,18 @@ emits `GOGOGUARD_PROGRESS <percent> <stage> <message>` markers; the Mac
 workstation forwards those real cloud stages to the browser instead of showing
 a fixed percentage.
 
+The route exported in `map.json` must cover the sealed recording start, not
+merely the first pose that GLIM later decides is optimizable. If GLIM's first
+optimized pose is more than 0.5 seconds after `session.started_at`, the cloud
+exporter timestamp-matches the overlapping recording pose samples to the GLIM
+timeline, fits one bounded planar rigid transform, converts and prepends the
+missing prefix, and emits `routeCoverage` in both `map.json` and
+`trajectory-poses.json`. The optimized quaternion timeline itself remains
+unchanged and authoritative for checkpoint binding. Too few synchronized
+samples, excessive fit residual, an unsafe join gap, or a route start outside
+the 0.5-second recording boundary fails the cloud job instead of publishing a
+truncated patrol route. The Mac repeats this validation after download.
+
 `gogoguard-glim-editor` adds an isolated review session around GLIM's official
 `map_editor`. Each session copies the immutable source dump, runs as the
 unprivileged `go2mapping` user, and binds x11vnc/noVNC only to cloud loopback.

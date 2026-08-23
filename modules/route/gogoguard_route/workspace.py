@@ -10,12 +10,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from gogoguard_calibration import (
+    MountCalibration,
+    load_commissioned_mount_calibration,
+)
+
+from .pose_frames import (
+    BASE_POSE_FRAME,
+    LIDAR_POSE_FRAME,
+    POSE_FRAMES,
+    artifact_pose_frame,
+    planar_trajectory_to_base,
+)
+
 
 SAFE_MAP_ID = re.compile(r"^map-[A-Za-z0-9]{12}$")
 WORKSPACE_SCHEMA = "gogoguard.navigation_workspace.v2"
 LEGACY_WORKSPACE_SCHEMA = "gogoguard.navigation_workspace.v1"
 NAVIGATION_SURFACE_SCHEMA = "gogoguard.navigation_surface_edit.v1"
 DEFAULT_ROBOT_RADIUS_M = 0.48
+# Must remain identical to the padded hard envelope in go2_nav2_patrol.yaml.
+PADDED_BASE_FOOTPRINT_M = (
+    (0.50, 0.30),
+    (0.50, -0.30),
+    (-0.43, -0.30),
+    (-0.43, 0.30),
+)
+PADDED_FOOTPRINT_RADIUS_M = max(math.hypot(x, y) for x, y in PADDED_BASE_FOOTPRINT_M)
 DEFAULT_SURFACE_RESOLUTION_M = 0.10
 DEFAULT_OBSTACLE_MIN_Z = 0.05
 DEFAULT_OBSTACLE_MAX_Z = 1.80
@@ -27,6 +48,7 @@ GROUND_INTERPOLATION_RADIUS_M = 1.20
 MAX_ROUTE_POINTS = 5000
 MAX_BOUNDARY_POINTS = 1000
 MAX_MANUAL_SURFACE_CELLS = 50000
+DEFAULT_SENSOR_ID = "ARMCP6B0035634"
 
 
 class NavigationWorkspaceError(ValueError):
@@ -336,6 +358,49 @@ def _sample_segment(
         )
 
 
+def _route_pose_samples(
+    route: Sequence[tuple[float, float]], spacing_m: float
+) -> Iterable[tuple[float, float, float]]:
+    for start, end in zip(route, route[1:]):
+        yaw = math.atan2(end[1] - start[1], end[0] - start[0])
+        for x, y in _sample_segment(start, end, spacing_m):
+            yield x, y, yaw
+
+
+def _footprint_polygon(
+    x: float, y: float, yaw: float
+) -> list[tuple[float, float]]:
+    cosine, sine = math.cos(yaw), math.sin(yaw)
+    return [
+        (
+            x + cosine * local_x - sine * local_y,
+            y + sine * local_x + cosine * local_y,
+        )
+        for local_x, local_y in PADDED_BASE_FOOTPRINT_M
+    ]
+
+
+def _route_footprint_cells(
+    route: Sequence[tuple[float, float]], resolution: float
+) -> set[tuple[int, int]]:
+    cells: set[tuple[int, int]] = set()
+    for x, y, yaw in _route_pose_samples(route, resolution / 2.0):
+        footprint = _footprint_polygon(x, y, yaw)
+        minimum_x = math.floor(min(point[0] for point in footprint) / resolution)
+        maximum_x = math.floor(max(point[0] for point in footprint) / resolution)
+        minimum_y = math.floor(min(point[1] for point in footprint) / resolution)
+        maximum_y = math.floor(max(point[1] for point in footprint) / resolution)
+        for cell_x in range(minimum_x, maximum_x + 1):
+            for cell_y in range(minimum_y, maximum_y + 1):
+                center = (
+                    (cell_x + 0.5) * resolution,
+                    (cell_y + 0.5) * resolution,
+                )
+                if _point_in_polygon(center, footprint):
+                    cells.add((cell_x, cell_y))
+    return cells
+
+
 def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise NavigationWorkspaceError("navigation workspace must be an object")
@@ -362,6 +427,16 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
         raise NavigationWorkspaceError(
             "review and save the static navigation map before publishing"
         )
+    route_pose_frame = str(payload.get("routePoseFrame") or BASE_POSE_FRAME)
+    if route_pose_frame != BASE_POSE_FRAME:
+        raise NavigationWorkspaceError(
+            "navigation workspace route must be expressed in base_link poses"
+        )
+    source_pose_frame = str(
+        payload.get("sourceTrajectoryPoseFrame") or BASE_POSE_FRAME
+    )
+    if source_pose_frame not in POSE_FRAMES:
+        raise NavigationWorkspaceError("source trajectory pose frame is invalid")
     if allowed_area is not None:
         polygon = [(value[0], value[1]) for value in allowed_area]
         route_values = [(value[0], value[1]) for value in route]
@@ -378,6 +453,14 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
                 raise NavigationWorkspaceError(
                     "the blue route is closer to the green boundary than the robot radius"
                 )
+        for x, y, yaw in _route_pose_samples(route_values, 0.10):
+            if any(
+                not _point_in_polygon(corner, polygon)
+                for corner in _footprint_polygon(x, y, yaw)
+            ):
+                raise NavigationWorkspaceError(
+                    "the padded rectangular robot footprint leaves the green allowed area"
+                )
     normalized = {
         "schema": WORKSPACE_SCHEMA,
         "mapJobId": map_job_id,
@@ -386,6 +469,10 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
         "routeSource": (
             "recorded" if payload.get("routeSource") == "recorded" else "edited"
         ),
+        "routePoseFrame": route_pose_frame,
+        "sourceTrajectoryPoseFrame": source_pose_frame,
+        "mountCalibrationId": str(payload.get("mountCalibrationId") or ""),
+        "mountCalibrationSha256": str(payload.get("mountCalibrationSha256") or ""),
         "route": route,
         "allowedArea": allowed_area,
         "robotRadiusM": radius,
@@ -403,8 +490,70 @@ def validate_workspace(payload: dict[str, Any], *, require_ready: bool = False) 
 class NavigationWorkspaceStore:
     """Version editable route data beside, never inside, immutable GLIM artifacts."""
 
-    def __init__(self, data_root: Path) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        *,
+        sensor_id: str = DEFAULT_SENSOR_ID,
+        mount_calibration: MountCalibration | None = None,
+    ) -> None:
         self.data_root = Path(data_root)
+        self.sensor_id = sensor_id
+        self.mount_calibration = mount_calibration or load_commissioned_mount_calibration(
+            sensor_id
+        )
+
+    def _artifact_pose_frame(self, job_id: str) -> str:
+        map_json = self._artifact_root(job_id) / "map.json"
+        artifact = json.loads(map_json.read_text(encoding="utf-8"))
+        try:
+            return artifact_pose_frame(artifact, legacy=LIDAR_POSE_FRAME)
+        except ValueError as exc:
+            raise NavigationWorkspaceError(str(exc)) from exc
+
+    def _normalize_route_frame(
+        self, job_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        value = dict(payload)
+        source_frame = str(
+            value.get("sourceTrajectoryPoseFrame") or self._artifact_pose_frame(job_id)
+        )
+        raw_frame = value.get("routePoseFrame")
+        route_frame = str(
+            raw_frame
+            or (
+                source_frame
+                if value.get("routeSource") == "recorded"
+                else BASE_POSE_FRAME
+            )
+        )
+        if source_frame not in POSE_FRAMES or route_frame not in POSE_FRAMES:
+            raise NavigationWorkspaceError("navigation workspace pose frame is invalid")
+        if route_frame == LIDAR_POSE_FRAME:
+            if value.get("routeSource") != "recorded":
+                raise NavigationWorkspaceError(
+                    "an edited route cannot be migrated from lidar_link implicitly"
+                )
+            try:
+                transformed = planar_trajectory_to_base(
+                    [[point[0], point[1], 0.0] for point in value.get("route") or []],
+                    pose_frame=LIDAR_POSE_FRAME,
+                    calibration=self.mount_calibration,
+                )
+            except (IndexError, TypeError, ValueError) as exc:
+                raise NavigationWorkspaceError(
+                    "legacy recorded route pose-frame migration failed"
+                ) from exc
+            value["route"] = [[point[0], point[1]] for point in transformed]
+        value.update(
+            {
+                "routePoseFrame": BASE_POSE_FRAME,
+                "sourceTrajectoryPoseFrame": source_frame,
+                "mountCalibrationId": self.mount_calibration.calibration_id,
+                "mountCalibrationSha256": self.mount_calibration.digest,
+            }
+        )
+        return value
 
     def _job_root(self, job_id: str) -> Path:
         if not SAFE_MAP_ID.fullmatch(job_id):
@@ -436,7 +585,8 @@ class NavigationWorkspaceStore:
             # but every subsequent update is written to the job root.
             path = self._legacy_path(job_id)
         if path.is_file():
-            value = validate_workspace(json.loads(path.read_text(encoding="utf-8")))
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            value = validate_workspace(self._normalize_route_frame(job_id, raw))
             map_json = self._artifact_root(job_id) / "map.json"
             if value.get("sourceMapSha256") != _file_hash(map_json):
                 raise NavigationWorkspaceError(
@@ -449,7 +599,43 @@ class NavigationWorkspaceStore:
         artifact_root = self._artifact_root(job_id)
         map_json = artifact_root / "map.json"
         artifact = json.loads(map_json.read_text(encoding="utf-8"))
-        route = _route_points(artifact.get("trajectory") or [])
+        trajectory = artifact.get("trajectory") or []
+        coverage = artifact.get("routeCoverage")
+        if coverage is not None:
+            try:
+                start = coverage["startMapPose"]
+                route_start_gap = float(coverage["routeStartGapSec"])
+                start_error = math.dist(
+                    (float(start["x"]), float(start["y"]), float(start["z"])),
+                    tuple(float(value) for value in trajectory[0][:3]),
+                )
+            except (KeyError, TypeError, ValueError, IndexError) as exc:
+                raise NavigationWorkspaceError(
+                    "map recording-route coverage is invalid"
+                ) from exc
+            if (
+                coverage.get("schema")
+                != "gogoguard.recording_route_coverage.v1"
+                or coverage.get("complete") is not True
+                or not math.isfinite(route_start_gap)
+                or not -0.5 <= route_start_gap <= 0.5
+                or start_error > 1e-6
+            ):
+                raise NavigationWorkspaceError(
+                    "map route does not cover the recording start"
+                )
+        try:
+            source_pose_frame = artifact_pose_frame(
+                artifact, legacy=LIDAR_POSE_FRAME
+            )
+            base_trajectory = planar_trajectory_to_base(
+                trajectory,
+                pose_frame=source_pose_frame,
+                calibration=self.mount_calibration,
+            )
+        except ValueError as exc:
+            raise NavigationWorkspaceError(str(exc)) from exc
+        route = _route_points(base_trajectory)
         return validate_workspace(
             {
                 "schema": WORKSPACE_SCHEMA,
@@ -457,6 +643,10 @@ class NavigationWorkspaceStore:
                 "mapVersion": job_id,
                 "revision": 0,
                 "routeSource": "recorded",
+                "routePoseFrame": BASE_POSE_FRAME,
+                "sourceTrajectoryPoseFrame": source_pose_frame,
+                "mountCalibrationId": self.mount_calibration.calibration_id,
+                "mountCalibrationSha256": self.mount_calibration.digest,
                 "route": route,
                 "allowedArea": None,
                 "robotRadiusM": DEFAULT_ROBOT_RADIUS_M,
@@ -484,6 +674,12 @@ class NavigationWorkspaceStore:
                 "mapVersion": job_id,
                 "revision": int(current.get("revision") or 0) + 1,
                 "sourceMapSha256": current["sourceMapSha256"],
+                "routePoseFrame": BASE_POSE_FRAME,
+                "sourceTrajectoryPoseFrame": current[
+                    "sourceTrajectoryPoseFrame"
+                ],
+                "mountCalibrationId": self.mount_calibration.calibration_id,
+                "mountCalibrationSha256": self.mount_calibration.digest,
                 "updatedAt": _utc_now(),
             }
         )
@@ -844,14 +1040,7 @@ def navigation_surface_cells(
     route_cleared: set[tuple[int, int]] = set()
     if value["routeSource"] == "recorded":
         route = [(point[0], point[1]) for point in value["route"]]
-        radius_cells = int(math.ceil(value["robotRadiusM"] / resolution))
-        for start, end in zip(route, route[1:]):
-            for point_x, point_y in _sample_segment(start, end, resolution / 2.0):
-                center = _surface_cell(point_x, point_y, resolution)
-                for dx in range(-radius_cells, radius_cells + 1):
-                    for dy in range(-radius_cells, radius_cells + 1):
-                        if math.hypot(dx, dy) * resolution <= value["robotRadiusM"]:
-                            route_cleared.add((center[0] + dx, center[1] + dy))
+        route_cleared = _route_footprint_cells(route, resolution)
         automatic -= route_cleared
     manual_clear = {tuple(cell) for cell in surface["manualClearCells"]}
     manual_blocked = {tuple(cell) for cell in surface["manualBlockedCells"]}
@@ -927,6 +1116,15 @@ def write_static_navigation_map(
     ) = _raster_bounds(value, cloud)
     surface = navigation_surface_cells(value, cloud)
     occupied = {tuple(cell) for cell in surface["occupiedCells"]}
+    route = [(point[0], point[1]) for point in value["route"]]
+    footprint_cells = _route_footprint_cells(
+        route, float(value["navigationSurface"]["resolutionM"])
+    )
+    conflicts = occupied & footprint_cells
+    if conflicts:
+        raise NavigationWorkspaceError(
+            "the padded rectangular robot footprint intersects the reviewed static map"
+        )
     pixels = bytearray(width * height)
     for row in range(height):
         world_y = maximum_y - (row + 0.5) * resolution
@@ -966,6 +1164,11 @@ def write_static_navigation_map(
     metadata = {
         "schema": "gogoguard.static_navigation_map.v1",
         "frame": "map",
+        "routePoseFrame": value["routePoseFrame"],
+        "paddedBaseFootprintM": [list(point) for point in PADDED_BASE_FOOTPRINT_M],
+        "sourceTrajectoryPoseFrame": value["sourceTrajectoryPoseFrame"],
+        "mountCalibrationId": value["mountCalibrationId"],
+        "mountCalibrationSha256": value["mountCalibrationSha256"],
         "width": width,
         "height": height,
         "resolutionM": resolution,
@@ -974,6 +1177,10 @@ def write_static_navigation_map(
         "obstacleMaxZ": value["navigationSurface"]["obstacleMaxZ"],
         "automaticCellCount": surface["stats"]["automaticCellCount"],
         "occupiedCellCount": surface["stats"]["occupiedCellCount"],
+        "recordedCorridorClearCellCount": surface["stats"][
+            "recordedCorridorClearCellCount"
+        ],
+        "routeFootprintConflictCellCount": 0,
         "workspaceHash": value["workspaceHash"],
     }
     _atomic_json(output_root / "navigation-map.json", metadata)
@@ -1002,12 +1209,12 @@ def plan_navigation_preview(
     surface = navigation_surface_cells(value, map_points)
     resolution = float(surface["resolutionM"])
     occupied = {tuple(cell) for cell in surface["occupiedCells"]}
-    radius_cells = int(math.ceil(float(value["robotRadiusM"]) / resolution))
+    radius_cells = int(math.ceil(PADDED_FOOTPRINT_RADIUS_M / resolution))
     inflated: set[tuple[int, int]] = set()
     for cell_x, cell_y in occupied:
         for dx in range(-radius_cells, radius_cells + 1):
             for dy in range(-radius_cells, radius_cells + 1):
-                if math.hypot(dx, dy) * resolution <= value["robotRadiusM"]:
+                if math.hypot(dx, dy) * resolution <= PADDED_FOOTPRINT_RADIUS_M:
                     inflated.add((cell_x + dx, cell_y + dy))
     minimum_x = min(point[0] for point in polygon)
     maximum_x = max(point[0] for point in polygon)
@@ -1027,12 +1234,12 @@ def plan_navigation_preview(
             and min_cell[1] <= cell[1] <= max_cell[1]
             and _point_in_polygon(world, polygon)
             and _distance_to_boundary(world, polygon) + 1.0e-6
-            >= value["robotRadiusM"]
+            >= PADDED_FOOTPRINT_RADIUS_M
         )
 
     if not traversable(start_cell) or not traversable(goal_cell):
         raise NavigationWorkspaceError(
-            "preview start or goal has no room for the robot's 0.48m body"
+            "preview start or goal has no room for the padded robot footprint"
         )
     import heapq
 

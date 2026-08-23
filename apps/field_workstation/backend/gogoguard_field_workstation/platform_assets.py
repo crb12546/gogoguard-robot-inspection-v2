@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import hashlib
+import getpass
 import os
+import platform
 import ssl
+import subprocess
 import tempfile
 import threading
 import time
@@ -60,7 +63,18 @@ class PlatformAssetUploader:
         if parsed.scheme == "http" and allow_http is not True:
             raise ValueError("platform asset HTTP requires allow_insecure_http=true")
         self.token_env = str(config.get("device_token_env") or "GOGOGUARD_DEVICE_TOKEN")
+        self.token_keychain_service = str(
+            config.get("device_token_keychain_service")
+            or "com.gogoguard.field-workstation.device-token"
+        )
+        self.token_keychain_account = str(
+            config.get("device_token_keychain_account")
+            or os.environ.get("USER")
+            or getpass.getuser()
+        )
         self.timeout_s = float(config.get("timeout_s") or 30.0)
+        self._keychain_token: str | None = None
+        self._keychain_checked = False
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
 
@@ -86,9 +100,10 @@ class PlatformAssetUploader:
             or _file_hash(archive) != str(descriptor.get("archiveSha256") or "")
         ):
             raise PlatformAssetUploadError("platform bundle changed after it was exported")
-        if not os.environ.get(self.token_env, ""):
+        if not self._device_token():
             raise PlatformAssetUploadError(
-                f"platform device token is unavailable in {self.token_env}"
+                "platform device token is unavailable in the process environment "
+                "or commissioned macOS Keychain"
             )
         with self._lock:
             thread = self._threads.get(job_id)
@@ -261,7 +276,7 @@ class PlatformAssetUploader:
         *,
         raw: bytes | None = None,
     ) -> dict[str, Any]:
-        token = os.environ.get(self.token_env, "")
+        token = self._device_token()
         if not token:
             raise PlatformAssetUploadError("platform device token is unavailable")
         content = raw
@@ -282,18 +297,59 @@ class PlatformAssetUploader:
                     raise PlatformAssetUploadError("platform returned a non-object response")
                 return value
             except HTTPError as exc:
+                code = int(exc.code)
                 try:
                     detail = json.loads(exc.read().decode("utf-8"))
                     message = detail.get("error") or detail.get("reason")
                 except (ValueError, UnicodeDecodeError):
                     message = None
-                if exc.code < 500:
-                    raise PlatformAssetUploadError(message or f"platform returned HTTP {exc.code}") from exc
+                finally:
+                    exc.close()
+                if code < 500:
+                    raise PlatformAssetUploadError(message or f"platform returned HTTP {code}") from exc
                 last_error = exc
             except (URLError, TimeoutError) as exc:
                 last_error = exc
             time.sleep(min(0.25 * (2**attempt), 2.0))
         raise PlatformAssetUploadError("platform asset transfer failed after retries") from last_error
+
+    def _device_token(self) -> str:
+        """Resolve a process override first, then the commissioned Mac keychain.
+
+        Native workstation restarts must not depend on a terminal remembering
+        to export a credential.  Linux/container deployments retain the
+        explicit environment-only boundary and never attempt a host keychain.
+        """
+        token = os.environ.get(self.token_env, "")
+        if token:
+            return token
+        if self._keychain_checked:
+            return self._keychain_token or ""
+        self._keychain_checked = True
+        if platform.system() != "Darwin" or not Path("/usr/bin/security").is_file():
+            return ""
+        try:
+            completed = subprocess.run(
+                [
+                    "/usr/bin/security",
+                    "find-generic-password",
+                    "-a",
+                    self.token_keychain_account,
+                    "-s",
+                    self.token_keychain_service,
+                    "-w",
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if completed.returncode == 0:
+            self._keychain_token = completed.stdout.rstrip("\r\n") or None
+        return self._keychain_token or ""
 
     def _write(self, job_id: str, **updates: Any) -> None:
         value = self.status(job_id)

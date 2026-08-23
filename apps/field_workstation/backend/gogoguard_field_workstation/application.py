@@ -25,11 +25,13 @@ class FieldWorkstationApplication:
         cloud: dict,
         map_worker: str = "ssh",
         site_id: str = "local-first-site",
+        sensor_id: str = "ARMCP6B0035634",
         platform: dict | None = None,
     ) -> None:
         self.data_root = Path(data_root)
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.site_id = site_id
+        self.sensor_id = sensor_id
         self.robot = RobotClient(
             str(robot.get("base_url") or "http://192.168.123.18:8080"),
             timeout_s=float(robot.get("timeout_s") or 10.0),
@@ -39,8 +41,12 @@ class FieldWorkstationApplication:
         self.glim_editor = GlimEditorManager(
             self.data_root, self.maps, map_worker, cloud
         )
-        self.navigation_workspaces = NavigationWorkspaceStore(self.data_root)
-        self.routes = RouteManager(self.data_root, site_id=self.site_id)
+        self.navigation_workspaces = NavigationWorkspaceStore(
+            self.data_root, sensor_id=self.sensor_id
+        )
+        self.routes = RouteManager(
+            self.data_root, site_id=self.site_id, sensor_id=self.sensor_id
+        )
         self.platform_assets = PlatformAssetUploader(self.data_root, platform)
         self.catalog_path = self.data_root / "catalog.json"
         self._catalog_lock = threading.Lock()

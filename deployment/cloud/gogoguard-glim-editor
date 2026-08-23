@@ -159,6 +159,8 @@ case "$COMMAND" in
       --trajectory "$map_root/traj_lidar.txt" \
       --output "$OUTPUT_STAGING" \
       --source-job "$source_job" \
+      --session "/opt/go2/jobs/$source_job/input/session.json" \
+      --snapshots "/opt/go2/jobs/$source_job/input/samples/snapshots.jsonl" \
       --editor-session "$SESSION_ID"
     rm "$OUTPUT_STAGING/exported-map.ply"
     chmod -R a-w "$OUTPUT_STAGING"

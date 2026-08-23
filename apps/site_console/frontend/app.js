@@ -49,6 +49,16 @@ const state = {
   },
 };
 
+// Must remain identical to the padded hard envelope in go2_nav2_patrol.yaml
+// and gogoguard_route.workspace. It is intentionally not a display-only
+// circle: route clearing and review must use the same body polygon as Nav2.
+const PADDED_BASE_FOOTPRINT_M = [
+  [0.50, 0.30],
+  [0.50, -0.30],
+  [-0.43, -0.30],
+  [-0.43, 0.30],
+];
+
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(
   /[&<>"]/g,
@@ -1119,17 +1129,9 @@ function drawWorkspace() {
 }
 
 function recordedWorkspaceRoute() {
-  const raw = (state.mapArtifact?.trajectory || []).map(point => [Number(point[0]), Number(point[1])]);
-  if (raw.length < 2) return [];
-  const sampled = [raw[0]];
-  for (const point of raw.slice(1)) {
-    const last = sampled[sampled.length - 1];
-    if (Math.hypot(point[0] - last[0], point[1] - last[1]) >= 0.4) sampled.push(point);
-  }
-  const last = raw[raw.length - 1];
-  const sampledLast = sampled[sampled.length - 1];
-  if (Math.hypot(last[0] - sampledLast[0], last[1] - sampledLast[1]) >= 0.1) sampled.push(last);
-  return sampled;
+  return (state.navigationWorkspace?.recordedRoute || []).map(point => [
+    Number(point[0]), Number(point[1]),
+  ]);
 }
 
 function renderWorkspaceControls() {
@@ -1163,7 +1165,7 @@ function renderWorkspaceControls() {
   $('workspaceHelp').textContent = state.workspaceEditMode === 'route'
       ? '请在地图上依次点击推荐路线点；蓝线保留巡检顺序，狗端由 Nav2 规划实际可走路径。'
     : state.workspaceEditMode === 'area'
-      ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。蓝线与边界至少留出 0.48 m。'
+      ? '请沿允许行走区域的外边界依次点击；保存时会自动闭合。系统会按与 Nav2 一致的前 0.50 m、后 0.43 m、左右各 0.30 m 加垫矩形校验蓝线。'
       : state.workspaceEditMode === 'blocked'
         ? '已进入补画模式：在地图上按住鼠标拖动，表示这里固定不可走。'
         : state.workspaceEditMode === 'clear'
@@ -1226,6 +1228,7 @@ function renderCheckpointAudit() {
   $('checkpointAudit').className = audit.audit?.ready ? 'ok' : 'warn';
   $('checkpointAuditList').innerHTML = (audit.checkpoints || []).map(item => `<div class="checkpoint-item"><span><b>${escapeHtml(item.checkpointId)}</b> · 路线索引 ${item.routeProgressIndex}<br>距路线 ${Number(item.binding?.distanceToExecutionRouteM || 0).toFixed(2)} m · pan ${Number(item.camera?.pan || 0).toFixed(1)}° / tilt ${Number(item.camera?.tilt || 0).toFixed(1)}°</span><b>${item.binding?.needsReview ? '待复核' : '已对齐'}</b></div>`).join('') || '<small>本次录制没有标记巡检点，仍可发布纯路线。</small>';
   drawWorkspace();
+  drawNavigation();
 }
 
 async function refreshCheckpointAudit() {
@@ -1428,6 +1431,56 @@ function syncSurfaceControls() {
 
 function surfaceCellKey(cell) { return `${cell[0]},${cell[1]}`; }
 
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  let previous = polygon.at(-1);
+  for (const current of polygon) {
+    const crosses = (current[1] > point[1]) !== (previous[1] > point[1]);
+    if (crosses) {
+      const intersectionX = (
+        (previous[0] - current[0]) * (point[1] - current[1])
+        / (previous[1] - current[1]) + current[0]
+      );
+      if (point[0] <= intersectionX) inside = !inside;
+    }
+    previous = current;
+  }
+  return inside;
+}
+
+function recordedRouteFootprintCells(route, resolution) {
+  const cells = new Set();
+  for (let segment = 0; segment + 1 < route.length; segment += 1) {
+    const start = route[segment];
+    const end = route[segment + 1];
+    const distance = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    const steps = Math.max(1, Math.ceil(distance / (resolution / 2)));
+    const yaw = Math.atan2(end[1] - start[1], end[0] - start[0]);
+    const cosine = Math.cos(yaw);
+    const sine = Math.sin(yaw);
+    for (let step = 0; step <= steps; step += 1) {
+      const ratio = step / steps;
+      const x = start[0] + (end[0] - start[0]) * ratio;
+      const y = start[1] + (end[1] - start[1]) * ratio;
+      const footprint = PADDED_BASE_FOOTPRINT_M.map(([localX, localY]) => [
+        x + cosine * localX - sine * localY,
+        y + sine * localX + cosine * localY,
+      ]);
+      const minimumX = Math.floor(Math.min(...footprint.map(point => point[0])) / resolution);
+      const maximumX = Math.floor(Math.max(...footprint.map(point => point[0])) / resolution);
+      const minimumY = Math.floor(Math.min(...footprint.map(point => point[1])) / resolution);
+      const maximumY = Math.floor(Math.max(...footprint.map(point => point[1])) / resolution);
+      for (let cellX = minimumX; cellX <= maximumX; cellX += 1) {
+        for (let cellY = minimumY; cellY <= maximumY; cellY += 1) {
+          const center = [(cellX + 0.5) * resolution, (cellY + 0.5) * resolution];
+          if (pointInPolygon(center, footprint)) cells.add(`${cellX},${cellY}`);
+        }
+      }
+    }
+  }
+  return cells;
+}
+
 function visibleNavigationSurfaceCells(surface) {
   const resolution = Number(surface.resolutionM || 0.10);
   const counts = new Map();
@@ -1450,25 +1503,7 @@ function visibleNavigationSurfaceCells(surface) {
   }
   if (state.navigationWorkspace?.routeSource === 'recorded') {
     const route = state.navigationWorkspace.route || [];
-    const robotRadius = Number(state.navigationWorkspace.robotRadiusM || 0.48);
-    const radiusCells = Math.ceil(robotRadius / resolution);
-    for (let segment = 0; segment + 1 < route.length; segment += 1) {
-      const start = route[segment];
-      const end = route[segment + 1];
-      const steps = Math.max(1, Math.ceil(Math.hypot(end[0] - start[0], end[1] - start[1]) / (resolution / 2)));
-      for (let step = 0; step <= steps; step += 1) {
-        const ratio = step / steps;
-        const center = [
-          Math.floor((start[0] + (end[0] - start[0]) * ratio) / resolution),
-          Math.floor((start[1] + (end[1] - start[1]) * ratio) / resolution),
-        ];
-        for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
-          for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
-            if (Math.hypot(dx, dy) * resolution <= robotRadius) occupied.delete(`${center[0] + dx},${center[1] + dy}`);
-          }
-        }
-      }
-    }
+    for (const key of recordedRouteFootprintCells(route, resolution)) occupied.delete(key);
   }
   for (const cell of surface.manualClearCells || []) occupied.delete(surfaceCellKey(cell));
   for (const cell of surface.manualBlockedCells || []) occupied.add(surfaceCellKey(cell));
@@ -1729,8 +1764,15 @@ function drawNavigation() {
     : state.navigationWorkspace?.route || [];
   const allowedArea = state.navigationWorkspace?.allowedArea || [];
   const pose = state.navigation?.localization_pose;
-  if (!points.length && !route.length) return;
-  const all = points.map(point => [point[0], point[1]]).concat(route, allowedArea);
+  const checkpoints = (state.checkpointAudit?.checkpoints || [])
+    .filter(item => Number.isFinite(Number(item.position?.x)) && Number.isFinite(Number(item.position?.y)))
+    .sort((left, right) => (
+      Number(left.routeProgressIndex ?? Number.MAX_SAFE_INTEGER)
+      - Number(right.routeProgressIndex ?? Number.MAX_SAFE_INTEGER)
+    ) || String(left.checkpointId).localeCompare(String(right.checkpointId)));
+  if (!points.length && !route.length && !checkpoints.length) return;
+  const all = points.map(point => [point[0], point[1]])
+    .concat(route, allowedArea, checkpoints.map(item => [Number(item.position.x), Number(item.position.y)]));
   if (pose) all.push([pose.x, pose.y]);
   const minX = Math.min(...all.map(point => point[0]));
   const maxX = Math.max(...all.map(point => point[0]));
@@ -1763,6 +1805,31 @@ function drawNavigation() {
     });
     context.stroke();
   }
+  const checkpointRuntime = state.navigation?.runtime?.checkpoint || {};
+  const completedCount = Math.max(0, Number(checkpointRuntime.completedCheckpointCount || 0));
+  const activeCheckpointId = String(checkpointRuntime.activeCheckpointId || '');
+  const lastCompletedCheckpointId = String(checkpointRuntime.lastCompletedCheckpointId || '');
+  checkpoints.forEach((checkpoint, index) => {
+    const checkpointId = String(checkpoint.checkpointId || `P${index + 1}`);
+    const active = checkpointId === activeCheckpointId;
+    const completed = index < completedCount || checkpointId === lastCompletedCheckpointId;
+    const point = xy([Number(checkpoint.position.x), Number(checkpoint.position.y)]);
+    context.beginPath();
+    context.arc(point[0], point[1], active ? 9 : 7, 0, Math.PI * 2);
+    context.fillStyle = active ? '#fbbf24' : completed ? '#4ade80' : '#ef4444';
+    context.fill();
+    context.strokeStyle = '#f8fafc';
+    context.lineWidth = 2;
+    context.stroke();
+    context.font = '600 11px system-ui, sans-serif';
+    const labelWidth = context.measureText(checkpointId).width + 10;
+    const labelX = point[0] + 10;
+    const labelY = point[1] - 17;
+    context.fillStyle = '#07111fe6';
+    context.fillRect(labelX - 4, labelY - 11, labelWidth, 16);
+    context.fillStyle = '#f8fafc';
+    context.fillText(checkpointId, labelX, labelY + 1);
+  });
   if (pose) {
     const point = xy([pose.x, pose.y]); const yaw = pose.yaw || 0;
     context.fillStyle = '#fb923c'; context.beginPath(); context.arc(point[0], point[1], 8, 0, Math.PI * 2); context.fill();
@@ -1786,7 +1853,7 @@ function renderNavigation() {
     candidate
     && selectedJobId
     && candidate.map_job_id === selectedJobId
-    && candidateGeneration >= 9
+    && candidateGeneration >= 10
     && state.navigationWorkspace?.workspaceHash
     && candidate.workspace_hash === state.navigationWorkspace.workspaceHash
   );

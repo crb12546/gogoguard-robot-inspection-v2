@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-17
+Updated: 2026-08-23
 
 ## New-task handoff — start here
 
@@ -95,6 +95,48 @@ that cannot be reached. A 2026-08-17 browser receipt against real
 This is a Mac-side static-connectivity and UI receipt; it is not a physical
 robot completion receipt.
 
+The first retained generation-9 motion trace on 2026-08-17 reached and
+completed `cp_01`, then repeatedly failed MPPI/Smac on the nearly straight
+1.93 m leg toward `cp_02`. Fixed-map localization remained healthy and the
+reviewed static map plus green area were clear; live obstacle evidence instead
+flickered around 0.39--0.58 m while the 0.48 m circular model turned the Go2's
+front/back length into excessive lateral width. The current local source now
+has a navigation-only rigid-self cloud filter and one shared rectangular hard
+envelope: measured body plus 0.10 m padding, x `[-0.43, 0.50]`, y
+`+/-0.30 m`. MPPI, both costmaps and Collision Monitor consume the same model;
+localization retains the unfiltered cloud. The live navigation canvas now
+renders red pending, amber active and green completed checkpoint markers. The
+incident recorder also limits a repeated recovery transition on one patrol leg
+to one automatic package per 30-second window. These corrections pass all 227
+offline tests and a real-map browser check. They were statically deployed on
+2026-08-17 as `obstacle-envelope-r1` with the robot lying down; sensors,
+platform and LiveKit passed while Nav2, the motion bridge and UDP 5005 remained
+stopped. The new behavior is **deployed but not motion accepted**.
+
+A later 2026-08-17 23:17 platform-started revision-5 patrol accepted the new
+obstacle envelope on its first leg and reached `cp_01` about 0.10 m from the
+goal with fixed-map localization still tracking. It then reproduced the known
+`platform_edge` checkpoint defect with complete dog-side evidence. Navigation
+computed a camera-only observation target of `+62.976 deg`, but the checkpoint
+coordinator remained at stage `new` with `lastError=RuntimeError`; no matching
+gimbal success/failure journal entry exists and the final feedback remained
+near zero. The coordinator calls the synchronous mission-event endpoint before
+the local gimbal, so an HTTP 401 `{"detail":"设备令牌无效"}` prevented the
+camera command. Platform logs prove all 18,541 mission-event requests from
+11:06 UTC onward failed this way because the robot-local `X-Device-Token` did
+not match the platform credential; the Mac token previously injected for asset
+upload was a separate process value and never provisioned the robot runtime.
+The coordinator retried every 0.2 seconds without backoff, creating a second
+observable defect. The platform
+heartbeat compatibility path independently played the announcement and sent a
+valid `announcement_completed`, but sent no `checkpoint_verdict`; it then sent
+an operator-issued `stop_patrol` (`by=admin`) at 15:18:44 UTC, which reached the
+dog command bridge at 15:18:46 UTC and the navigation runtime applied as
+`STOP_REQUESTED`. This failure is not localization, Nav2, MPPI, obstacle
+avoidance or camera-angle computation. The immutable evidence set is under
+`runtime-data/analysis/platform-checkpoint-20260817-232116/`, and the repair
+remains owned by `platform_edge`.
+
 ### Immediate continuation for the next Codex task
 
 - Start in this repository and treat the 2026-08-15 ground/editor work as
@@ -109,9 +151,10 @@ robot completion receipt.
   acceptance task covering slopes, steps, holes, low returns and localization-
   map separation.
 - If work returns to platform patrol/checkpoint behavior instead, the known
-  terminal-message application defect remains a separate owner and the entry
-  checklist is `docs/CHECKPOINT_CLOSURE_REPAIR_TODO.md`. Do not mix that repair
-  into `route` or the map-editor UI.
+  terminal-message application defect now has a complete 2026-08-17 dog-side
+  reproduction. The entry checklist is
+  `docs/CHECKPOINT_CLOSURE_REPAIR_TODO.md`. Do not mix that repair into `route`,
+  Nav2, obstacle parameters or the map-editor UI.
 
 | Product area | Current reality | Remaining product gap |
 |---|---|---|
@@ -121,9 +164,9 @@ robot completion receipt.
 | Cloud map production | Mac has submitted real recordings to the pinned Alibaba Cloud GLIM worker and received immutable artifacts; the official GLIM map editor now runs in an isolated cloud session through an SSH-tunneled noVNC window | One real operator-cleaned map still needs to be saved and accepted through the new workflow |
 | Map and route assets | Maps have immutable history/labels; generation 8 preserves the GLIM timestamp/quaternion checkpoint timeline. The generation-9 workbench derives a separate reviewed static navigation map and has published real `map-62d8cec9a1dc` revision 4 to the robot; it never rewrites localization PCD. The local Mac additionally derives a review-only 2.5D ground layer with measured/interpolated/unknown cells | Operator editing acceptance, ground-model field acceptance before any navigation authority, and physical planning receipts remain pending |
 | Localization | FAST-LIO plus fixed-map VGICP has localized successfully during real patrols; the active V6 image preserves the trusted anchor, requires three consistent recovery matches and processes only the newest pending LiDAR cloud. The operator accepted the first V6-r4 patrol, and synchronized evidence proves repeated localization holds resumed instead of entering the former stale-frame lockout | Repeatability and a complete retained full-route trace are still needed |
-| Navigation and motion | Nav2/MPPI has completed real routes on the V6 baseline. Generation 9 is now installed and statically verified with a reviewed StaticLayer map, full-map Smac point-goal planning, the same MPPI controller, one 0.48 m safety circle and the green KeepoutFilter | Verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release before calling generation 9 motion-accepted |
-| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor and checkpoint-ordered mission preview in addition to GLIM, checkpoint and gimbal workflows. The current real workspace has 523 visible occupied cells, 1,548 explicit clear cells and two checkpoints; browser verification rendered three reachable task legs totaling 10.177 m | Get operator usability and physical-patrol acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
-| Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed; generation 8 adds map-frame pose and gimbal convergence evidence | Exercise the new evidence during a real two-checkpoint mission; production retention policy remains partial |
+| Navigation and motion | Nav2/MPPI has completed real routes on the V6 baseline. The installed generation 9 reached `cp_01` but then exposed an oversized circular live-obstacle model. `obstacle-envelope-r1` is now statically installed with a self-filtered navigation cloud and one body-shaped envelope with 0.10 m shoulder clearance | Verify clear full patrol, moving person, passable vehicle/wall bypass, dead-end retry, localization recovery and stop release before calling generation 9 motion-accepted |
+| Field workstation and UI | The Mac page runs at `http://127.0.0.1:8080/` and includes a generation-9 navigation editor, checkpoint-ordered mission preview and red/amber/green checkpoints on the live navigation map. The current real workspace has 523 visible occupied cells, 1,548 explicit clear cells and two checkpoints; browser verification rendered the markers and three reachable task legs totaling 10.177 m | Get operator usability and physical-patrol acceptance; securely reinject the token before a future SaaS asset upload because it is deliberately not persisted |
+| Development evidence | Robot runtime traces, parameter receipts and Mac-side replay/incident infrastructure are deployed. `obstacle-envelope-r1` also limits one repeated leg/state automatic incident to a 30-second window | Exercise the deduplicated evidence during the next real two-checkpoint mission; production retention policy remains partial |
 | Inspection actions/evidence | Existing realtime Z1Pro video is integrated. Generation 8 and revision 6 resolve `cp_01`/`cp_02` to -72.447/-21.862 degrees from timestamp-matched GLIM quaternions. The deployed camera correction now compares each command axis against its protocol-defined feedback and keeps checkpoint and manual tolerances separate | Verify explicit/manual camera motion, then complete reference/live comparison, suffix continuation, second checkpoint and mission completion |
 | Mission/task system | The selected platform MissionPlan has completed real two-checkpoint patrols, and platform terminal messages reach the robot inbox. A separate `local_operator` mode remains isolated | Fix the known `platform_edge` defect where synchronous mission-event failure blocks terminal-message application and forces fixed navigation timeouts; then re-accept the full point loop |
 | SaaS integration | Complete null-safe heartbeat, real Unitree battery, realtime interaction, selected-patrol lifecycle, map-bound LiveKit pose stream and Mac asset upload are deployed. The latest `map-62d8cec9a1dc` revision-1 bundle is SaaS-verified and has been used in real platform patrols | Make checkpoint event delivery observable and ensure announcement/verdict terminal messages are applied immediately instead of merely ACKed |
@@ -2819,3 +2862,276 @@ authorization before localization, Nav2 or physical motion.
   physical receipt must stand the robot, start fixed-map localization, confirm
   the first Smac plan, then complete the ordered two-checkpoint patrol before
   testing a moving person or a wide mapped obstacle.
+
+## 2026-08-17 first generation-9 motion incident and local correction
+
+- The retained runtime trace `runtime-20260817-124742-4461-part001.jsonl`
+  proves the robot completed `cp_01` at route index 26, resumed toward `cp_02`
+  and then repeatedly entered `SEARCHING_PATH`. The current map pose was about
+  `(4.121, 0.754)` and the next checkpoint `(4.128, 2.682)`, a nearly straight
+  1.93 m leg. The operator stopped and released remote control after the robot
+  remained unable to progress.
+- Localization was not the first failing module: VGICP remained accepted with
+  confidence 0.889, inlier ratio 0.969, MSE 0.032 and only about 0.027 m /
+  0.586 degree correction. The reviewed static map had no occupied cell within
+  about 1.50 m and the green boundary was about 4.50 m away. The first failure
+  was the live local-obstacle/navigation model.
+- Safety evidence flickered between obstacle and clear: 109 of 362 stuck-leg
+  samples saw obstacle frames, the nearest forward point reached about 0.394 m
+  and a stationary probe retained roughly 90--102 points in the 0.48--0.65 m
+  ring, including a cluster near `(-0.31, +0.38, 0.45--0.50)`. That cluster is
+  not proven to be self rather than an adjacent object, so the correction does
+  not hide it. Instead it removes only points inside the rigid central body and
+  lets a body-shaped footprint decide whether the side cluster actually blocks
+  passage.
+- The local navigation candidate replaces the hard 0.48 m circle with one
+  explicit rectangular contract. The measured body footprint remains front
+  0.40 m, rear 0.33 m and half-width 0.20 m; one 0.10 m padding produces x
+  `[-0.43, 0.50]`, y `+/-0.30 m`. Global/local costmaps, MPPI CostCritic and
+  Collision Monitor all use it. The separate `/navigation/cloud_obstacles`
+  removes only rigid-body/backboard interior returns; localization and evidence
+  retain `/navigation/cloud_body`. Inflation is reduced to a 0.45 m soft field
+  rather than a second hard circle.
+- The live navigation canvas now includes the checkpoint coordinates in its
+  bounds and draws pending red, active amber and completed green markers with
+  IDs. An in-app browser against real `map-62d8cec9a1dc` visibly rendered
+  `cp_01` and `cp_02` on the cyan route beside the current robot pose.
+- The same run exposed an evidence-side load defect: repeated recovery state
+  transitions sealed a new one-message partial incident almost every second.
+  Automatic capture is now keyed by runtime/mission/checkpoint/goal/state and
+  limited to one accepted package per 30-second window. Manual capture and
+  motion decisions are unchanged.
+- All 227 unit tests, Python compilation and UI smoke pass locally. The ARM64
+  combined image
+  `gogoguard-robot-inspection:v2-edge-20260817-obstacle-envelope-r1` has local
+  manifest-list ID
+  `sha256:b7d8f40d72d30e43b364c246640cbbf7e9a22e42dade9eb0ae9a2705fab21b82`
+  and robot config ID
+  `sha256:27c141155d948f7b952acc075b32a5a464c6cdd649968db667994a0d10b3e39d`.
+  Its 1,501,559,808-byte archive passed SHA-256 on both ends as
+  `1892dad2f1c0ec6cea484670f7ee3190ccfa957f3cdcd197f5d302dcdcfa3c16`.
+- Static installation and service restart completed at 22:50 CST with the dog
+  lying down. The service is active on the new image; Livox was 9.9 Hz, IMU
+  48.6 Hz and odometry 9.9 Hz. Platform heartbeat was online with no error and
+  LiveKit reported audio/video/DataChannel live. Nav2 and the motion bridge
+  remained stopped, motion authority was false and UDP 5005 was unbound. The
+  next step is a separate stood-up patrol of the same two-checkpoint route.
+
+## 2026-08-23 persistent identity and restart-generation deployment receipt
+
+- The 2026-08-17 checkpoint failure was traced to a deployment boundary, not
+  Nav2 or localization: the workstation had previously held a device token in
+  process memory, while the robot's persistent runtime environment did not.
+  The commissioned robot now stores its explicit robot ID and device token only
+  in `/etc/gogoguard/runtime.env`, owned by root with mode 0600. The release
+  installer preserves commissioned values instead of overwriting them with the
+  example file, and systemd refuses to start when the root-only environment is
+  missing, malformed, duplicated or lacks the required identity. A separate
+  stdin-only commissioning helper updates the token atomically without logging
+  it. The token itself is not present in this repository or release archive.
+- One initial authenticated r3 start exposed a second restart defect: the
+  platform adapter consumed the previous container generation's navigation
+  status before the new observer replaced it. It emitted `resuming` and
+  `completed` for the old 2026-08-17 mission. Platform read-only audit found two
+  accepted mission events and one false `PointCheck #27` with `captured=0`; no
+  announcement, verdict, capture, evidence transaction, execution entry or
+  motion occurred. The production row remains untouched pending an explicit
+  operator decision.
+- The final repair is clock-independent. Each edge-container start generates a
+  new random edge generation ID. The navigation observer writes it into every
+  atomic status snapshot, and both heartbeat and checkpoint paths accept
+  navigation only when the ID matches the current container generation. A
+  mismatch fails closed, reports
+  `NAVIGATION_SNAPSHOT_GENERATION_MISMATCH`, and never falls back to old data.
+  Durable events older than ten minutes, missing/invalid time or lacking an
+  explicit timezone are audited and discarded locally. Every newly generated
+  mission event uses UTC with an explicit `+00:00` offset and carries the
+  commissioned robot identity. The evidence-transaction gate remains disabled.
+- The platform peer deployed its matching mission-event timezone normalization
+  at 15:59 CST, then deployed tri-state navigation readiness, a 409 dispatch
+  gate and human-readable command rejection receipts at 16:20 CST. A production
+  read-only audit after r6 started at 16:08:26 CST found zero new mission event,
+  point check, announcement, verdict, capture, capture transaction or execution
+  row. The platform also accepted the real nested
+  `patrol.navigationReady=true` heartbeat without treating legacy missing fields
+  as false.
+- The final dog release is
+  `gogoguard-robot-inspection:v2-edge-20260823-evidence-txn-r10`, built from dirty
+  source identity `f69c246d9a97377e795d9946d842e346a5535aa3-dirty`. Its Mac
+  manifest-list ID is
+  `sha256:c2dd50b10421d78ed7b2cbc26a5c7211a58adafc8e20cdde1a5225e7ec682893`,
+  robot-loaded ARM64 config ID is
+  `sha256:48e4b0aff76e879049085d480c64d391192f12b9164163f3ccb3a30f724c5aa3`,
+  and the release archive SHA-256 is
+  `621b53f8a76ea2651457948e1dcd9b7a5a04fe88e508b731f418e35f19dda1b4`.
+  r7 established at 16:20:36 CST that the existing heartbeat
+  `edgeInstanceId` is the container generation ID rather than another identity.
+  r8 additionally requires every `gogoguard.robot_pose.v1` frame to carry the
+  nonempty Nav2 `runtimeInstanceId`; no runtime identity means no frame. r9
+  also prevents a crashed active Nav2 generation from leaving a stale
+  `PATROLLING` snapshot indefinitely: three seconds without a runtime status
+  publication, measured only with the observer's local monotonic clock, becomes
+  persistent `INTERRUPTED` / `NAV_RUNTIME_LOST`, clears motion authorization
+  and reports `patrol.running=false`. Never-started, idle and already terminal
+  runtimes retain their prior semantics. r10 also makes that stale-runtime
+  state report `navigationReady=false` with the same reason code and rejects
+  every queued `start_patrol` with an explicit `NAVIGATION_NOT_READY` receipt;
+  a generation-matched but dead runtime therefore cannot accept a new task.
+- r10 started at 17:28:36 CST after the environment validator and clock gate
+  passed. Systemd is active and enabled with zero restarts. The observer and
+  platform processes share the exact generation; platform status is online and
+  navigation ready. Nav2, patrol runtime and the motion bridge remain stopped,
+  so `runtimeInstanceId` is correctly null and no pose frame can be emitted.
+  UDP 5005 is unbound and the evidence-transaction gate is still zero. All 263
+  tests, Python compilation, container contract, script syntax and in-image
+  generation checks pass. This is a static restart-safety receipt, not a motion
+  or full checkpoint acceptance.
+
+## 2026-08-23 checkpoint-mission reload and workstation credential persistence
+
+- A real local run of `map-0d97341cedd2` / `route-0d97341cedd2-workspace-r3`
+  completed the route without stopping at its three audited checkpoints. The
+  robot asset and persisted mission plan were correct, but the browser first
+  started a mission-free localization/Nav2 generation. Selected-patrol startup
+  then claimed and persisted the new mission without replacing that already
+  running generation, so its immutable launch-time checkpoint state remained
+  `missionId=null`, `checkpointCount=0`.
+- Selected-patrol startup now replaces only a fully observed, idle generation
+  whose state is `BOOTING`, `POSITIONING` or `READY`, whose motion authority is
+  explicitly false and whose checkpoint status has no mission/hash and exactly
+  zero checkpoints. It requires full remote-control release before claiming
+  and launching the exact new mission. Active claims, motion-authorized
+  runtimes, active patrol states and incomplete observations are never stopped
+  or inferred safe. A focused regression proves the stop -> mission claim ->
+  new runtime -> patrol order; conflict/idempotency coverage remains intact.
+- The native Mac workstation no longer depends on a terminal-exported token
+  surviving process restarts. Environment injection remains the explicit
+  temporary/container override; otherwise the asset uploader reads the
+  commissioned item from macOS Keychain. The commissioning helper accepts no
+  token argument and uses the secure Keychain prompt. The token is absent from
+  this repository, configuration, logs and release archive.
+- A real workstation restart with no token environment resolved the Keychain
+  item successfully. Retrying the selected map upload produced platform bundle
+  `ab_71e66b8280100dcd`: platform state is `verified`, project is `天津大学`,
+  and the server counted three checkpoints. It remains deliberately unactivated
+  pending the operator/platform workflow.
+- The robot release is
+  `gogoguard-robot-inspection:v2-edge-20260823-checkpoint-reload-r11`, built from
+  dirty source identity `f69c246d9a97377e795d9946d842e346a5535aa3-dirty`.
+  Its Mac manifest-list ID is
+  `sha256:c597aca606d09deff775e2a910ac56e41bdb366a3c7a58b4d06c6c136f9bedd1`,
+  robot-running ARM64 config ID is
+  `sha256:afe596cfeedfbeb5acb2e503bd9b911a4042480e52bc88cf1692d0959d084efa`,
+  and the release archive SHA-256 is
+  `ba04b8bc84d955df5a4470961739cbc2b3ee65a9510e567f0c1f7349dd700e8d`.
+- r11 started at 18:23:26 CST. Systemd is active and enabled with zero restarts;
+  platform is online and reports navigation ready. Livox and odometry were
+  9.9 Hz and IMU 60.7 Hz. Nav2 and the Unitree motion bridge remained stopped,
+  so no posture or motion command was issued. All 267 tests, Python compilation,
+  container contract, script syntax and in-image checkpoint-reload checks pass.
+  This is a static deployment receipt; the three-checkpoint stopped-photo flow
+  still requires a supervised stood-up patrol.
+- The separate old GoGoGuard task rejection remains unchanged: when its
+  expected map/route differs from the robot-selected release, dispatch continues
+  to fail closed. Compatibility or migration for that old task is deferred to
+  a later explicitly scoped change.
+
+## 2026-08-23 recording-start route coverage cloud repair
+
+- Real map `map-5d7270cde617` exposed a cross-stage route contract defect. The
+  sealed recording began at 13:16:00.512 UTC, while GLIM's optimized trajectory
+  began at 13:16:05.061 UTC after the robot had already started moving. The old
+  cloud exporter copied the optimized trajectory directly into `map.json`, and
+  the workstation treated its first point `(0.465, 0.028)` as the patrol start.
+  Runtime localization near the physical recording start therefore appeared
+  about 0.73 m from the saved route and Nav2 correctly rejected the localized
+  start cell as lethal. The static workbench preview did not expose the defect
+  because it began at the already-truncated saved route point.
+- The cloud exporter now preserves two separate authorities: the untouched
+  GLIM timestamp/quaternion timeline remains authoritative for checkpoint
+  binding, while the route in `map.json` is required to cover the sealed
+  recording start. For a delayed optimized start it timestamp-matches the
+  overlapping recording pose samples, fits a bounded SE(2) transform, prepends
+  the missing map-frame route prefix and writes the same
+  `gogoguard.recording_route_coverage.v1` receipt into both artifacts. Fewer
+  than eight synchronized samples, RMS above 0.20 m, maximum error above
+  0.45 m, join gap above 0.75 m or route start more than 0.5 seconds after the
+  sealed start fails closed. The workstation independently validates the
+  receipt before registering every new normal cloud result; the route workspace
+  also rejects an inconsistent receipt while retaining legacy-map reads.
+- The fixed cloud scripts were backed up and atomically installed on
+  `39.96.72.215`. Deployed SHA-256 values are
+  `cabd88e3b1e9710a4b8c0d2b4567364cd3f3a490f9065259b8cffb1edfd072a8`
+  for `gogoguard-map-job`,
+  `5ad0bfd96c7a8de423f0ac9e20538a5fb54d44579fb691d5a848a7b2ce2b1f45`
+  for the exporter and
+  `be8958a65146e1888c2081d8f9f432e745287b93ecade6fe8c79c903bd34590a`
+  for the official-editor adapter. No robot runtime or motion service was
+  changed.
+- Existing sealed recording `20260823T131600Z-fcc0bbbe` was resubmitted as new
+  immutable cloud map `map-dc7036e35379`; `map-5d7270cde617` remains unchanged.
+  The returned route starts 0.025 seconds after recording at approximately
+  `(0.017, -0.026)`, contains 13 reconstructed prefix poses and joins 2,085
+  optimized GLIM poses. Its 57-pair alignment receipt reports 0.048 m RMS,
+  0.121 m maximum error and a 0.152 m join gap. The fresh default workspace is
+  revision 0, `routeSource=recorded`, 205 sampled route points and intentionally
+  not ready until the operator redraws/reviews the allowed area and static
+  surface. It is labeled `起点补齐修复版（待重新编辑）` and has not been
+  published to the robot or GoGoGuard platform.
+- All 269 repository tests, Python compilation, cloud script syntax and the
+  deployment contract passed locally. The native workstation was restarted to
+  load the new validation boundary. This is a cloud/workstation artifact
+  receipt, not a navigation or motion acceptance receipt.
+
+## 2026-08-24 new-map replanning root cause and GitHub-only closure
+
+- The retained, ignored analysis bundle for `map-dc7036e35379` proves that the
+  initial repeated `replanning` was not explained by a 0.70 m recording-start
+  loss. GLIM's exported `traj_lidar.txt` describes `lidar_link`, but route and
+  checkpoint consumers had silently treated its map XYZ/quaternion as
+  `base_link`. The uncorrected route start `(0.016991, -0.026487)` was 0.321 m
+  from the observed runtime base pose `(-0.294525, 0.049241)`. Composing the
+  commissioned `base_link -> lidar_link` transform produces a base route start
+  near `(-0.217560, -0.041006)`, reducing that comparison to 0.119 m and
+  matching the operator's approximately 0.10 m observation.
+- A second, independent preview/runtime mismatch made the bad start look safe.
+  The workstation cleared and planned with a 0.48 m circle, while Nav2 and MPPI
+  used the commissioned padded rectangle x `[-0.43, 0.50]`, y `+/-0.30 m`.
+  Runtime evidence recorded robot cost 89 above the obstruction threshold 65,
+  zero usable command and 91 replans. The route's static centre cell was free,
+  but the rectangular body footprint overlapped occupied cells. This explains
+  why drawing-time preview succeeded while the real controller immediately
+  replanned.
+- Cloud artifacts now declare `trajectoryPoseFrame=lidar_link` and optimized
+  pose companions declare `poseFrame=lidar_link`. The route boundary composes
+  the commissioned inverse mount exactly once and emits only `base_link`
+  routes/checkpoint poses. Missing frame fields retain a bounded legacy-lidar
+  read; only legacy `recorded` workspaces are migrated, while edited routes are
+  never shifted implicitly. Candidate generation 10 records the source/route
+  frames and calibration identity; all older candidates fail before the motion
+  bridge starts.
+- Workstation, publication and runtime metadata now share the exact padded
+  rectangle. Recorded-corridor clearing, green-boundary validation, static-map
+  route collision rejection and browser red-cell review use the same swept
+  footprint; generic A-star preview uses its conservative circumscribed radius.
+  The browser's restore-recorded-route action receives the calibrated base route
+  from the backend instead of rebuilding it from raw LiDAR JSON. Manual blocks
+  in the route footprint fail publication rather than being hidden.
+- The day-wide audit retained the identity/generation fences, mission reload,
+  recording-start coverage, obstacle self-filter, runtime publisher liveness,
+  bounded incident capture and default-off evidence transaction because their
+  regression suites pass and their safety ownership remains explicit. It also
+  hardened token commissioning so terminal input is hidden, the token is never
+  passed in a child process argument, startup validates token format, and HTTP
+  error responses are closed on failure paths. No credential, runtime log, map
+  artifact or analysis bundle is tracked.
+- `pose_ready` now persists `cameraPose.targetDeg`, `actualDeg`,
+  `absoluteErrorDeg`, `toleranceDeg=2.0` and `converged=true` in both legacy and
+  durable mission events after the existing independent GCU RX convergence
+  gate. The platform peer accepted this nested contract. It remains explicitly
+  unknown whether the vendor feedback field is physical encoder truth; no HFOV
+  value was invented and no physical gimbal acceptance is claimed.
+- All 274 unit tests pass locally after the closure. This section records local
+  source verification and the subsequent GitHub push only. No generation-10
+  image was built, no release was staged, no cloud script was redeployed and no
+  robot process, service, posture or motion command was changed.

@@ -19,6 +19,7 @@ class PlatformPoseStreamTest(unittest.TestCase):
         payload = build_pose_stream_payload(
             robot_id="LLYJ0001",
             sequence=8,
+            runtime_instance_id="runtime-1234",
             map_version="map-6855ba54ae11",
             route_id="route-6855ba54ae11-workspace-r4",
             frame_id="map",
@@ -30,6 +31,7 @@ class PlatformPoseStreamTest(unittest.TestCase):
             localization={"usable": True, "confidence": 0.82, "reason": "TRACKING"},
         )
         self.assertEqual(payload["schema"], "gogoguard.robot_pose.v1")
+        self.assertEqual(payload["runtimeInstanceId"], "runtime-1234")
         self.assertEqual(payload["mapVersion"], "map-6855ba54ae11")
         self.assertEqual(payload["routeId"], "route-6855ba54ae11-workspace-r4")
         self.assertEqual(payload["pose"]["position"]["x"], 3.1)
@@ -38,10 +40,26 @@ class PlatformPoseStreamTest(unittest.TestCase):
             build_pose_stream_payload(
                 robot_id="LLYJ0001",
                 sequence=9,
+                runtime_instance_id="runtime-1234",
                 map_version="map-6855ba54ae11",
                 route_id="route-6855ba54ae11-workspace-r4",
                 frame_id="map",
                 x=float("nan"),
+                y=0.0,
+                z=0.0,
+                yaw_rad=0.0,
+                source_at="2026-08-11T08:00:00.123+00:00",
+                localization={"usable": True},
+            )
+        with self.assertRaisesRegex(ValueError, "runtime"):
+            build_pose_stream_payload(
+                robot_id="LLYJ0001",
+                sequence=10,
+                runtime_instance_id="",
+                map_version="map-6855ba54ae11",
+                route_id="route-6855ba54ae11-workspace-r4",
+                frame_id="map",
+                x=0.0,
                 y=0.0,
                 z=0.0,
                 yaw_rad=0.0,

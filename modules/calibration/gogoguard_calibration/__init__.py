@@ -1,4 +1,4 @@
-from .calibration import MountCalibration
+from .calibration import MountCalibration, load_commissioned_mount_calibration
 from .coordinate_contract import ContractError, CoordinateContract
 from .internal_calibration import SensorInternalCalibration
 from .release_calibration import ReleaseCalibrationBundle
@@ -11,4 +11,5 @@ __all__ = [
     "ReleaseCalibrationBundle",
     "RigidTransform",
     "SensorInternalCalibration",
+    "load_commissioned_mount_calibration",
 ]

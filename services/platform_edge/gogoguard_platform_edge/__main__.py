@@ -15,6 +15,7 @@ from .heartbeat import (
     command_result_url,
 )
 from .checkpoint import CheckpointCoordinator, LocalGimbalClient
+from gogoguard_contracts import verify_evidence_artifact
 
 
 def main() -> None:
@@ -38,6 +39,7 @@ def main() -> None:
         type=Path,
         default=Path("/var/lib/gogoguard/navigation/status.json"),
     )
+    parser.add_argument("--edge-generation-id", required=True)
     parser.add_argument(
         "--battery-status",
         type=Path,
@@ -73,6 +75,14 @@ def main() -> None:
     parser.add_argument("--allow-insecure-http", action="store_true")
     args = parser.parse_args()
 
+    evidence_transaction_enabled = (
+        os.environ.get(
+            "GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED", ""
+        ).strip()
+        == "1"
+        and verify_evidence_artifact()
+    )
+
     poster = UrllibJsonPoster(
         device_token=os.environ.get("GOGOGUARD_DEVICE_TOKEN", ""),
         tls_insecure=args.tls_insecure,
@@ -88,6 +98,11 @@ def main() -> None:
         post_json=poster,
         gimbal=LocalGimbalClient(),
         timeout_s=args.timeout,
+        evidence_transaction_enabled=(
+            evidence_transaction_enabled
+        ),
+        robot_id=args.robot_id,
+        navigation_generation_id=args.edge_generation_id,
     )
     service = PlatformHeartbeatService(
         robot_id=args.robot_id,
@@ -107,6 +122,8 @@ def main() -> None:
         timeout_s=args.timeout,
         mission_inbox_path=args.checkpoint_inbox,
         checkpoint_coordinator=checkpoint_coordinator,
+        evidence_transaction_enabled=evidence_transaction_enabled,
+        navigation_generation_id=args.edge_generation_id,
     )
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

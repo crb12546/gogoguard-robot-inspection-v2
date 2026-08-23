@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import struct
@@ -7,7 +8,12 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from gogoguard_route import NavigationWorkspaceError, NavigationWorkspaceStore, RouteManager
+from gogoguard_route import (
+    NavigationWorkspaceError,
+    NavigationWorkspaceStore,
+    RouteManager,
+    navigation_surface_cells,
+)
 
 
 class NavigationCandidateTest(unittest.TestCase):
@@ -68,7 +74,13 @@ class NavigationCandidateTest(unittest.TestCase):
                 }
             )
         (self.artifacts / "map.json").write_text(
-            json.dumps({"source": "cloud-glim", "trajectory": trajectory}),
+            json.dumps(
+                {
+                    "source": "cloud-glim",
+                    "trajectoryPoseFrame": "base_link",
+                    "trajectory": trajectory,
+                }
+            ),
             encoding="utf-8",
         )
         (self.artifacts / "trajectory-poses.json").write_text(
@@ -76,6 +88,7 @@ class NavigationCandidateTest(unittest.TestCase):
                 {
                     "schema": "gogoguard.optimized_trajectory.v1",
                     "frame": "map",
+                    "poseFrame": "base_link",
                     "poses": optimized_poses,
                 }
             ),
@@ -125,10 +138,79 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertTrue(current_path.is_file())
         self.assertTrue(legacy_path.is_file())
 
+    def test_lidar_trajectory_is_converted_to_base_route_once(self):
+        workspace_path = self.artifacts.parent / "navigation-workspace.json"
+        self.artifacts.chmod(0o750)
+        artifact_path = self.artifacts / "map.json"
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        artifact["trajectoryPoseFrame"] = "lidar_link"
+        artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+        workspace_path.unlink()
+        self.artifacts.chmod(0o550)
+
+        workspace = NavigationWorkspaceStore(self.root).get(self.job_id)
+
+        self.assertEqual(workspace["routePoseFrame"], "base_link")
+        self.assertEqual(workspace["sourceTrajectoryPoseFrame"], "lidar_link")
+        self.assertAlmostEqual(workspace["route"][0][0], -0.235, places=3)
+        self.assertAlmostEqual(workspace["route"][0][1], 0.0, places=3)
+        self.assertTrue(workspace["mountCalibrationId"].endswith("fixed-20260808"))
+
+    def test_legacy_recorded_route_migrates_but_edited_route_does_not_shift(self):
+        workspace_path = self.artifacts.parent / "navigation-workspace.json"
+        raw = json.loads(workspace_path.read_text(encoding="utf-8"))
+        for name in (
+            "routePoseFrame",
+            "sourceTrajectoryPoseFrame",
+            "mountCalibrationId",
+            "mountCalibrationSha256",
+        ):
+            raw.pop(name, None)
+        self.artifacts.chmod(0o750)
+        artifact_path = self.artifacts / "map.json"
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        artifact["trajectoryPoseFrame"] = "lidar_link"
+        artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+        self.artifacts.chmod(0o550)
+        raw["sourceMapSha256"] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        workspace_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        recorded = NavigationWorkspaceStore(self.root).get(self.job_id)
+        self.assertAlmostEqual(recorded["route"][0][0], -0.235, places=3)
+
+        raw["routeSource"] = "edited"
+        workspace_path.write_text(json.dumps(raw), encoding="utf-8")
+        edited = NavigationWorkspaceStore(self.root).get(self.job_id)
+        self.assertAlmostEqual(edited["route"][0][0], 0.0, places=6)
+
+    def test_corrected_recorded_body_corridor_clears_start_footprint_edge(self):
+        workspace_path = self.artifacts.parent / "navigation-workspace.json"
+        self.artifacts.chmod(0o750)
+        artifact_path = self.artifacts / "map.json"
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        artifact["trajectoryPoseFrame"] = "lidar_link"
+        artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+        workspace_path.unlink()
+        self.artifacts.chmod(0o550)
+        workspace = NavigationWorkspaceStore(self.root).get(self.job_id)
+
+        surface = navigation_surface_cells(
+            workspace,
+            [(-0.64, 0.25, 0.5), (-0.64, 0.25, 0.5)],
+        )
+
+        self.assertNotIn([-7, 2], surface["occupiedCells"])
+        self.assertGreater(
+            surface["stats"]["recordedCorridorClearCellCount"], 0
+        )
+
     def test_prepare_converts_map_and_removes_stationary_posture_tail(self):
         candidate = RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
         self.assertEqual(candidate["point_count"], 4)
-        self.assertEqual(candidate["candidate_generation"], 9)
+        self.assertEqual(candidate["candidate_generation"], 10)
+        self.assertEqual(candidate["route_pose_frame"], "base_link")
+        self.assertEqual(candidate["source_trajectory_pose_frame"], "base_link")
+        self.assertEqual(len(candidate["mount_calibration_sha256"]), 64)
         self.assertTrue(Path(candidate["localization_map"]).read_bytes().startswith(b"# .PCD v0.7"))
         route = json.loads(Path(candidate["route"]).read_text(encoding="utf-8"))
         self.assertEqual(route["schema"], "go2.route.v1")
@@ -154,6 +236,10 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(
             profile["navigation"]["plannerProfileId"],
             "go2-nav2-smac-2d-v1",
+        )
+        self.assertEqual(
+            profile["navigation"]["paddedBaseFootprintM"],
+            [[0.5, 0.3], [0.5, -0.3], [-0.43, -0.3], [-0.43, 0.3]],
         )
 
     def test_repeated_prepare_keeps_runtime_artifact_identity(self):
@@ -225,6 +311,33 @@ class NavigationCandidateTest(unittest.TestCase):
         with self.assertRaisesRegex(NavigationWorkspaceError, "green allowed area"):
             RouteManager(self.root, site_id="test-site").prepare_map_job(self.job_id)
 
+    def test_prepare_rejects_static_obstacle_inside_route_footprint(self):
+        store = NavigationWorkspaceStore(self.root)
+        current = store.get(self.job_id)
+        surface = dict(current["navigationSurface"])
+        surface.update(
+            {
+                "manualBlockedCells": [[0, 0]],
+                "manualClearCells": [],
+                "reviewed": True,
+            }
+        )
+        store.update(
+            self.job_id,
+            {
+                "routeSource": "recorded",
+                "route": current["route"],
+                "allowedArea": current["allowedArea"],
+                "robotRadiusM": current["robotRadiusM"],
+                "navigationSurface": surface,
+            },
+        )
+
+        with self.assertRaisesRegex(NavigationWorkspaceError, "rectangular"):
+            RouteManager(self.root, site_id="test-site").prepare_map_job(
+                self.job_id
+            )
+
     def test_legacy_map_without_checkpoints_does_not_require_pose_companion(self):
         self.artifacts.chmod(0o750)
         (self.artifacts / "trajectory-poses.json").unlink()
@@ -278,6 +391,10 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertEqual(manifest["routeId"], candidate["route_id"])
         self.assertEqual(manifest["frame"], "map")
         self.assertTrue(manifest["gravityAligned"])
+        self.assertEqual(
+            manifest["allowedArea"]["paddedBaseFootprintM"],
+            [[0.5, 0.3], [0.5, -0.3], [-0.43, -0.3], [-0.43, 0.3]],
+        )
         self.assertEqual(
             {item["path"] for item in manifest["files"]},
             {
@@ -333,7 +450,10 @@ class NavigationCandidateTest(unittest.TestCase):
                     )
                     + "\n"
                 )
-        (inspection / "cp_01-main.jpg").write_bytes(b"\xff\xd8sample\xff\xd9")
+        sample_payload = bytes.fromhex(
+            "ffd8ffc00011080002000303011100021100031100ffd9"
+        )
+        (inspection / "cp_01-main.jpg").write_bytes(sample_payload)
         (inspection / "checkpoints.json").write_text(
             json.dumps(
                 {
@@ -363,6 +483,13 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertTrue(checkpoints["audit"]["ready"])
         self.assertEqual(checkpoints["checkpoints"][0]["checkpointId"], "cp_01")
         self.assertEqual(checkpoints["checkpoints"][0]["camera"]["tilt"], 22.5)
+        sample_metadata = checkpoints["checkpoints"][0]["sampleFrameMetadata"][0]
+        self.assertEqual(sample_metadata["width"], 3)
+        self.assertEqual(sample_metadata["height"], 2)
+        self.assertEqual(sample_metadata["bytes"], len(sample_payload))
+        self.assertEqual(
+            sample_metadata["sha256"], hashlib.sha256(sample_payload).hexdigest()
+        )
         self.assertAlmostEqual(
             math.degrees(checkpoints["checkpoints"][0]["bodyYaw"]),
             -72.447,
@@ -370,7 +497,7 @@ class NavigationCandidateTest(unittest.TestCase):
         )
         self.assertEqual(
             checkpoints["checkpoints"][0]["binding"]["orientationSource"],
-            "glim_quaternion",
+            "glim_quaternion_base_link",
         )
         self.assertEqual(
             checkpoints["checkpoints"][0]["binding"]["optimizedTrajectoryIndex"],
@@ -382,6 +509,13 @@ class NavigationCandidateTest(unittest.TestCase):
         with zipfile.ZipFile(descriptor["archive"]) as archive:
             self.assertIn("checkpoints.json", archive.namelist())
             self.assertIn("samples/cp_01-cp_01-main.jpg", archive.namelist())
+        manifest = json.loads(Path(descriptor["manifest"]).read_text(encoding="utf-8"))
+        manifest_sample = next(
+            item for item in manifest["files"] if item["role"] == "checkpoint_sample"
+        )
+        self.assertEqual(manifest_sample["width"], 3)
+        self.assertEqual(manifest_sample["height"], 2)
+        self.assertEqual(manifest_sample["sha256"], sample_metadata["sha256"])
 
     def test_checkpoint_binding_fails_closed_without_capture_timestamp(self):
         session_id = "20260811T010203Z-1234abcd"

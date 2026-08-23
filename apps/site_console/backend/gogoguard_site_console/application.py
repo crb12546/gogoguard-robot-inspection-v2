@@ -54,8 +54,10 @@ class InspectionApplication:
             data_root, map_worker, self.journal, cloud
         )
         self.exchange = EdgeArtifactExchange(data_root)
-        self.navigation_workspaces = NavigationWorkspaceStore(data_root)
-        self.routes = RouteManager(data_root, site_id=site_id)
+        self.navigation_workspaces = NavigationWorkspaceStore(
+            data_root, sensor_id=sensor_id
+        )
+        self.routes = RouteManager(data_root, site_id=site_id, sensor_id=sensor_id)
         self.navigation = (
             NavigationSupervisorClient(data_root / "navigation" / "supervisor.sock")
             if mode == "robot"
@@ -303,7 +305,13 @@ class InspectionApplication:
     def navigation_workspace(self, job_id: str) -> dict:
         if self.maps is not None:
             self.maps.get(job_id)
-        return self.navigation_workspaces.get(job_id)
+        value = self.navigation_workspaces.get(job_id)
+        # The immutable recorded route remains separately available after the
+        # operator edits the working route.  It is already converted to
+        # base_link by the same commissioned frame boundary as publication.
+        return value | {
+            "recordedRoute": self.navigation_workspaces.default(job_id)["route"]
+        }
 
     def update_navigation_workspace(self, job_id: str, payload: dict) -> dict:
         if self.maps is not None:
@@ -316,7 +324,9 @@ class InspectionApplication:
             workspace_hash=value["workspaceHash"],
             ready=value["ready"],
         )
-        return value
+        return value | {
+            "recordedRoute": self.navigation_workspaces.default(job_id)["route"]
+        }
 
     def navigation_surface_preview(self, job_id: str) -> dict:
         if self.maps is not None:

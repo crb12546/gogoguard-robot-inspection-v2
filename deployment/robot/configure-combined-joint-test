@@ -33,6 +33,14 @@ if [[ -z $unitree_key ]]; then
 fi
 unset unitree_key
 
+device_token=$(sed -n 's/^GOGOGUARD_DEVICE_TOKEN=//p' "$RUNTIME_ENV" | tail -n 1)
+if [[ -z $device_token ]]; then
+  echo "GOGOGUARD_DEVICE_TOKEN is not provisioned in $RUNTIME_ENV" >&2
+  echo "provision the robot-local token before enabling platform heartbeat" >&2
+  exit 4
+fi
+unset device_token
+
 readonly TEMPORARY_ENV=$(mktemp /etc/gogoguard/.runtime.env.joint-test.XXXXXX)
 cleanup() {
   rm -f "$TEMPORARY_ENV"
@@ -65,6 +73,7 @@ upsert() {
 
 upsert GOGOGUARD_INTERACTION_ENABLED 1
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED 1
+upsert GOGOGUARD_ROBOT_ID LLYJ0001
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S 5
 upsert GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER ""
 if [[ $profile == temporary-icp-fallback ]]; then

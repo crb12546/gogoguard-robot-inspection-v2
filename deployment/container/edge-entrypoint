@@ -19,6 +19,7 @@ readonly PLATFORM_HEARTBEAT_INTERVAL_S=${GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S
 readonly PLATFORM_HEARTBEAT_TLS_INSECURE=${GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE:-0}
 readonly PLATFORM_HEARTBEAT_HOST_HEADER=${GOGOGUARD_PLATFORM_HEARTBEAT_HOST_HEADER:-}
 readonly PLATFORM_HEARTBEAT_ALLOW_HTTP=${GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP:-0}
+readonly EDGE_GENERATION_ID=$(tr -d '\n' </proc/sys/kernel/random/uuid)
 mkdir -p "$LOG_ROOT"
 
 declare -a CHILD_PIDS=()
@@ -125,6 +126,7 @@ CHILD_PIDS+=("$!")
 
 setsid gogoguard-navigation-observer \
   --output /var/lib/gogoguard/navigation/status.json \
+  --edge-generation-id "$EDGE_GENERATION_ID" \
   >"$LOG_ROOT/navigation-observer.log" 2>&1 &
 CHILD_PIDS+=("$!")
 
@@ -182,6 +184,7 @@ if [[ "$PLATFORM_HEARTBEAT_ENABLED" == "1" ]]; then
     --robot-id "$ROBOT_ID"
     --url "$PLATFORM_HEARTBEAT_URL"
     --interval "$PLATFORM_HEARTBEAT_INTERVAL_S"
+    --edge-generation-id "$EDGE_GENERATION_ID"
     --navigation-socket /var/lib/gogoguard/navigation/supervisor.sock
     --battery-status /var/lib/gogoguard/device/battery.json
   )

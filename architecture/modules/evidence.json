@@ -2,7 +2,7 @@
   "id": "evidence",
   "responsibility": "Append-only runtime events, bounded passive incident capture and immutable receipts; no product decision logic or motion gating",
   "runtime": ["robot", "cloud", "workstation"],
-  "status": "runtime_trace_with_map_pose_and_gimbal_event_evidence_deployed_runtime_exercise_pending",
+  "status": "recovery_incident_per_leg_cooldown_offline_verified_deployment_pending",
   "codeRoots": ["modules/evidence"],
   "entrypoints": ["gogoguard_evidence.journal:EventJournal", "gogoguard_evidence.incident_recorder:main"],
   "dependsOn": ["contracts"],
