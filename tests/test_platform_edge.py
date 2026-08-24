@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gogoguard_contracts import MediaConnectionReceipt
 from gogoguard_interaction_edge.service import InteractionEdgeService, InteractionUnixServer
@@ -126,6 +127,12 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         run_edge = (repository / "deployment/robot/run-edge").read_text(
             encoding="utf-8"
         )
+        edge_entrypoint = (
+            repository / "deployment/container/edge-entrypoint"
+        ).read_text(encoding="utf-8")
+        validator = (
+            repository / "deployment/robot/validate-runtime-env"
+        ).read_text(encoding="utf-8")
         service = (repository / "deployment/robot/gogoguard-edge.service").read_text(
             encoding="utf-8"
         )
@@ -145,6 +152,10 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertIn("--env-file /etc/gogoguard/release.env", run_edge)
         self.assertIn("GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED=0", runtime_env)
         self.assertIn("GOGOGUARD_ROBOT_ID=LLYJ0001", runtime_env)
+        self.assertIn("GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE=", runtime_env)
+        self.assertIn("/etc/gogoguard/platform-ca.crt", run_edge)
+        self.assertIn('--ca-file "$PLATFORM_HEARTBEAT_CA_FILE"', edge_entrypoint)
+        self.assertIn("commissioned platform CA file is unavailable", validator)
         self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", service)
         self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", installer)
         self.assertIn("commission-device-token", installer)
@@ -766,6 +777,42 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertIsNone(requests[0]["authorization"])
         self.assertEqual(requests[0]["device_token"], "device-token")
         self.assertEqual(requests[0]["body"], {"robotId": "LLYJ0001"})
+
+    def test_https_adapter_uses_only_the_commissioned_ca_file(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def read(*_args):
+                return b'{"ok":true}'
+
+        ca_file = self.root / "platform-ca.crt"
+        ca_file.write_text("test CA placeholder", encoding="utf-8")
+        context = object()
+        with mock.patch(
+            "gogoguard_platform_edge.heartbeat.ssl.create_default_context",
+            return_value=context,
+        ) as create_context, mock.patch(
+            "gogoguard_platform_edge.heartbeat.urlopen",
+            return_value=Response(),
+        ) as opened:
+            result = UrllibJsonPoster(ca_file=ca_file)(
+                "https://39.96.37.187/api/v1/robot/heartbeat",
+                {"robotId": "LLYJ0001"},
+                2.0,
+            )
+
+        self.assertTrue(result["ok"])
+        create_context.assert_called_once_with(cafile=str(ca_file))
+        self.assertIs(opened.call_args.kwargs["context"], context)
+
+    def test_private_ca_cannot_disable_tls_verification(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            UrllibJsonPoster(ca_file=self.root / "ca.crt", tls_insecure=True)
 
     def test_real_http_adapter_preserves_safe_http_status_for_backoff(self) -> None:
         class Handler(BaseHTTPRequestHandler):

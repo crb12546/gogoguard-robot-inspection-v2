@@ -71,6 +71,7 @@ def main() -> None:
         default=Path("/var/lib/gogoguard/platform/checkpoint-inbox.jsonl"),
     )
     parser.add_argument("--tls-insecure", action="store_true")
+    parser.add_argument("--ca-file", type=Path)
     parser.add_argument("--host-header", default="")
     parser.add_argument("--allow-insecure-http", action="store_true")
     args = parser.parse_args()
@@ -86,6 +87,7 @@ def main() -> None:
     poster = UrllibJsonPoster(
         device_token=os.environ.get("GOGOGUARD_DEVICE_TOKEN", ""),
         tls_insecure=args.tls_insecure,
+        ca_file=args.ca_file,
         host_header=args.host_header,
         allow_insecure_http=args.allow_insecure_http,
     )

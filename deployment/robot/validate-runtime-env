@@ -25,6 +25,7 @@ runtime_value() {
 heartbeat_enabled=$(runtime_value GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED)
 robot_id=$(runtime_value GOGOGUARD_ROBOT_ID)
 device_token=$(runtime_value GOGOGUARD_DEVICE_TOKEN)
+heartbeat_ca_file=$(runtime_value GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE)
 
 if [[ $heartbeat_enabled == 1 ]]; then
   if [[ ! $robot_id =~ ^[A-Za-z0-9._:-]+$ ]]; then
@@ -39,9 +40,27 @@ if [[ $heartbeat_enabled == 1 ]]; then
     echo "GOGOGUARD_DEVICE_TOKEN has an invalid format" >&2
     exit 5
   fi
+  if [[ -n $heartbeat_ca_file ]]; then
+    if [[ ! $heartbeat_ca_file =~ ^/etc/gogoguard/[A-Za-z0-9._-]+\.crt$ ]]; then
+      echo "GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE must name an /etc/gogoguard CRT file" >&2
+      exit 7
+    fi
+    if [[ $RUNTIME_ENV == /etc/gogoguard/runtime.env ]]; then
+      if [[ -L $heartbeat_ca_file || ! -f $heartbeat_ca_file ]]; then
+        echo "commissioned platform CA file is unavailable" >&2
+        exit 7
+      fi
+      ca_ownership_and_mode=$(stat -c '%U:%G:%a' "$heartbeat_ca_file")
+      if [[ $ca_ownership_and_mode != root:root:644 ]]; then
+        echo "commissioned platform CA file must be root:root mode 0644" >&2
+        exit 7
+      fi
+    fi
+  fi
 fi
 
 unset device_token
+unset heartbeat_ca_file
 
 if [[ $RUNTIME_ENV == /etc/gogoguard/runtime.env ]]; then
   ownership_and_mode=$(stat -c '%U:%G:%a' "$RUNTIME_ENV")

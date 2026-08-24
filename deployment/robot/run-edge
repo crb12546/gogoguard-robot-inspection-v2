@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source /etc/gogoguard/release.env
+declare -a platform_ca_mount=()
+if [[ -f /etc/gogoguard/platform-ca.crt ]]; then
+  platform_ca_mount+=(
+    -v /etc/gogoguard/platform-ca.crt:/etc/gogoguard/platform-ca.crt:ro
+  )
+fi
 exec docker run --rm --name gogoguard-edge \
   --stop-timeout 15 \
   --network host \
@@ -10,4 +16,5 @@ exec docker run --rm --name gogoguard-edge \
   --env-file /etc/gogoguard/release.env \
   -v /var/lib/gogoguard:/var/lib/gogoguard \
   -v /etc/gogoguard/runtime.json:/etc/gogoguard/runtime.json:ro \
+  "${platform_ca_mount[@]}" \
   "${GOGOGUARD_IMAGE}"

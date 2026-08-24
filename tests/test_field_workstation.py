@@ -14,6 +14,7 @@ from gogoguard_field_workstation.robot_client import RobotClient
 
 
 SESSION_ID = "20260806T010203Z-1234abcd"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeRobot:
@@ -37,6 +38,23 @@ class FakeRobot:
 
 
 class FieldWorkstationTest(unittest.TestCase):
+    def test_workstation_entrypoints_include_calibration_dependency(self) -> None:
+        native = (
+            REPOSITORY_ROOT / "deployment/workstation/run-native"
+        ).read_text(encoding="utf-8")
+        dockerfile = (
+            REPOSITORY_ROOT / "deployment/workstation/Dockerfile"
+        ).read_text(encoding="utf-8")
+        manifest = json.loads(
+            (
+                REPOSITORY_ROOT / "architecture/modules/field_workstation.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertIn("modules/calibration", native)
+        self.assertIn("modules/calibration", dockerfile)
+        self.assertIn("calibration", manifest["dependsOn"])
+
     def test_robot_observability_surfaces_are_proxied(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             app = FieldWorkstationApplication(

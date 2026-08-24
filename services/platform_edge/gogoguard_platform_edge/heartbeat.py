@@ -254,11 +254,15 @@ class UrllibJsonPoster:
         *,
         device_token: str = "",
         tls_insecure: bool = False,
+        ca_file: Path | None = None,
         host_header: str = "",
         allow_insecure_http: bool = False,
     ) -> None:
         self.device_token = device_token.strip()
         self.tls_insecure = bool(tls_insecure)
+        self.ca_file = Path(ca_file) if ca_file else None
+        if self.tls_insecure and self.ca_file is not None:
+            raise ValueError("a private CA cannot be combined with insecure TLS")
         self.host_header = host_header.strip()
         self.allow_insecure_http = bool(allow_insecure_http)
 
@@ -287,7 +291,11 @@ class UrllibJsonPoster:
         if self.host_header:
             headers["Host"] = self.host_header
         request = Request(url, data=body, headers=headers, method="POST")
-        context = ssl._create_unverified_context() if self.tls_insecure else None
+        context = None
+        if self.tls_insecure:
+            context = ssl._create_unverified_context()
+        elif self.ca_file is not None and endpoint.scheme == "https":
+            context = ssl.create_default_context(cafile=str(self.ca_file))
         try:
             with urlopen(request, timeout=timeout_s, context=context) as response:
                 raw = response.read(MAX_HTTP_BYTES + 1)
