@@ -210,7 +210,7 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
             resume_branch.index("self._request_resume()"),
         )
 
-    def test_recovery_is_continuous_and_evidence_is_not_a_motion_gate(self) -> None:
+    def test_recovery_is_bounded_for_repeated_path_obstruction(self) -> None:
         source = RUNTIME_MANAGER.read_text(encoding="utf-8")
         tree = ast.parse(source)
         for name in ("_runtime_gate", "_start_readiness"):
@@ -229,8 +229,20 @@ class NavigationRuntimeCompatibilityTest(unittest.TestCase):
         self.assertIn('self.runtime_state = "SEARCHING_PATH"', source)
         self.assertIn('self.runtime_state = "RECOVERING"', source)
         self.assertIn('self.runtime_reason = "RUNTIME_TRANSIENT_RECOVERED"', source)
+        self.assertIn("MAX_CONSECUTIVE_PATH_FAILURES = 8", source)
+        self.assertIn('self.runtime_reason = "PERSISTENT_PATH_OBSTRUCTION"', source)
+        self.assertIn('self.runtime_state = "FAULT"', source)
         self.assertNotIn("mppiRetryLimit", source)
         self.assertNotIn("mppi_retry_limit", source)
+
+    def test_real_map_prepare_has_a_dedicated_long_rpc_timeout(self) -> None:
+        source = (
+            ROOT
+            / "modules/navigation/gogoguard_navigation/supervisor_client.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("timeout_s=max(self.timeout_s, 120.0)", source)
+        self.assertIn("self.timeout_s if timeout_s is None", source)
 
     def test_idle_costmap_startup_wait_is_not_a_terminal_fault(self) -> None:
         tree = ast.parse(RUNTIME_MANAGER.read_text(encoding="utf-8"))

@@ -316,7 +316,9 @@ class InspectionApplication:
     def update_navigation_workspace(self, job_id: str, payload: dict) -> dict:
         if self.maps is not None:
             self.maps.get(job_id)
-        value = self.navigation_workspaces.update(job_id, payload)
+        value = self.navigation_workspaces.update(
+            job_id, payload, require_current=True
+        )
         self.journal.append(
             "map.navigation_workspace_updated",
             job_id=job_id,

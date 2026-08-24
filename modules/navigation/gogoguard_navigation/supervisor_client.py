@@ -16,11 +16,19 @@ class NavigationSupervisorClient:
     def close(self) -> None:
         return None
 
-    def _call(self, method: str, **params: Any) -> Any:
+    def _call(
+        self,
+        method: str,
+        *,
+        timeout_s: float | None = None,
+        **params: Any,
+    ) -> Any:
         request = json.dumps({"method": method, "params": params}, ensure_ascii=False).encode("utf-8") + b"\n"
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self.timeout_s)
+                client.settimeout(
+                    self.timeout_s if timeout_s is None else float(timeout_s)
+                )
                 client.connect(str(self.socket_path))
                 client.sendall(request)
                 with client.makefile("rb") as stream:
@@ -33,7 +41,16 @@ class NavigationSupervisorClient:
         return response.get("result")
 
     def status(self) -> dict[str, Any]: return self._call("status")
-    def prepare(self, job_id: str) -> dict[str, Any]: return self._call("prepare", job_id=job_id)
+    def prepare(self, job_id: str) -> dict[str, Any]:
+        # Reading and rasterizing a real 400k-point GLIM map can legitimately
+        # take longer than the short control/status RPC timeout, especially on
+        # the Orin. Keep preparation synchronous, but do not report a false
+        # 409 while the supervisor is still successfully building the map.
+        return self._call(
+            "prepare",
+            timeout_s=max(self.timeout_s, 120.0),
+            job_id=job_id,
+        )
     def start_runtime(self, candidate_id: str) -> dict[str, Any]: return self._call("runtime.start", candidate_id=candidate_id)
     def stop_runtime(self) -> dict[str, Any]: return self._call("runtime.stop")
     def reset_localization(self) -> dict[str, Any]: return self._call("localization.reset")

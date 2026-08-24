@@ -13,6 +13,7 @@ readonly SENSOR_ID=${GOGOGUARD_SENSOR_ID:-ARMCP6B0035634}
 readonly MAP_WORKER=${GOGOGUARD_MAP_WORKER:-none}
 readonly INTERACTION_ENABLED=${GOGOGUARD_INTERACTION_ENABLED:-0}
 readonly INTERACTION_ALLOW_INSECURE_WS=${GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS:-0}
+readonly INTERACTION_CA_FILE=${GOGOGUARD_INTERACTION_CA_FILE:-}
 readonly PLATFORM_HEARTBEAT_ENABLED=${GOGOGUARD_PLATFORM_HEARTBEAT_ENABLED:-0}
 readonly PLATFORM_HEARTBEAT_URL=${GOGOGUARD_PLATFORM_HEARTBEAT_URL:-}
 readonly PLATFORM_HEARTBEAT_INTERVAL_S=${GOGOGUARD_PLATFORM_HEARTBEAT_INTERVAL_S:-5}
@@ -74,7 +75,16 @@ if [[ "$INTERACTION_ENABLED" == "1" ]]; then
   if [[ "$INTERACTION_ALLOW_INSECURE_WS" == "1" ]]; then
     interaction_args+=(--allow-insecure-ws)
   fi
-  setsid env PYTHONPATH=/opt/gogoguard/interaction-python \
+  interaction_ca_bundle=""
+  if [[ -n "$INTERACTION_CA_FILE" ]]; then
+    interaction_ca_bundle=/tmp/gogoguard-interaction-ca-bundle.crt
+    cat /etc/ssl/certs/ca-certificates.crt "$INTERACTION_CA_FILE" \
+      >"$interaction_ca_bundle"
+    chmod 0644 "$interaction_ca_bundle"
+  fi
+  setsid env \
+    PYTHONPATH=/opt/gogoguard/interaction-python \
+    ${interaction_ca_bundle:+SSL_CERT_FILE=$interaction_ca_bundle} \
     gogoguard-interaction-edge "${interaction_args[@]}" \
     >"$LOG_ROOT/interaction.log" 2>&1 &
   CHILD_PIDS+=("$!")

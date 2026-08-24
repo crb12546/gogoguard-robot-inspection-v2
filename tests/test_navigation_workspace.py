@@ -1,10 +1,14 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from gogoguard_route import (
     NavigationWorkspaceError,
     navigation_surface_cells,
     plan_navigation_preview,
     validate_workspace,
+    write_static_navigation_map,
 )
 
 
@@ -174,6 +178,89 @@ class NavigationWorkspaceTest(unittest.TestCase):
         result = plan_navigation_preview(value, wall, [0, 0], [3, 0])
         self.assertTrue(result["reachable"])
         self.assertGreater(result["lengthM"], 3.0)
+
+    def test_preview_uses_the_rectangular_nav2_footprint_in_a_narrow_corridor(self):
+        value = self.value()
+        value["allowedArea"] = [[-1, -1], [4, -1], [4, 1], [-1, 1]]
+        value["route"] = [[0, 0], [3, 0]]
+        value["routeSource"] = "edited"
+        value["routePoseFrame"] = "base_link"
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+            "reviewed": True,
+        }
+        # Parallel walls are 0.90 m apart. The commissioned 0.60 m-wide
+        # rectangle fits, while its historical 1.166 m circumscribed circle
+        # falsely closes the corridor.
+        walls = [
+            [x / 10, y, 1.0]
+            for x in range(-5, 36)
+            for y in (-0.45, 0.45)
+        ]
+
+        result = plan_navigation_preview(value, walls, [0, 0], [3, 0])
+
+        self.assertTrue(result["reachable"])
+        self.assertLess(result["lengthM"], 3.5)
+
+    def test_static_raster_uses_the_review_grid_and_validates_final_pixels(self):
+        value = self.value()
+        value["allowedArea"] = [
+            [-1.0916, -1.0612],
+            [2.0084, -1.0612],
+            [2.0084, 1.0388],
+            [-1.0916, 1.0388],
+        ]
+        value["route"] = [
+            [-0.2175921257, -0.0410910692],
+            [0.2291317436, 0.0378699879],
+        ]
+        value["routeSource"] = "edited"
+        value["routePoseFrame"] = "base_link"
+        value["navigationSurface"] = {
+            "resolutionM": 0.10,
+            "obstacleMinZ": 0.05,
+            "obstacleMaxZ": 1.80,
+            "manualBlockedCells": [],
+            "manualClearCells": [],
+            "reviewed": True,
+        }
+        # The reviewed-grid center (-0.55, -0.45) is outside the rectangular
+        # start footprint. Before the grid-alignment fix, independent upper-row
+        # and YAML-origin rounding could reinterpret that black source cell one
+        # row closer to the robot after publication.
+        cloud = [
+            [-0.55, -0.45, 1.0],
+            [-0.55, -0.45, 1.0],
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            _pgm, _yaml, metadata = write_static_navigation_map(
+                value, cloud, Path(temporary)
+            )
+            persisted = json.loads(
+                (Path(temporary) / "navigation-map.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertAlmostEqual(
+            metadata["origin"][0] / 0.10,
+            round(metadata["origin"][0] / 0.10),
+            places=7,
+        )
+        self.assertAlmostEqual(
+            metadata["origin"][1] / 0.10,
+            round(metadata["origin"][1] / 0.10),
+            places=7,
+        )
+        self.assertTrue(persisted["rasterOriginAligned"])
+        self.assertTrue(persisted["routeFootprintRasterValidated"])
+        self.assertEqual(persisted["routeFootprintConflictCellCount"], 0)
 
 
 if __name__ == "__main__":

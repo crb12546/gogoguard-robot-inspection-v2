@@ -215,11 +215,16 @@ class FieldWorkstationApplication:
 
     def navigation_workspace(self, job_id: str) -> dict:
         self.maps.get(job_id)
-        return self.navigation_workspaces.get(job_id)
+        value = self.navigation_workspaces.get(job_id)
+        return value | {
+            "recordedRoute": self.navigation_workspaces.default(job_id)["route"]
+        }
 
     def update_navigation_workspace(self, job_id: str, payload: dict) -> dict:
         self.maps.get(job_id)
-        value = self.navigation_workspaces.update(job_id, payload)
+        value = self.navigation_workspaces.update(
+            job_id, payload, require_current=True
+        )
         self.journal.append(
             "map.navigation_workspace_updated",
             job_id=job_id,
@@ -227,7 +232,9 @@ class FieldWorkstationApplication:
             workspace_hash=value["workspaceHash"],
             ready=value["ready"],
         )
-        return value
+        return value | {
+            "recordedRoute": self.navigation_workspaces.default(job_id)["route"]
+        }
 
     def navigation_surface_preview(self, job_id: str) -> dict:
         self.maps.get(job_id)

@@ -385,19 +385,27 @@ def _route_footprint_cells(
 ) -> set[tuple[int, int]]:
     cells: set[tuple[int, int]] = set()
     for x, y, yaw in _route_pose_samples(route, resolution / 2.0):
-        footprint = _footprint_polygon(x, y, yaw)
-        minimum_x = math.floor(min(point[0] for point in footprint) / resolution)
-        maximum_x = math.floor(max(point[0] for point in footprint) / resolution)
-        minimum_y = math.floor(min(point[1] for point in footprint) / resolution)
-        maximum_y = math.floor(max(point[1] for point in footprint) / resolution)
-        for cell_x in range(minimum_x, maximum_x + 1):
-            for cell_y in range(minimum_y, maximum_y + 1):
-                center = (
-                    (cell_x + 0.5) * resolution,
-                    (cell_y + 0.5) * resolution,
-                )
-                if _point_in_polygon(center, footprint):
-                    cells.add((cell_x, cell_y))
+        cells.update(_footprint_cells(x, y, yaw, resolution))
+    return cells
+
+
+def _footprint_cells(
+    x: float, y: float, yaw: float, resolution: float
+) -> set[tuple[int, int]]:
+    footprint = _footprint_polygon(x, y, yaw)
+    minimum_x = math.floor(min(point[0] for point in footprint) / resolution)
+    maximum_x = math.floor(max(point[0] for point in footprint) / resolution)
+    minimum_y = math.floor(min(point[1] for point in footprint) / resolution)
+    maximum_y = math.floor(max(point[1] for point in footprint) / resolution)
+    cells: set[tuple[int, int]] = set()
+    for cell_x in range(minimum_x, maximum_x + 1):
+        for cell_y in range(minimum_y, maximum_y + 1):
+            center = (
+                (cell_x + 0.5) * resolution,
+                (cell_y + 0.5) * resolution,
+            )
+            if _point_in_polygon(center, footprint):
+                cells.add((cell_x, cell_y))
     return cells
 
 
@@ -664,9 +672,43 @@ class NavigationWorkspaceStore:
             }
         )
 
-    def update(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def update(
+        self,
+        job_id: str,
+        payload: dict[str, Any],
+        *,
+        require_current: bool = False,
+    ) -> dict[str, Any]:
         current = self.get(job_id)
+        if require_current:
+            try:
+                base_revision = int(payload.get("baseRevision"))
+            except (TypeError, ValueError) as exc:
+                raise NavigationWorkspaceError(
+                    "navigation workspace page is stale; refresh before saving"
+                ) from exc
+            base_hash = str(payload.get("baseWorkspaceHash") or "")
+            if (
+                base_revision != int(current["revision"])
+                or base_hash != current["workspaceHash"]
+            ):
+                raise NavigationWorkspaceError(
+                    "navigation workspace changed after this page loaded; refresh before saving"
+                )
         value = dict(payload)
+        route_source = (
+            "recorded" if value.get("routeSource") == "recorded" else "edited"
+        )
+        if route_source == "recorded" and require_current:
+            # A recorded route is immutable derived evidence, not browser-owned
+            # geometry.  Rebuild it from the map artifact so an old page can
+            # never repost lidar_link coordinates and have them stamped as
+            # base_link.
+            value["route"] = self.default(job_id)["route"]
+        elif require_current and value.get("routePoseFrame") != BASE_POSE_FRAME:
+            raise NavigationWorkspaceError(
+                "edited route save must explicitly use the base_link pose frame"
+            )
         value.update(
             {
                 "schema": WORKSPACE_SCHEMA,
@@ -674,6 +716,7 @@ class NavigationWorkspaceStore:
                 "mapVersion": job_id,
                 "revision": int(current.get("revision") or 0) + 1,
                 "sourceMapSha256": current["sourceMapSha256"],
+                "routeSource": route_source,
                 "routePoseFrame": BASE_POSE_FRAME,
                 "sourceTrajectoryPoseFrame": current[
                     "sourceTrajectoryPoseFrame"
@@ -1080,19 +1123,125 @@ def _raster_bounds(
     if not bounds_points:
         raise NavigationWorkspaceError("map has no points for navigation bounds")
     margin = max(2.0, value["robotRadiusM"] * 3.0)
-    minimum_x = min(point[0] for point in bounds_points) - margin
-    maximum_x = max(point[0] for point in bounds_points) + margin
-    minimum_y = min(point[1] for point in bounds_points) - margin
-    maximum_y = max(point[1] for point in bounds_points) + margin
+    raw_minimum_x = min(point[0] for point in bounds_points) - margin
+    raw_maximum_x = max(point[0] for point in bounds_points) + margin
+    raw_minimum_y = min(point[1] for point in bounds_points) - margin
+    raw_maximum_y = max(point[1] for point in bounds_points) + margin
     requested = float(value["navigationSurface"]["resolutionM"])
+    # Snapping can add at most one cell on each side. Reserve those two cells
+    # when a very large map must be coarsened to the Nav2 image-size limit.
     resolution = max(
         requested,
-        (maximum_x - minimum_x) / 4095.0,
-        (maximum_y - minimum_y) / 4095.0,
+        (raw_maximum_x - raw_minimum_x) / 4093.0,
+        (raw_maximum_y - raw_minimum_y) / 4093.0,
     )
-    width = max(1, int(math.ceil((maximum_x - minimum_x) / resolution)))
-    height = max(1, int(math.ceil((maximum_y - minimum_y) / resolution)))
+    # The reviewed surface is indexed from map-frame (0, 0). The PGM origin
+    # must use the same lattice. An arbitrary cloud-bound origin shifts cell
+    # centers by a few centimetres and can put a previously cleared wall pixel
+    # back inside the commissioned rectangular robot footprint.
+    minimum_x = math.floor(raw_minimum_x / resolution) * resolution
+    maximum_x = math.ceil(raw_maximum_x / resolution) * resolution
+    minimum_y = math.floor(raw_minimum_y / resolution) * resolution
+    maximum_y = math.ceil(raw_maximum_y / resolution) * resolution
+    width = max(1, int(round((maximum_x - minimum_x) / resolution)))
+    height = max(1, int(round((maximum_y - minimum_y) / resolution)))
+    if width > 4095 or height > 4095:
+        raise NavigationWorkspaceError("navigation raster exceeds the supported size")
+    # Reconstruct the upper edges from the serialized origin, dimensions and
+    # resolution. This is exactly how map_server interprets the PGM/YAML pair.
+    maximum_x = minimum_x + width * resolution
+    maximum_y = minimum_y + height * resolution
     return minimum_x, maximum_x, minimum_y, maximum_y, resolution, width, height
+
+
+def _raster_cell(
+    x: float,
+    y: float,
+    *,
+    origin_x: float,
+    origin_y: float,
+    resolution: float,
+) -> tuple[int, int]:
+    return (
+        math.floor((x - origin_x) / resolution),
+        math.floor((y - origin_y) / resolution),
+    )
+
+
+def _raster_cell_center(
+    cell: tuple[int, int],
+    *,
+    origin_x: float,
+    origin_y: float,
+    resolution: float,
+) -> tuple[float, float]:
+    return (
+        origin_x + (cell[0] + 0.5) * resolution,
+        origin_y + (cell[1] + 0.5) * resolution,
+    )
+
+
+def _raster_footprint_cells(
+    x: float,
+    y: float,
+    yaw: float,
+    *,
+    origin_x: float,
+    origin_y: float,
+    resolution: float,
+) -> set[tuple[int, int]]:
+    footprint = _footprint_polygon(x, y, yaw)
+    minimum = _raster_cell(
+        min(point[0] for point in footprint),
+        min(point[1] for point in footprint),
+        origin_x=origin_x,
+        origin_y=origin_y,
+        resolution=resolution,
+    )
+    maximum = _raster_cell(
+        max(point[0] for point in footprint),
+        max(point[1] for point in footprint),
+        origin_x=origin_x,
+        origin_y=origin_y,
+        resolution=resolution,
+    )
+    cells: set[tuple[int, int]] = set()
+    for cell_x in range(minimum[0], maximum[0] + 1):
+        for cell_y in range(minimum[1], maximum[1] + 1):
+            center = _raster_cell_center(
+                (cell_x, cell_y),
+                origin_x=origin_x,
+                origin_y=origin_y,
+                resolution=resolution,
+            )
+            if _point_in_polygon(center, footprint):
+                cells.add((cell_x, cell_y))
+    return cells
+
+
+def _raster_cell_is_free(
+    cell: tuple[int, int],
+    *,
+    origin_x: float,
+    origin_y: float,
+    resolution: float,
+    width: int,
+    height: int,
+    polygon: Sequence[tuple[float, float]],
+    occupied: set[tuple[int, int]],
+    source_resolution: float,
+) -> bool:
+    if not (0 <= cell[0] < width and 0 <= cell[1] < height):
+        return False
+    world_x, world_y = _raster_cell_center(
+        cell,
+        origin_x=origin_x,
+        origin_y=origin_y,
+        resolution=resolution,
+    )
+    return _point_in_polygon((world_x, world_y), polygon) and _surface_cell(
+        world_x, world_y, source_resolution
+    ) not in occupied
 
 
 def write_static_navigation_map(
@@ -1109,7 +1258,7 @@ def write_static_navigation_map(
         minimum_x,
         _maximum_x,
         minimum_y,
-        maximum_y,
+        _maximum_y,
         resolution,
         width,
         height,
@@ -1126,21 +1275,47 @@ def write_static_navigation_map(
             "the padded rectangular robot footprint intersects the reviewed static map"
         )
     pixels = bytearray(width * height)
-    for row in range(height):
-        world_y = maximum_y - (row + 0.5) * resolution
+    source_resolution = float(value["navigationSurface"]["resolutionM"])
+    for cell_y in range(height):
+        row = height - 1 - cell_y
         offset = row * width
-        for column in range(width):
-            world_x = minimum_x + (column + 0.5) * resolution
-            source_cell = _surface_cell(
-                world_x,
-                world_y,
-                float(value["navigationSurface"]["resolutionM"]),
+        for cell_x in range(width):
+            free = _raster_cell_is_free(
+                (cell_x, cell_y),
+                origin_x=minimum_x,
+                origin_y=minimum_y,
+                resolution=resolution,
+                width=width,
+                height=height,
+                polygon=polygon,
+                occupied=occupied,
+                source_resolution=source_resolution,
             )
-            free = (
-                _point_in_polygon((world_x, world_y), polygon)
-                and source_cell not in occupied
-            )
-            pixels[offset + column] = 255 if free else 0
+            pixels[offset + cell_x] = 255 if free else 0
+
+    # Validate the exact top-down byte raster that map_server will consume,
+    # after every origin, resolution and source-cell conversion has happened.
+    # Pre-raster validation alone cannot catch quantization or row-origin drift.
+    raster_conflicts: set[tuple[int, int]] = set()
+    for x, y, yaw in _route_pose_samples(route, resolution / 2.0):
+        for cell_x, cell_y in _raster_footprint_cells(
+            x,
+            y,
+            yaw,
+            origin_x=minimum_x,
+            origin_y=minimum_y,
+            resolution=resolution,
+        ):
+            if not (0 <= cell_x < width and 0 <= cell_y < height):
+                raster_conflicts.add((cell_x, cell_y))
+                continue
+            row = height - 1 - cell_y
+            if pixels[row * width + cell_x] == 0:
+                raster_conflicts.add((cell_x, cell_y))
+    if raster_conflicts:
+        raise NavigationWorkspaceError(
+            "the padded rectangular robot footprint intersects the final static-map raster"
+        )
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     pgm_path = output_root / "navigation-map.pgm"
@@ -1181,6 +1356,8 @@ def write_static_navigation_map(
             "recordedCorridorClearCellCount"
         ],
         "routeFootprintConflictCellCount": 0,
+        "routeFootprintRasterValidated": True,
+        "rasterOriginAligned": True,
         "workspaceHash": value["workspaceHash"],
     }
     _atomic_json(output_root / "navigation-map.json", metadata)
@@ -1206,75 +1383,143 @@ def plan_navigation_preview(
     for label, point in (("start", start_xy), ("goal", goal_xy)):
         if not _point_in_polygon(point, polygon):
             raise NavigationWorkspaceError(f"preview {label} is outside the green area")
-    surface = navigation_surface_cells(value, map_points)
-    resolution = float(surface["resolutionM"])
+    cloud = [_map_point(point, "map point") for point in map_points]
+    surface = navigation_surface_cells(value, cloud)
+    source_resolution = float(surface["resolutionM"])
     occupied = {tuple(cell) for cell in surface["occupiedCells"]}
-    radius_cells = int(math.ceil(PADDED_FOOTPRINT_RADIUS_M / resolution))
-    inflated: set[tuple[int, int]] = set()
-    for cell_x, cell_y in occupied:
-        for dx in range(-radius_cells, radius_cells + 1):
-            for dy in range(-radius_cells, radius_cells + 1):
-                if math.hypot(dx, dy) * resolution <= PADDED_FOOTPRINT_RADIUS_M:
-                    inflated.add((cell_x + dx, cell_y + dy))
-    minimum_x = min(point[0] for point in polygon)
-    maximum_x = max(point[0] for point in polygon)
-    minimum_y = min(point[1] for point in polygon)
-    maximum_y = max(point[1] for point in polygon)
-    min_cell = _surface_cell(minimum_x, minimum_y, resolution)
-    max_cell = _surface_cell(maximum_x, maximum_y, resolution)
-    start_cell = _surface_cell(*start_xy, resolution)
-    goal_cell = _surface_cell(*goal_xy, resolution)
+    (
+        minimum_x,
+        _maximum_x,
+        minimum_y,
+        _maximum_y,
+        resolution,
+        width,
+        height,
+    ) = _raster_bounds(value, cloud)
+    start_cell = _raster_cell(
+        *start_xy,
+        origin_x=minimum_x,
+        origin_y=minimum_y,
+        resolution=resolution,
+    )
+    goal_cell = _raster_cell(
+        *goal_xy,
+        origin_x=minimum_x,
+        origin_y=minimum_y,
+        resolution=resolution,
+    )
+    directions = (
+        (-1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
+    )
+    headings = tuple(math.atan2(dy, dx) for dx, dy in directions)
+    traversable_cache: dict[tuple[int, int, int], bool] = {}
 
-    def traversable(cell: tuple[int, int]) -> bool:
-        if cell in inflated:
-            return False
-        world = ((cell[0] + 0.5) * resolution, (cell[1] + 0.5) * resolution)
-        return (
-            min_cell[0] <= cell[0] <= max_cell[0]
-            and min_cell[1] <= cell[1] <= max_cell[1]
-            and _point_in_polygon(world, polygon)
-            and _distance_to_boundary(world, polygon) + 1.0e-6
-            >= PADDED_FOOTPRINT_RADIUS_M
+    def traversable(cell: tuple[int, int], heading: int) -> bool:
+        key = (cell[0], cell[1], heading)
+        if key in traversable_cache:
+            return traversable_cache[key]
+        world_x, world_y = _raster_cell_center(
+            cell,
+            origin_x=minimum_x,
+            origin_y=minimum_y,
+            resolution=resolution,
         )
+        footprint = _footprint_polygon(world_x, world_y, headings[heading])
+        footprint_cells = _raster_footprint_cells(
+            world_x,
+            world_y,
+            headings[heading],
+            origin_x=minimum_x,
+            origin_y=minimum_y,
+            resolution=resolution,
+        )
+        result = all(_point_in_polygon(corner, polygon) for corner in footprint) and all(
+            _raster_cell_is_free(
+                footprint_cell,
+                origin_x=minimum_x,
+                origin_y=minimum_y,
+                resolution=resolution,
+                width=width,
+                height=height,
+                polygon=polygon,
+                occupied=occupied,
+                source_resolution=source_resolution,
+            )
+            for footprint_cell in footprint_cells
+        )
+        traversable_cache[key] = result
+        return result
 
-    if not traversable(start_cell) or not traversable(goal_cell):
+    start_states = [
+        (start_cell, heading)
+        for heading in range(len(directions))
+        if traversable(start_cell, heading)
+    ]
+    if not start_states or not any(
+        traversable(goal_cell, heading) for heading in range(len(directions))
+    ):
         raise NavigationWorkspaceError(
             "preview start or goal has no room for the padded robot footprint"
         )
     import heapq
 
-    frontier: list[tuple[float, float, tuple[int, int]]] = []
-    heapq.heappush(frontier, (0.0, 0.0, start_cell))
-    parent: dict[tuple[int, int], tuple[int, int] | None] = {start_cell: None}
-    cost = {start_cell: 0.0}
+    State = tuple[tuple[int, int], int]
+    frontier: list[tuple[float, float, State]] = []
+    parent: dict[State, State | None] = {}
+    cost: dict[State, float] = {}
+    for state in start_states:
+        parent[state] = None
+        cost[state] = 0.0
+        heapq.heappush(
+            frontier,
+            (math.dist(start_cell, goal_cell), 0.0, state),
+        )
     visited = 0
+    goal_state: State | None = None
     while frontier:
-        _priority, current_cost, current = heapq.heappop(frontier)
-        if current_cost > cost.get(current, math.inf) + 1.0e-9:
+        _priority, current_cost, current_state = heapq.heappop(frontier)
+        if current_cost > cost.get(current_state, math.inf) + 1.0e-9:
             continue
         visited += 1
+        current, current_heading = current_state
         if current == goal_cell:
+            goal_state = current_state
             break
-        for dx, dy in (
-            (-1, 0), (1, 0), (0, -1), (0, 1),
-            (-1, -1), (-1, 1), (1, -1), (1, 1),
-        ):
+        for heading, (dx, dy) in enumerate(directions):
             neighbor = (current[0] + dx, current[1] + dy)
-            if not traversable(neighbor):
+            if not traversable(neighbor, heading):
                 continue
-            if dx and dy and (
-                not traversable((current[0] + dx, current[1]))
-                or not traversable((current[0], current[1] + dy))
-            ):
+            # A heading change must also fit at the current center; this keeps
+            # the review path from rotating the long body through a wall.
+            if heading != current_heading and not traversable(current, heading):
                 continue
-            next_cost = current_cost + (math.sqrt(2.0) if dx and dy else 1.0)
-            if next_cost + 1.0e-9 >= cost.get(neighbor, math.inf):
+            turn_steps = min(
+                (heading - current_heading) % len(directions),
+                (current_heading - heading) % len(directions),
+            )
+            next_cost = (
+                current_cost
+                + (math.sqrt(2.0) if dx and dy else 1.0)
+                + turn_steps * 0.05
+            )
+            neighbor_state = (neighbor, heading)
+            if next_cost + 1.0e-9 >= cost.get(neighbor_state, math.inf):
                 continue
-            cost[neighbor] = next_cost
-            parent[neighbor] = current
+            cost[neighbor_state] = next_cost
+            parent[neighbor_state] = current_state
             heuristic = math.hypot(goal_cell[0] - neighbor[0], goal_cell[1] - neighbor[1])
-            heapq.heappush(frontier, (next_cost + heuristic, next_cost, neighbor))
-    if goal_cell not in parent:
+            heapq.heappush(
+                frontier,
+                (next_cost + heuristic, next_cost, neighbor_state),
+            )
+    if goal_state is None:
         return {
             "schema": "gogoguard.navigation_plan_preview.v1",
             "reachable": False,
@@ -1282,11 +1527,12 @@ def plan_navigation_preview(
             "path": [],
             "visitedCellCount": visited,
         }
-    cells = []
-    current: tuple[int, int] | None = goal_cell
-    while current is not None:
-        cells.append(current)
-        current = parent[current]
+    states: list[State] = []
+    current_state: State | None = goal_state
+    while current_state is not None:
+        states.append(current_state)
+        current_state = parent[current_state]
+    cells = [state[0] for state in states]
     cells.reverse()
     # The preview is for human review, not controller input. Keep corners and
     # every tenth cell so a long result stays legible and bounded in the UI.
@@ -1300,14 +1546,30 @@ def plan_navigation_preview(
             reduced.append(cell)
         previous_direction = direction
     path = [[start_xy[0], start_xy[1]]]
-    path.extend([[(cell[0] + 0.5) * resolution, (cell[1] + 0.5) * resolution] for cell in reduced[1:-1]])
+    path.extend(
+        [
+            list(
+                _raster_cell_center(
+                    cell,
+                    origin_x=minimum_x,
+                    origin_y=minimum_y,
+                    resolution=resolution,
+                )
+            )
+            for cell in reduced[1:-1]
+        ]
+    )
     path.append([goal_xy[0], goal_xy[1]])
+    length_m = sum(
+        math.dist(first, second) * resolution
+        for first, second in zip(cells, cells[1:])
+    )
     return {
         "schema": "gogoguard.navigation_plan_preview.v1",
         "reachable": True,
         "reason": "OK",
         "path": path,
-        "lengthM": round(cost[goal_cell] * resolution, 3),
+        "lengthM": round(length_m, 3),
         "visitedCellCount": visited,
         "note": "编辑器连通性预演；狗端正式路径由 Nav2 SmacPlanner2D 计算",
     }

@@ -498,6 +498,7 @@ _OPERATOR_REASON_MESSAGES = {
     "TRANSIENT_CONTROL_RETRY": "导航控制刚才短暂中断，路线前方没有确认障碍，正从当前进度自动重试",
     "PATH_OBSTRUCTED": "局部代价地图已确认原路线前方被占用，正在局部绕行并接回原路线",
     "SEARCHING_FOR_PATH": "当前还没有找到可行绕行路径，机器狗已停稳并会持续重新寻路",
+    "PERSISTENT_PATH_OBSTRUCTION": "连续多次规划都被同一静态障碍阻断，机器狗已停止；请检查最终导航地图与路线后重新发布",
     "ACTUATION_RECOVERY": "指令与实际运动短暂不一致，机器狗已停稳并会从当前进度持续恢复",
     "OBSTRUCTION_CLEARED_RESUMING_ROUTE": "原障碍已消失，正从当前进度恢复原巡检路线",
     "COSTMAP_UNHEALTHY": "本地障碍地图状态异常，机器狗已停稳并会等待新的健康数据后继续",

@@ -9,15 +9,17 @@ only the latest navigation problem. The dated sections below are evidence
 history; do not treat an older "next experiment" paragraph as current when it
 conflicts with this section or the final paragraph of this file.
 
-The current GitHub `main` and robot edge release are now the clean generation-10
-source at commit `3184deeda6165c39af1e6f8b4f850810fde7a4c4`. The robot was
-statically upgraded on 2026-08-24; its existing selected candidate is still
-generation 9 and therefore fails closed before the Unitree motion bridge can
-start. The operator does not need to repeat the physical recording. The next
-safe step is to reopen the repaired map `map-dc7036e35379`, review/save the
-green area and red static occupancy with the calibrated base-frame route, and
-publish a new generation-10 candidate. No generation-10 motion acceptance has
-occurred.
+The current robot edge release is generation-10
+`gogoguard-robot-inspection:v2-edge-20260824-raster-r14`, built from source
+identity `9405c498644ec2552c9c68905db9cef7def9a15c-dirty`. It is active and
+enabled with zero restarts. Real candidate `map-0d2b63d9da78` /
+`route-0d2b63d9da78-workspace-r5` is statically selected: Mac and robot have
+the same final PGM hash, its origin is aligned to the reviewed 0.10 m lattice,
+and the serialized raster has zero route-footprint conflicts. The operator does
+not need to repeat the physical recording. Nav2 and the Unitree motion bridge
+remain stopped; r14 has no physical patrol acceptance yet. The source changes
+are being promoted to GitHub `main` so the dog05 owner can build the same
+behavior.
 
 ### Overall product status
 
@@ -3190,3 +3192,55 @@ authorization before localization, Nav2 or physical motion.
   evidence of another robot-token failure and is tracked as an external
   platform-listener condition; no insecure-TLS fallback or credential change
   was applied.
+
+## 2026-08-24 aligned-raster r14 static deployment receipt
+
+- The field trace on `map-0d2b63d9da78` exposed a third independent map
+  mismatch after the earlier LiDAR/base-frame and circular-footprint repairs.
+  The reviewed surface cells are indexed from map-frame `(0,0)`, but the final
+  PGM origin had been taken from an arbitrary point-cloud bound at
+  `(-88.0916213989,-115.3611755371)`. That sub-cell shift could reinterpret a
+  reviewed/cleared cell several centimetres closer to the robot after Nav2
+  loaded the YAML/PGM pair. The preview and pre-raster validator therefore did
+  not prove the bytes consumed by `map_server`.
+- Route publication now snaps the PGM origin to the effective resolution
+  lattice, uses one bottom-up cell conversion for preview and serialization,
+  and rechecks every sampled padded rectangular footprint against the final
+  top-down PGM bytes. Metadata records `rasterOriginAligned=true`,
+  `routeFootprintRasterValidated=true` and zero conflicts. Preview A* uses the
+  same oriented rectangle and prevents in-place turns through walls. The
+  runtime also changes eight consecutive healthy-costmap `PATH_OBSTRUCTED`
+  failures into terminal `PERSISTENT_PATH_OBSTRUCTION` instead of an endless
+  planning loop. Real-map preparation receives a dedicated 120-second local
+  supervisor timeout instead of falsely returning HTTP 409 after 15 seconds.
+- The existing green area and recording were not recreated. Revision 5 retains
+  217 recorded route points, six allowed-area vertices and 5041 explicit clear
+  cells. Five ordered static preview legs are all reachable: start -> cp_01
+  5.894 m, cp_01 -> cp_02 12.223 m, cp_02 -> cp_03 32.235 m, cp_03 -> cp_04
+  46.586 m and cp_04 -> end 0.500 m. This is workstation connectivity evidence,
+  not a motion receipt.
+- ARM64 image
+  `gogoguard-robot-inspection:v2-edge-20260824-raster-r14` has local manifest
+  list ID
+  `sha256:24b446ad7841ae97ea74c01c7393e539ce9bb6d509a786f004d3b08bf1e8b8eb`
+  and robot-running config ID
+  `sha256:fe24321baf86546a01dcf01cc9f8d211fcaf615c633e205cf51394460ce211ab`.
+  The 1,501,913,600-byte release archive SHA-256 is
+  `19f22bc6f8fc83abbde1b7f3d119125cc54f29005decf7d36b56086f54141730`;
+  Mac and robot both verified it before installation. The service entered
+  active/running at 23:38:03 CST, remains enabled with zero restarts, and the
+  platform reports `online=true`.
+- Mac and robot candidate metadata now match exactly for
+  `route-0d2b63d9da78-workspace-r5`: final PGM SHA-256
+  `40717c720bdbdc2a324b84b640980070f15ad0a2088f754b290c2da20a72a341`,
+  origin `(-88.1,-115.4)`, resolution 0.10 m, aligned-raster receipt true,
+  final-footprint receipt true and zero conflict cells. Nav2 and the motion
+  bridge were never started during build, install or candidate preparation;
+  UDP 5005 remained unbound. r14 therefore remains a static deployment pending
+  one supervised physical patrol.
+- All 284 repository tests, Python compilation, UI smoke, container contract,
+  repository knowledge and ARM64 in-image source/runtime checks pass. The
+  release also retains the strict private-CA LiveKit WSS path and sanitized
+  interaction rejection reason codes from the immediately preceding platform
+  connectivity work; no credential is stored in source, image metadata or this
+  receipt.

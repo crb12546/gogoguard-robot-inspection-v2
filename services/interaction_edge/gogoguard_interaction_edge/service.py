@@ -33,6 +33,29 @@ from gogoguard_interaction import (
 SAFE_EXTERNAL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
+def safe_interaction_reason_code(exc: Exception) -> str:
+    """Classify a local failure without returning tokens, URLs or private details."""
+
+    message = str(exc)
+    exact = {
+        "LiveKit URL must be a credential-free wss endpoint": "LIVEKIT_WSS_REQUIRED",
+        "LiveKit token identity does not match robot id": "LIVEKIT_TOKEN_IDENTITY_MISMATCH",
+        "LiveKit token room grant does not match command": "LIVEKIT_TOKEN_ROOM_MISMATCH",
+        "LiveKit token is expired or too close to expiration": "LIVEKIT_TOKEN_EXPIRED",
+        "LiveKit token is not active yet": "LIVEKIT_TOKEN_NOT_ACTIVE",
+        "another live room is already desired": "LIVEKIT_ROOM_CONFLICT",
+    }
+    if message in exact:
+        return exact[message]
+    if message.startswith("LiveKit token"):
+        return "LIVEKIT_TOKEN_INVALID"
+    if message.startswith("requested media capability is unavailable"):
+        return "MEDIA_CAPABILITY_UNAVAILABLE"
+    if isinstance(exc, ValueError):
+        return "INTERACTION_COMMAND_INVALID"
+    return "INTERACTION_COMMAND_FAILED"
+
+
 def validate_pose_stream_payload(payload: Any, *, robot_id: str) -> dict[str, Any]:
     """Validate the frozen robot-to-platform pose DataChannel envelope."""
 
@@ -384,6 +407,7 @@ class InteractionUnixServer:
                 result = {
                     "ok": False,
                     "errorCode": type(exc).__name__,
+                    "reasonCode": safe_interaction_reason_code(exc),
                     "message": "interaction command failed",
                 }
             try:

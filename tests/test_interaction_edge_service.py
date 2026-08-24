@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import socket
 import tempfile
 import threading
 import time
@@ -230,6 +231,37 @@ class InteractionEdgeServiceTest(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=2)
             self.assertFalse(thread.is_alive())
+
+    def test_unix_socket_reports_safe_wss_reason_without_echoing_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = self.create_service(root)
+            server = InteractionUnixServer(root / "control.sock", service)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            for _ in range(100):
+                if (root / "control.sock").exists():
+                    break
+                time.sleep(0.01)
+            secret = token()
+            payload = {
+                "id": 2,
+                "action": "start_live",
+                "params": {
+                    "url": "ws://39.96.37.187:7880",
+                    "room": "patrol-test-001",
+                    "token": secret,
+                },
+            }
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.connect(str(root / "control.sock"))
+                client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+                response = json.loads(client.makefile("rb").readline())
+            self.assertFalse(response["ok"])
+            self.assertEqual(response["reasonCode"], "LIVEKIT_WSS_REQUIRED")
+            self.assertNotIn(secret, json.dumps(response))
+            server.shutdown()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

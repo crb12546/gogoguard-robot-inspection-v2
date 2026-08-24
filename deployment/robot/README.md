@@ -57,6 +57,15 @@ proxy. Run the helper again without
 the option as soon as the public domain is restored to return to strict
 HTTPS/WSS defaults.
 
+For the commissioned strict-TLS bare-IP path, install the root-owned
+`/etc/gogoguard/platform-ca.crt` first and run
+`configure-combined-joint-test --fixed-ip-private-ca`. This profile keeps
+heartbeat verification enabled, requires a platform-issued `wss://` LiveKit
+URL and supplies the private CA to the interaction process without replacing
+the public system trust bundle. Platform rollout is per device: verify the new
+WSS room on one robot before changing another robot's `live_url`. The helper
+does not start the service and never embeds either device's token.
+
 The first robot deployment is an explicit experiment with these receipts:
 
 1. image digest and container health;

@@ -101,6 +101,12 @@ RECOVERABLE_RUNTIME_GATES = frozenset(
     }
 )
 
+# A healthy costmap returning the same PATH_OBSTRUCTED controller result over
+# and over is not recovery; it is a stationary retry loop. Bound consecutive
+# identical failures so the robot remains stopped and the operator receives an
+# actionable map/route review reason instead of an endless "planning" state.
+MAX_CONSECUTIVE_PATH_FAILURES = 8
+
 
 def _yaw_from_quaternion(quaternion) -> float:
     siny = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
@@ -532,6 +538,7 @@ class PatrolRuntimeManager(Node):
         self.costmap_refresh_started_at = None
         self.costmap_refresh_future = None
         self.detour_attempt_count = 0
+        self.consecutive_path_failure_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
         self.planner_completion = ""
@@ -1379,6 +1386,7 @@ class PatrolRuntimeManager(Node):
         self.checkpoint_gate_failed_at = None
         self.checkpoint_gate_recovered_at = None
         self.detour_attempt_count = 0
+        self.consecutive_path_failure_count = 0
         self.last_detour_compute_ms = None
         self.last_rejoin_index = None
         self.planner_completion = ""
@@ -1562,6 +1570,7 @@ class PatrolRuntimeManager(Node):
             self.runtime_reason = "STOPPED"
             attempt_outcome = "STOPPED"
         elif status == GoalStatus.STATUS_SUCCEEDED:
+            self.consecutive_path_failure_count = 0
             success_action = controller_success_action(completed_controller)
             if success_action == ControllerSuccessAction.RESUME_MPPI_SUFFIX:
                 if self.last_rejoin_index is not None:
@@ -1615,6 +1624,24 @@ class PatrolRuntimeManager(Node):
                 )
             )
             self.last_failure_class = decision.failure_class.value
+            if decision.failure_class.value == "PATH_OBSTRUCTED":
+                self.consecutive_path_failure_count += 1
+            else:
+                self.consecutive_path_failure_count = 0
+            if (
+                costmap_health.healthy
+                and self.consecutive_path_failure_count
+                >= MAX_CONSECUTIVE_PATH_FAILURES
+            ):
+                self.recovery_pending = ""
+                self.recovery_requested_at = None
+                self.recovery_reason = ""
+                self.runtime_state = "FAULT"
+                self.runtime_reason = "PERSISTENT_PATH_OBSTRUCTION"
+                self._finish_active_start_attempt(
+                    "FAILED", self.runtime_reason
+                )
+                return
             if decision.action == RecoveryAction.HOLD_LOCALIZATION:
                 self.resume_pending = True
                 self.runtime_state = "HOLDING"
@@ -2443,6 +2470,7 @@ class PatrolRuntimeManager(Node):
                 "angularCommandActiveRatio": motion_evidence.angular_command_active_ratio,
             },
             "detourAttemptCount": self.detour_attempt_count,
+            "consecutivePathFailureCount": self.consecutive_path_failure_count,
             "detourComputeMs": self.last_detour_compute_ms,
             "rejoinRouteIndex": self.last_rejoin_index,
             "resumePending": self.resume_pending,

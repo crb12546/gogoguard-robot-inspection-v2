@@ -138,6 +138,48 @@ class NavigationCandidateTest(unittest.TestCase):
         self.assertTrue(current_path.is_file())
         self.assertTrue(legacy_path.is_file())
 
+    def test_browser_save_rejects_a_stale_workspace_snapshot(self):
+        store = NavigationWorkspaceStore(self.root)
+        current = store.get(self.job_id)
+
+        with self.assertRaisesRegex(NavigationWorkspaceError, "refresh before saving"):
+            store.update(
+                self.job_id,
+                {
+                    "baseRevision": current["revision"] - 1,
+                    "baseWorkspaceHash": current["workspaceHash"],
+                    "routeSource": "recorded",
+                    "routePoseFrame": "base_link",
+                    "route": current["route"],
+                    "allowedArea": current["allowedArea"],
+                    "robotRadiusM": current["robotRadiusM"],
+                    "navigationSurface": current["navigationSurface"],
+                },
+                require_current=True,
+            )
+
+    def test_browser_recorded_route_is_rebuilt_from_the_map_artifact(self):
+        store = NavigationWorkspaceStore(self.root)
+        current = store.get(self.job_id)
+        recorded = store.default(self.job_id)["route"]
+
+        updated = store.update(
+            self.job_id,
+            {
+                "baseRevision": current["revision"],
+                "baseWorkspaceHash": current["workspaceHash"],
+                "routeSource": "recorded",
+                "routePoseFrame": "base_link",
+                "route": [[0.0, 0.0], [0.5, 0.5]],
+                "allowedArea": current["allowedArea"],
+                "robotRadiusM": current["robotRadiusM"],
+                "navigationSurface": current["navigationSurface"],
+            },
+            require_current=True,
+        )
+
+        self.assertEqual(updated["route"], recorded)
+
     def test_lidar_trajectory_is_converted_to_base_route_once(self):
         workspace_path = self.artifacts.parent / "navigation-workspace.json"
         self.artifacts.chmod(0o750)

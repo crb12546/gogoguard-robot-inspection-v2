@@ -142,6 +142,9 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         runtime_env = (
             repository / "deployment/robot/runtime.env.example"
         ).read_text(encoding="utf-8")
+        configure = (
+            repository / "deployment/robot/configure-combined-joint-test"
+        ).read_text(encoding="utf-8")
         for name in (
             "GOGOGUARD_SOFTWARE_VERSION",
             "GOGOGUARD_GIT_COMMIT",
@@ -153,8 +156,12 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         self.assertIn("GOGOGUARD_CHECKPOINT_EVIDENCE_TXN_ENABLED=0", runtime_env)
         self.assertIn("GOGOGUARD_ROBOT_ID=LLYJ0001", runtime_env)
         self.assertIn("GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE=", runtime_env)
+        self.assertIn("GOGOGUARD_INTERACTION_CA_FILE=", runtime_env)
         self.assertIn("/etc/gogoguard/platform-ca.crt", run_edge)
         self.assertIn('--ca-file "$PLATFORM_HEARTBEAT_CA_FILE"', edge_entrypoint)
+        self.assertIn("SSL_CERT_FILE", edge_entrypoint)
+        self.assertIn("GOGOGUARD_INTERACTION_CA_FILE", validator)
+        self.assertIn("--fixed-ip-private-ca", configure)
         self.assertIn("commissioned platform CA file is unavailable", validator)
         self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", service)
         self.assertIn("validate-runtime-env /etc/gogoguard/runtime.env", installer)
@@ -685,6 +692,37 @@ class PlatformHeartbeatServiceTest(unittest.TestCase):
         thread.join(timeout=2)
         self.assertTrue(response["ok"])
         self.assertEqual(received, [{"id": 9, "action": "stop_live"}])
+
+    def test_interaction_client_preserves_only_safe_rejection_reason(self) -> None:
+        socket_path = self.root / "rejected-interaction.sock"
+        ready = threading.Event()
+
+        def server() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(socket_path))
+                listener.listen(1)
+                ready.set()
+                connection, _ = listener.accept()
+                with connection:
+                    connection.makefile("rb").readline()
+                    connection.sendall(
+                        b'{"ok":false,"errorCode":"ValueError",'
+                        b'"reasonCode":"LIVEKIT_WSS_REQUIRED",'
+                        b'"message":"interaction command failed"}\n'
+                    )
+
+        thread = threading.Thread(target=server, daemon=True)
+        thread.start()
+        self.assertTrue(ready.wait(2))
+        with self.assertRaisesRegex(RuntimeError, "LIVEKIT_WSS_REQUIRED") as raised:
+            InteractionControlClient(socket_path).request(
+                {"id": 10, "action": "start_live"}
+            )
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "LIVEKIT_WSS_REQUIRED",
+        )
+        thread.join(timeout=2)
 
     def test_navigation_client_maps_platform_lifecycle_to_narrow_rpc(self) -> None:
         socket_path = self.root / "navigation.sock"

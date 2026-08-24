@@ -1675,9 +1675,12 @@ async function saveNavigationWorkspace() {
   $('saveWorkspace').disabled = true;
   try {
     const payload = {
+      baseRevision: state.navigationWorkspace.revision,
+      baseWorkspaceHash: state.navigationWorkspace.workspaceHash,
       route: state.navigationWorkspace.route,
       allowedArea: state.navigationWorkspace.allowedArea,
       routeSource: state.navigationWorkspace.routeSource,
+      routePoseFrame: state.navigationWorkspace.routePoseFrame,
       robotRadiusM: state.navigationWorkspace.robotRadiusM || 0.48,
       navigationSurface: {...ensureNavigationSurface(), reviewed: true},
     };

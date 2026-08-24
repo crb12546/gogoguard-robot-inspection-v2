@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import socket
 import ssl
 import tempfile
@@ -135,7 +136,18 @@ class InteractionControlClient:
             raise RuntimeError("interaction service returned an invalid response")
         value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict) or value.get("ok") is not True:
-            raise RuntimeError("interaction service rejected the platform command")
+            reason_code = value.get("reasonCode") if isinstance(value, dict) else None
+            if (
+                not isinstance(reason_code, str)
+                or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", reason_code) is None
+            ):
+                reason_code = "INTERACTION_COMMAND_REJECTED"
+            error = RuntimeError(
+                "interaction service rejected the platform command; "
+                f"reasonCode={reason_code}"
+            )
+            error.reason_code = reason_code
+            raise error
         return value
 
 
@@ -596,6 +608,9 @@ class PlatformHeartbeatService:
                         "status": "failed",
                         "message": str(exc)[:512] or type(exc).__name__,
                     }
+                    reason_code = getattr(exc, "reason_code", None)
+                    if isinstance(reason_code, str):
+                        outcome["reasonCode"] = reason_code
                 outcomes.append(outcome)
                 self._report_command_result(command, outcome)
             self._last_error_code = None

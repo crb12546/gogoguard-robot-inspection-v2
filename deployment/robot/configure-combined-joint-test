@@ -8,15 +8,18 @@ fi
 
 profile=secure
 if [[ $# -gt 1 ]]; then
-  echo "usage: configure-combined-joint-test [--temporary-icp-fallback]" >&2
+  echo "usage: configure-combined-joint-test [--fixed-ip-private-ca|--temporary-icp-fallback]" >&2
   exit 2
 fi
 if [[ $# -eq 1 ]]; then
-  if [[ $1 != "--temporary-icp-fallback" ]]; then
+  if [[ $1 == "--fixed-ip-private-ca" ]]; then
+    profile=fixed-ip-private-ca
+  elif [[ $1 == "--temporary-icp-fallback" ]]; then
+    profile=temporary-icp-fallback
+  else
     echo "unknown joint-test profile: $1" >&2
     exit 2
   fi
-  profile=temporary-icp-fallback
 fi
 
 readonly RUNTIME_ENV=/etc/gogoguard/runtime.env
@@ -82,12 +85,21 @@ if [[ $profile == temporary-icp-fallback ]]; then
   # robot traffic uses the fixed IP. LiveKit remains command-supplied and is
   # never hard-coded here.
   upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 1
+  upsert GOGOGUARD_INTERACTION_CA_FILE ""
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL http://39.96.37.187/api/v1/robot/heartbeat
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE ""
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 1
+elif [[ $profile == fixed-ip-private-ca ]]; then
+  upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 0
+  upsert GOGOGUARD_INTERACTION_CA_FILE /etc/gogoguard/platform-ca.crt
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL https://39.96.37.187/api/v1/robot/heartbeat
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE /etc/gogoguard/platform-ca.crt
+  upsert GOGOGUARD_PLATFORM_HEARTBEAT_ALLOW_HTTP 0
 else
   upsert GOGOGUARD_INTERACTION_ALLOW_INSECURE_WS 0
+  upsert GOGOGUARD_INTERACTION_CA_FILE ""
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_URL https://gogoguard.cn/api/v1/robot/heartbeat
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_TLS_INSECURE 0
   upsert GOGOGUARD_PLATFORM_HEARTBEAT_CA_FILE ""
