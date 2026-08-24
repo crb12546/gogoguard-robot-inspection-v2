@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-23
+Updated: 2026-08-24
 
 ## New-task handoff — start here
 
@@ -8,6 +8,16 @@ This section is the compact authoritative handoff for the whole product, not
 only the latest navigation problem. The dated sections below are evidence
 history; do not treat an older "next experiment" paragraph as current when it
 conflicts with this section or the final paragraph of this file.
+
+The current GitHub `main` and robot edge release are now the clean generation-10
+source at commit `3184deeda6165c39af1e6f8b4f850810fde7a4c4`. The robot was
+statically upgraded on 2026-08-24; its existing selected candidate is still
+generation 9 and therefore fails closed before the Unitree motion bridge can
+start. The operator does not need to repeat the physical recording. The next
+safe step is to reopen the repaired map `map-dc7036e35379`, review/save the
+green area and red static occupancy with the calibrated base-frame route, and
+publish a new generation-10 candidate. No generation-10 motion acceptance has
+occurred.
 
 ### Overall product status
 
@@ -3135,3 +3145,48 @@ authorization before localization, Nav2 or physical motion.
   source verification and the subsequent GitHub push only. No generation-10
   image was built, no release was staged, no cloud script was redeployed and no
   robot process, service, posture or motion command was changed.
+
+## 2026-08-24 generation-10 static robot deployment receipt
+
+- The clean GitHub `main` commit
+  `3184deeda6165c39af1e6f8b4f850810fde7a4c4` was built for ARM64 and installed
+  as `gogoguard-robot-inspection:v2-edge-20260824-generation10-r12`. The image
+  digest is
+  `sha256:1c2b3ee23d8629413c9104ea63158012d0fe86dc172b58156f8eb44e42d85bc3`,
+  the build ID is `edge-3184deeda616-1c2b3ee23d86`, and the release archive
+  SHA-256 is
+  `163b95d2bd2432c52f8396369ef4aff4d1f041694d4736d64c6bb4ff464397cf`.
+  The workstation and robot both verified the archive hash before installation.
+- The commissioned robot identity, device token and runtime settings were
+  preserved by the release installer and passed the root-only environment
+  validator. `gogoguard-edge.service` entered `active/running` at 20:57:49 CST
+  with zero restarts. The running container reports the generation-10 image and
+  zero container restarts. A post-start snapshot reported Livox 10.9 Hz, IMU
+  37.6 Hz, odometry 9.9 Hz and approximately 313.5 GB free disk.
+- No localization, Nav2, patrol runtime or Unitree motion bridge was started.
+  UDP 5005 remained unbound and `motionCommandsPermitted=false`. The selected
+  robot candidate remains generation 9 `map-dc7036e35379` /
+  `route-dc7036e35379-workspace-r2`; generation-10 validation rejects it before
+  any motion-bridge process launch. A focused regression for this exact ordering
+  passes. This is a static deployment receipt, not a posture, motion or patrol
+  acceptance receipt.
+- Re-recording is not required for this correction. Sealed recording
+  `20260823T131600Z-fcc0bbbe` remains available on both the Mac and robot, and
+  repaired immutable map `map-dc7036e35379` remains available on the Mac. The
+  operator must review/save the map workspace and publish it again so the
+  workstation emits a generation-10 candidate with the calibrated
+  `lidar_link -> base_link` route conversion and shared rectangular footprint.
+- Robot sudo automation is commissioned locally without placing a password in
+  the repository, command arguments or logs. macOS Keychain service
+  `gogoguard-robot-sudo`, account `unitree@192.168.123.18`, backs the mode-0700
+  helper `/Users/mac/.gogoguard-agent-bridge/gogoguard-robot-sudo`. The helper
+  was verified with a root identity check and used for the final container and
+  service inspection.
+- The robot platform adapter currently reports `ConnectionError`, no successful
+  heartbeat and `online=false`, while retaining `navigationReady=true` and
+  `motionCommandsPermitted=false`. Strict HTTPS from both the robot container
+  and Mac resolves `gogoguard.cn` to `39.96.37.187` but is reset during TLS
+  negotiation before any HTTP request or device-token validation. This is not
+  evidence of another robot-token failure and is tracked as an external
+  platform-listener condition; no insecure-TLS fallback or credential change
+  was applied.
