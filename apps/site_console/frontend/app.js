@@ -22,6 +22,7 @@ const state = {
   planStart: null,
   planGoal: null,
   navigation: null,
+  navigationPrepare: null,
   live: null,
   camera: null,
   gimbal: null,
@@ -613,6 +614,7 @@ function redrawResult() {
 async function showResult(job, {explicit = false} = {}) {
   if (!job?.point_cloud_url) return;
   if (explicit) state.mapSelectionExplicit = true;
+  if (state.latestMapJob?.job_id !== job.job_id) state.navigationPrepare = null;
   state.latestMapJob = job;
   $('resultEmpty').style.display = 'none';
   document.querySelector('.map-review').style.display = 'grid';
@@ -1688,6 +1690,9 @@ async function saveNavigationWorkspace() {
       `/api/v1/map-jobs/${encodeURIComponent(state.latestMapJob.job_id)}/navigation-workspace`,
       payload,
     );
+    // The newly saved workspace is a new unpublished revision, so a success
+    // notice from the previous revision must not remain visible.
+    state.navigationPrepare = null;
     state.savedNavigationWorkspace = structuredClone(state.navigationWorkspace);
     state.workspaceEditMode = null;
     $('workspaceHelp').textContent = '已保存；这一版静态导航地图、推荐路线和绿色范围已绑定。';
@@ -1867,6 +1872,7 @@ function renderNavigation() {
   const selectedRuntimeReady = assetReady && runtimeMatchesCandidate;
   const operation = (navigation.operations || [])[0];
   const operationBusy = ['accepted', 'running'].includes(operation?.state);
+  const preparePending = state.navigationPrepare?.state === 'running';
   const stopOperationBusy = operationBusy && ['runtime.stop', 'patrol.stop'].includes(operation?.kind);
   const patrolRunning = [
     'STARTING', 'PATROLLING', 'HOLDING', 'RESUMING', 'REPLANNING',
@@ -1895,10 +1901,12 @@ function renderNavigation() {
   $('operationState').textContent = operationStateText(operation);
   $('operationMessage').textContent = operationMessageText(operation);
 
-  $('assetStepState').textContent = assetReady
+  $('assetStepState').textContent = preparePending
+    ? '发布中'
+    : assetReady
     ? (runtimeRunning && !runtimeMatchesCandidate ? '已发布，待切换' : '已发布')
     : (selectedJobId ? (workspaceReady ? '待发布' : '待保存绿色范围') : '未选择');
-  $('assetStep').classList.toggle('done', assetReady);
+  $('assetStep').classList.toggle('done', assetReady && !preparePending);
   $('runtimeStepState').textContent = runtimeRunning
     ? (!runtimeMatchesCandidate ? '运行旧地图' : (localization.usable ? '定位可用' : '定位中'))
     : '未启动';
@@ -1934,11 +1942,17 @@ function renderNavigation() {
     $('navigationError').textContent = operation.message || operation.error || '导航操作失败';
   }
   if (operationBusy) guidance = `正在${operationKindLabels[operation.kind] || operation.kind || '执行操作'}，请等待请求结果，不要重复点击。`;
+  if (preparePending) guidance = '正在把当前地图、路线和绿色允许范围发布到机器狗；请等待明确的成功或失败结果，不要重复点击。';
   $('workflowMessage').textContent = guidance;
 
-  $('prepareNavigation').hidden = assetReady || !selectedJobId;
+  $('prepareNavigation').hidden = (assetReady && !preparePending) || !selectedJobId;
   $('prepareNavigationHelp').hidden = $('prepareNavigation').hidden;
-  $('prepareNavigation').disabled = !selectedJobId || !workspaceReady || operationBusy;
+  $('prepareNavigation').disabled = !selectedJobId || !workspaceReady || operationBusy || preparePending;
+  $('prepareNavigation').textContent = preparePending
+    ? '正在发布地图与路线…'
+    : '发布所选地图与路线到机器狗';
+  $('prepareNavigationStatus').hidden = !state.navigationPrepare;
+  $('prepareNavigationMessage').textContent = state.navigationPrepare?.message || '';
   $('downloadPlatformBundle').hidden = !selectedJobId || !workspaceReady;
   $('downloadPlatformBundleHelp').hidden = $('downloadPlatformBundle').hidden;
   $('downloadPlatformBundle').href = selectedJobId
@@ -1975,7 +1989,16 @@ async function navigationAction(action) {
   try {
     if (action === 'prepare') {
       if (!state.latestMapJob) throw Error('请先选择一张已完成的 GLIM 地图');
+      state.navigationPrepare = {
+        state: 'running',
+        message: '请求已发出，正在生成并校验机器狗使用的地图与路线…',
+      };
+      renderNavigation();
       await post('/api/v1/navigation/prepare', {job_id: state.latestMapJob.job_id});
+      state.navigationPrepare = {
+        state: 'complete',
+        message: '发布成功：机器狗已收到当前地图与路线。',
+      };
     } else if (action === 'runtime') {
       await post('/api/v1/navigation/runtime/start', {candidate_id: state.navigation.candidate.candidate_id});
     } else if (action === 'reset') {
@@ -1995,7 +2018,12 @@ async function navigationAction(action) {
     }
     await refreshNavigation();
   } catch (error) {
-    $('navigationError').textContent = friendlyError(error);
+    const message = friendlyError(error);
+    if (action === 'prepare') {
+      state.navigationPrepare = {state: 'failed', message: `发布失败：${message}`};
+      renderNavigation();
+    }
+    $('navigationError').textContent = message;
   }
 }
 
