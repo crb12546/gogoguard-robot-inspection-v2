@@ -3244,3 +3244,36 @@ authorization before localization, Nav2 or physical motion.
   interaction rejection reason codes from the immediately preceding platform
   connectivity work; no credential is stored in source, image metadata or this
   receipt.
+
+## 2026-08-25 r14 start-in-lethal-space field incident
+
+- The first platform-selected r14 patrol started at 23:52:36 CST on
+  `map-0d2b63d9da78` / `route-0d2b63d9da78-workspace-r5` and made zero route
+  progress. Fixed-map localization remained `TRACKING` and usable, while the
+  planner retried about every 0.8 seconds with the explicit Nav2 error
+  `Starting point in lethal space!` for the first goal `(3.64,-2.87)`.
+  `routeObstructed=true`, costmap health remained nominal and motion authority
+  remained false. This rules out missing map publication and localization loss
+  as the immediate failure, but does not yet identify which static, inflation,
+  live-obstacle or keepout layer made the current start footprint lethal.
+- The bounded r14 `PERSISTENT_PATH_OBSTRUCTION` terminal rule did not close
+  this failure shape; the runtime remained in `SEARCHING_PATH` until the stop
+  operation completed at 23:56:19 CST. The navigation process and Unitree
+  motion bridge then exited with code 0 and remote-control release was
+  confirmed. Treat planner start-cell rejection and the missing bounded
+  termination as two related but separately testable defects.
+- A checksummed 87 MB evidence set with 76 files is retained under the ignored
+  runtime path
+  `runtime-data/analysis/map-0d2b63d9da78-searching-path-20260824T2352+0800/`.
+  It contains two full robot runtime traces, the complete Nav2 and motion logs,
+  SDK events, performance data, platform command ledger, service/container
+  logs and seven synchronized production incident bundles. The lightweight
+  incident bundles alone are partial, so the direct robot logs are the analysis
+  authority.
+- Site Console publication itself succeeded: the robot selected candidate is
+  workspace revision 5 and its workspace and raster hashes match the saved Mac
+  workspace. The prior synchronous publication UI gave no immediate feedback.
+  GitHub `main` commit `180d406` now displays an immediate, duplicate-click-
+  safe `publishing` state followed by an explicit success or failure result.
+  All 284 tests, compilation, knowledge check and UI smoke pass. This UI-only
+  commit has not been deployed to the robot yet.
