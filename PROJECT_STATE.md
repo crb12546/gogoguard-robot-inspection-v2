@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-09-29
+Updated: 2026-10-09
 
 ## New-task handoff — start here
 
@@ -8,6 +8,16 @@ This section is the compact authoritative handoff for the whole product, not
 only the latest navigation problem. The dated sections below are evidence
 history; do not treat an older "next experiment" paragraph as current when it
 conflicts with this section or the final paragraph of this file.
+
+The operator requested a public source freeze on 2026-10-09, identified by
+`v2-source-20261009`. The handoff is
+`docs/releases/source-freeze-20261009.md`; it includes the existing source,
+the 2026-09-29 GLIM capacity receipt, system-audit notes, structured models
+and the offline interactive guide. All 284 offline tests, Python compilation,
+UI smoke, container-contract checks and generated-knowledge checks passed.
+This is a source handoff only. The robot/cloud deployment and field-acceptance
+facts below retain their original receipt dates; no new robot connection,
+image build, deployment or motion took place during the freeze.
 
 On 2026-09-29 the Alibaba Cloud GLIM worker was operator-resized to
 `ecs.u1-c1m1.xlarge` (4 vCPU, 4 GiB). A repeated real recording completed the

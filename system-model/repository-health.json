@@ -1,0 +1,133 @@
+{
+  "schema": "gogoguard.repository_health.v2",
+  "snapshot": {
+    "repository": "gogoguard_robot_inspection_v2_field",
+    "branch": "agent/livekit-wss-r14",
+    "commit": "ce507afd9022e515bbd8ec376213c66cd5cdd7c6",
+    "trackedFiles": 691,
+    "rosPackagesInWorkspace": 21,
+    "launchFiles": 13,
+    "tags": 0,
+    "submodules": 0,
+    "branchUpstream": "not configured",
+    "auditWorkingTree": "docs/system-audit, system-model, system-guide and two guide tools are new untracked audit deliverables",
+    "fieldReproducibility": "不能只靠 Git commit 精确复现历史现场测试；还需要镜像 digest、dirty 状态、candidate/map/profile hashes、外部 GLIM commit/config、SaaS/云端版本和发布回执。",
+    "status": "confirmed"
+  },
+  "legacyDecisions": [
+    {
+      "id": "route-relocalizer", "name": "route_relocalizer.cpp / PCL ICP", "status": "inactive",
+      "originalProblem": "把当前累计点云与固定 PCD 做全局 XY/yaw 搜索，然后把 CSV Route 变换到当前 odom；它解决的是早期‘在地图里找 route’问题。",
+      "currentReplacement": "ContinuousMapLocalizer 使用 small_gicp VGICP 持续发布 map→odom；Route、Pose、Costmap 全部留在 map frame。",
+      "runtimeStarted": "否。CMake 构建并 install executable，但当前 edge-entrypoint、manager 和 active_map_patrol.launch.py 都没有启动它。",
+      "codeRefs": ["third_party/locked_stack/src/go2_map_manager/src/route_relocalizer.cpp", "third_party/locked_stack/src/go2_map_manager/CMakeLists.txt"],
+      "configRefs": ["当前 launch 无引用；它自身读取 map/route 和搜索参数"],
+      "gitHistory": "仅见 04d55da（2026-08-06）一次性导入；同一提交也导入 current ContinuousMapLocalizer，Git 无法证明先后替换过程或作者原始取舍。",
+      "whyInactive": "当前架构把固定地图校正放在 TF 的 map→odom，而不是修改 Route 到 odom；两套同时运行会争夺坐标责任。",
+      "deletionRisk": "中。仓库主启动链不引用，但产品仓库之外的临时脚本或运维手册是否调用尚未全局取证。",
+      "validationBeforeDelete": ["检查 robot/cloud/workstation 已部署脚本的 ros2 run 调用", "对当前 candidate 做启动、跟踪、LOST 恢复回放", "确认无 Route-to-odom 产物消费者", "从安装镜像中移除后跑容器契约和现场 dry-run"]
+    },
+    {
+      "id": "registration-benchmark", "name": "localization_registration_benchmark.cpp", "status": "inactive",
+      "originalProblem": "离线比较 PCL NDT、PCL GICP 和 small_gicp VGICP 的收敛、误差和速度，帮助选型。",
+      "currentReplacement": "它没有被‘替代’为运行节点；production localizer 明确只允许 VGICP，benchmark 应被归类为实验工具。",
+      "runtimeStarted": "否。存在可执行文件但不在任何当前 launch/systemd/container entrypoint。",
+      "codeRefs": ["third_party/locked_stack/src/go2_map_manager/src/localization_registration_benchmark.cpp"],
+      "configRefs": ["命令行 TARGET_PCD/SOURCE_PCD；不消费 candidate runtime profile"],
+      "gitHistory": "仅见 04d55da 一次性导入，无独立 benchmark 结果或选择记录进入 Git。",
+      "whyInactive": "离线实验与实时定位职责不同。算法名出现在这里不代表 runtime fallback。",
+      "deletionRisk": "低到中。删除不影响已确认主链，但会丢失现成算法对照工具。",
+      "validationBeforeDelete": ["确认 CI/性能回归未调用", "若保留，移动到 tools/benchmark 并写明 non-runtime", "若删除，先保存最近一次可复现实验脚本和结果格式"]
+    },
+    {
+      "id": "submap-builder", "name": "submap_builder.cpp", "status": "inactive",
+      "originalProblem": "订阅 /cloud_registered 和 /Odometry，按移动距离累计并周期保存 PCD；提供狗端直接生成局部地图的简单方案。",
+      "currentReplacement": "CaptureManager 封存 rosbag，云端 GLIM 优化整段轨迹与 submap，再由 workspace 生成正式 PCD/PGM/Route。",
+      "runtimeStarted": "否。可 install，但当前 Docker/source selection 与启动树没有节点。",
+      "codeRefs": ["third_party/locked_stack/src/go2_map_manager/src/submap_builder.cpp", "modules/data_capture/gogoguard_data_capture/manager.py"],
+      "configRefs": ["旧实现默认写本地 maps 路径；不产生当前 immutable map job/candidate receipt"],
+      "gitHistory": "仅见 04d55da 一次性导入，不能从本仓库证明曾现场部署。",
+      "whyInactive": "缺少全局离线优化、资产哈希、审核、发布和 Route/Checkpoint 契约。",
+      "deletionRisk": "中。可能仍被用作现场临时取图工具，但不应留在 production package 中伪装为主链。",
+      "validationBeforeDelete": ["查已安装机器人镜像中的启动脚本", "询问/核对现场取图 SOP", "保留 rosbag→GLIM 正向回归", "若仍需临时工具，移到明确 prototype 包"]
+    },
+    {
+      "id": "old-waypoint-follower", "name": "waypoint_follower_go2_2.py", "status": "suspected",
+      "originalProblem": "用 /Odometry 找 CSV 最近点和前视点，按简单位置/yaw 规则直接产生 /patrol_cmd，快速让狗沿记录路线走。",
+      "currentReplacement": "PatrolRuntime 选任务目标，Smac 规划 Path，MPPI Omni 跟踪，Collision Monitor 和授权链控制输出。",
+      "runtimeStarted": "否。setup.py 仍安装 console entry point，但当前 launch 和 manager 不调用。",
+      "codeRefs": ["third_party/locked_stack/src/go2_fastlio_patrol/go2_fastlio_patrol/waypoint_follower_go2_2.py", "third_party/locked_stack/src/go2_fastlio_patrol/setup.py"],
+      "configRefs": ["旧 CSV/odom 参数；不绑定当前 mapVersion、Costmap、Nav2 action 或 runtime authorization"],
+      "gitHistory": "仅见 04d55da 一次性导入；与 Nav2 current runtime 同一提交进入仓库，无法证明哪一个先在现场运行。",
+      "whyInactive": "不能处理固定 map Pose、全局绕障、任务 checkpoint 契约；若误启动会与当前链竞争 /patrol_cmd。",
+      "deletionRisk": "高于普通 dead code：console entry point 可被人手工启动；删除前必须确认现场脚本和应急 SOP。",
+      "validationBeforeDelete": ["列出机器人已安装 console scripts 和 systemd", "搜索运维历史命令/脚本", "执行当前 Smac+MPPI route 完成回归", "删除入口优先于删除源码，并观察一个发布周期"]
+    },
+    {
+      "id": "old-controller-core", "name": "patrol_control.py + controller_core.py", "status": "suspected",
+      "originalProblem": "为旧 waypoint follower 提供直线、转角、前视和简单控制计算。",
+      "currentReplacement": "Nav2 Smac/MPPI 与 PatrolRuntime/runtime_core。",
+      "runtimeStarted": "没有独立节点；waypoint_follower 会 import controller_core，但 follower 当前未启动。",
+      "codeRefs": ["third_party/locked_stack/src/go2_fastlio_patrol/go2_fastlio_patrol/patrol_control.py", "third_party/locked_stack/src/go2_fastlio_patrol/go2_fastlio_patrol/controller_core.py"],
+      "configRefs": ["旧控制常量；当前 active_map_patrol 不读取"],
+      "gitHistory": "仅见 04d55da 一次性导入。",
+      "whyInactive": "当前 Controller Server owns FollowPath；并行存在会形成两套路径跟踪责任。",
+      "deletionRisk": "中。与旧 follower 绑定，不能单独删其中一个。",
+      "validationBeforeDelete": ["作为同一个 legacy unit 审核", "确认 tests/imports 仅指旧包", "删除后验证 ROS package build 和 console entry point 清单"]
+    },
+    {
+      "id": "mission-coordinator", "name": "MissionCoordinator", "status": "inactive",
+      "originalProblem": "提供与 ROS 无关的任务状态机，验证 mission plan 并处理任务/步骤转换。",
+      "currentReplacement": "PatrolRuntime 与 CheckpointExecutor 直接拥有当前巡检、停车、取证和 verdict 状态。",
+      "runtimeStarted": "没有 runtime import/call；仅 setup/architecture index 和单元测试引用。",
+      "codeRefs": ["modules/mission/gogoguard_mission/state_machine.py", "tests/test_mission.py", "architecture/modules/mission.json"],
+      "configRefs": ["无 launch/config 引用"],
+      "gitHistory": "090635c（2026-08-11）创建，f4dd9ac 同日扩展；随后当前 checkpoint runtime 直接承担现场流程。",
+      "whyInactive": "通用领域模型未接入实际 ROS/platform transaction，形成‘架构清单显示存在、运行链不用’的认知债务。",
+      "deletionRisk": "中。可能代表目标架构或被 SaaS 侧未来使用，但当前产品运行链不依赖。",
+      "validationBeforeDelete": ["决定它是 design/reference 还是待接入模块", "检查发布 wheel 的公共 API 消费", "若删除同步 architecture index、setup 和 tests", "不要在未决定任务状态唯一 owner 前合并实现"]
+    },
+    {
+      "id": "evidence-frame-buffer", "name": "EvidenceFrameBuffer", "status": "inactive",
+      "originalProblem": "在磁盘容量与帧数限制下缓存图片 evidence，支持随后消费。",
+      "currentReplacement": "platform_edge checkpoint transaction 使用 receipt/outbox 与相机/判定流程。",
+      "runtimeStarted": "没有 runtime import/call；仅 package export、architecture index 和 tests。",
+      "codeRefs": ["modules/inspection/gogoguard_inspection/buffer.py", "tests/test_inspection.py", "architecture/modules/inspection.json"],
+      "configRefs": ["无当前 container/launch 配置"],
+      "gitHistory": "090635c（2026-08-11）创建，此后没有源文件提交。",
+      "whyInactive": "当前 evidence transaction 不通过这个 buffer，文件名和模块名容易让接手者误读。",
+      "deletionRisk": "低到中。可能是尚未接回主链的容量保护设计。",
+      "validationBeforeDelete": ["核对 platform/SaaS 是否 import 公共 wheel API", "确认 outbox 的容量与重试策略已覆盖原需求", "同步 architecture index 与 tests"]
+    },
+    {
+      "id": "safe-cmd-gates", "name": "unitree_safe_cmd 中未启用的定位/点云 gates", "status": "inactive",
+      "originalProblem": "让最终速度桥同时检查定位可用性和点云 ROI，形成一体化安全 gate。",
+      "currentReplacement": "Collision Monitor 是唯一点云障碍 owner；PatrolRuntime 授权负责定位/任务状态，safe cmd 只保留授权新鲜度、watchdog、finite/range 和硬限幅。",
+      "runtimeStarted": "节点在跑，但 require_localization=false、require_obstacle_gate=false；只有代码能力未启用。",
+      "codeRefs": ["third_party/locked_stack/src/go2_fastlio_patrol/go2_fastlio_patrol/unitree_safe_cmd_node.py", "modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py"],
+      "configRefs": ["launch explicit false/false/true"],
+      "gitHistory": "04d55da 导入，后续 launch 明确收敛 obstacle ownership。",
+      "whyInactive": "避免两套不同 ROI/门限同时决定停车，导致不可解释双重安全。",
+      "deletionRisk": "中到高。删除会缩小通用节点能力；保留又容易被误认为当前启用。",
+      "validationBeforeDelete": ["先把 capability 与 active policy 在代码/状态中分开展示", "确认其他 launch/profile 未启用", "故障注入验证 Collision Monitor + runtime auth + watchdog 覆盖"]
+    }
+  ],
+  "healthFindings": [
+    {"id": "planner-loop", "severity": 1, "status": "confirmed", "category": "Bug / state machine", "title": "无可行 Path 时可无限 SEARCHING_PATH", "whyItMatters": "r14 起点 lethal 后约每 0.75s 重试，直到人工停止；现场看到‘系统活着但永远不结束’。", "recommendedNext": "先补证失败分类和 layer dump，再设计有界 retry/terminal，不在本审计阶段直接改。"},
+    {"id": "center-footprint", "severity": 1, "status": "confirmed", "category": "Architecture / diagnostics", "title": "健康检查只看中心格，规划器检查完整身体", "whyItMatters": "status 可显示 robotCost=92 healthy，同时 Smac 报 Starting point in lethal space。", "recommendedNext": "诊断输出 footprint 下最大代价及贡献 layer，与 planner 使用同一判断。"},
+    {"id": "candidate-gates", "severity": 1, "status": "confirmed", "category": "Safety evidence", "title": "candidate runtime 不要求 Unitree state 与 FAST-LIO health", "whyItMatters": "软件声称 stopped/ready 不等于本体实测速度或独立里程计健康。", "recommendedNext": "决定 candidate/active 是否统一 gate，并给 stop receipt 增加测量来源字段。"},
+    {"id": "site-console", "severity": 1, "status": "confirmed", "category": "Security boundary", "title": "Site Console 0.0.0.0:8080 管理 API 无服务端认证", "whyItMatters": "包含地图、定位、巡检和 profile 写操作；网络隔离状态未知。", "recommendedNext": "先确认现场网络边界，再做鉴权/绑定策略。"},
+    {"id": "repro", "severity": 2, "status": "confirmed", "category": "Deployment", "title": "Git commit 不能单独复现现场", "whyItMatters": "60 份 release 中仅 12 份有 commit+digest，10 份 dirty；地图和外部依赖另行版本化。", "recommendedNext": "一个 field-run receipt 绑定 commit、dirty patch、image digest、candidate hashes、profile、external commits 和平台版本。"},
+    {"id": "glim-boundary", "severity": 2, "status": "likely", "category": "External dependency governance", "title": "GLIM 运行证据已封存，但外部源码树/镜像身份仍未回收到产品仓库", "whyItMatters": "目前有精确 commit、config hash、日志和产物，可解释一次运行；长期重建仍依赖云 worker 保留对应 source/image。", "recommendedNext": "在 map job receipt 中增加 worker image digest、dependency lock 和可获取的 source archive URI/hash。"},
+    {"id": "tf-authority", "severity": 2, "status": "unknown", "category": "TF architecture", "title": "odom→base_link 现场 authority 仍未完全确认", "whyItMatters": "FAST-LIO 与 localizer 能同时广播，可能造成跳变或维护分叉。", "recommendedNext": "保存现场 all_frames/tf2_monitor 与 broadcaster node identity。"},
+    {"id": "profile-migration", "severity": 2, "status": "confirmed", "category": "Configuration debt", "title": "保存 profile 与有效参数可能不同", "whyItMatters": "r14 保存 v4 aggressive tuple，运行时被定向迁移；基础 YAML batch 700 也被 profile 覆盖为 1000。", "recommendedNext": "UI/receipt 同时显示 stored、normalized、effective 三层与迁移原因。"}
+  ],
+  "governanceRules": [
+    {"owner": "Git", "rule": "记录代码、配置 schema、迁移逻辑和审计文档发生了什么变化；现场测试必须关联 commit 与 dirty patch。"},
+    {"owner": "Markdown / system-audit", "rule": "保存为什么这样设计、证据来源、不确定项和删除前验证；它是工程师小本子。"},
+    {"owner": "system-model", "rule": "保存 HTML 使用的结构化当前事实；页面不得自行发明运行结论。"},
+    {"owner": "Interactive Guide", "rule": "用现实问题、图示和渐进层级帮助人理解当前系统；不是新的事实权威。"},
+    {"owner": "Code comments", "rule": "只解释局部代码无法自然表达的现场约束、兼容原因和安全边界；不要重复函数表面行为。"},
+    {"owner": "Field-run receipt", "rule": "绑定代码、镜像、dirty、地图、Route、参数、外部依赖、平台版本和现场证据，回答‘当时到底跑了什么’。"}
+  ]
+}

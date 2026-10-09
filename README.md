@@ -21,10 +21,17 @@ built, deployed or robot-verified.
 
 ## Start here
 
+For the frozen 2026-10-09 source snapshot, read the
+[source handoff](docs/releases/source-freeze-20261009.md). Its immutable version
+is `v2-source-20261009`; later development must use a separate commit/version.
+
 1. [Documentation index](docs/README.md)
 2. [Architecture and developer handoff](docs/INSPECTION_SYSTEM_TECHNICAL_GUIDE.md)
 3. [Current deployed and field state](PROJECT_STATE.md)
 4. [Generated module ownership index](docs/generated/repository-index.md)
+5. [System audit and evidence notes](docs/system-audit/README.md)
+6. [Interactive system guide](system-guide/index.html): download/clone the
+   repository and open this file in a browser; it needs no server.
 
 Historical handoffs are under `docs/archive/` and are not current operating
 instructions.

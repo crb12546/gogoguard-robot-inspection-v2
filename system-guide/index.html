@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f1e9">
+  <meta name="description" content="从零前置知识理解 GoGoGuard 机器狗巡检系统，并下钻到当前代码、参数与仓库证据。">
+  <title>GoGoGuard 系统接管指南 · 第二版</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="reading-progress" aria-hidden="true"><i id="reading-progress"></i></div>
+  <aside class="side-rail" id="side-rail" aria-label="系统指南导航">
+    <a class="brand" href="#start">
+      <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><b>GoGoGuard</b><small>系统接管指南 · V2</small></span>
+    </a>
+    <nav>
+      <a href="#start" data-nav="start"><span>00</span>从现实开始</a>
+      <a href="#mastery" data-nav="mastery"><span>01</span>60 分钟主线</a>
+      <a href="#course-localization" data-nav="course-localization"><span>02</span>为什么知道在哪</a>
+      <a href="#course-navigation" data-nav="course-navigation"><span>03</span>为什么这样走</a>
+      <a href="#map-atlas" data-nav="map-atlas"><span>04</span>地图图鉴</a>
+      <a href="#algorithm-classroom" data-nav="algorithm-classroom"><span>05</span>算法课堂</a>
+      <a href="#field-debugger" data-nav="field-debugger"><span>06</span>现场反向排查</a>
+      <a href="#parameter-lab" data-nav="parameter-lab"><span>07</span>参数影响</a>
+      <a href="#repo-health" data-nav="repo-health"><span>08</span>仓库体检</a>
+      <a href="#evidence" data-nav="evidence"><span>09</span>实现与证据</a>
+    </nav>
+    <div class="rail-status">
+      <span class="status-pulse"></span>
+      <div><b>结构化事实源</b><small id="model-state">正在加载…</small></div>
+    </div>
+  </aside>
+
+  <header class="topbar">
+    <button class="menu-button" id="menu-button" type="button" aria-label="打开导航" aria-expanded="false">菜单</button>
+    <div class="top-context"><span>当前阅读位置</span><b id="current-section">从现实开始</b></div>
+    <div class="top-actions">
+      <button id="term-toggle" class="quiet-button" type="button" aria-pressed="true">术语解释：开</button>
+      <a href="../system-model/README.md" target="_blank" rel="noreferrer">打开事实源 ↗</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero section" id="start" data-title="从现实开始">
+      <div class="hero-copy">
+        <p class="kicker">ZERO UNDEFINED PREREQUISITES</p>
+        <h1>先看真实世界发生了什么，<br><em>再给它技术名字。</em></h1>
+        <p class="hero-lead">你不需要预先知道 FAST-LIO、VGICP、TF 或 MPPI。我们从“狗怎样感觉运动、怎样看见墙、怎样决定下一步”开始，最后再落到当前仓库的节点、Topic、函数和参数。</p>
+        <div class="hero-actions">
+          <a class="primary-button" href="#mastery">开始 60 分钟主线 <span>→</span></a>
+          <a class="text-button" href="#field-debugger">我正遇到现场问题</a>
+        </div>
+        <div class="identity-row" id="identity-row"></div>
+      </div>
+      <div class="hero-world" aria-label="一次巡检的现实闭环">
+        <div class="world-grid"></div><div class="world-route"></div>
+        <div class="world-dog" aria-hidden="true"><i></i><span></span></div><div class="world-scan" aria-hidden="true"></div>
+        <div class="world-label world-a"><b>看见周围</b><small>激光返回空间点</small></div>
+        <div class="world-label world-b"><b>知道在哪</b><small>当前观察对上历史地图</small></div>
+        <div class="world-label world-c"><b>决定怎么走</b><small>重新规划并持续纠偏</small></div>
+        <div class="world-label world-d"><b>真的运动</b><small>Unitree 执行速度命令</small></div>
+      </div>
+      <div class="three-rights">
+        <article><span>01</span><b>原理理解权</b><p>知道系统为什么能工作、依赖什么条件。</p></article>
+        <article><span>02</span><b>实现知情权</b><p>知道当前真正跑的是哪套节点、算法和配置。</p></article>
+        <article><span>03</span><b>仓库判断权</b><p>知道哪些是主链、legacy、风险和证据缺口。</p></article>
+      </div>
+    </section>
+
+    <section class="section boundaries" id="course-system" aria-labelledby="system-title">
+      <div class="section-heading">
+        <div><p class="kicker">REALITY BEFORE ARCHITECTURE</p><h2 id="system-title">先分清五个现实角色</h2></div>
+        <p>不是所有东西都在“机器狗系统”里做。点击每个角色，先看它负责的现实工作，再看当前实现证据。</p>
+      </div>
+      <div class="boundary-board" id="boundary-board"></div>
+      <div class="boundary-detail" id="boundary-detail" aria-live="polite"></div>
+    </section>
+
+    <section class="section mastery" id="mastery" data-title="60 分钟主线">
+      <div class="section-heading">
+        <div><p class="kicker">THE MAIN PATH · 60 MIN</p><h2>一小时形成骨架，三到五小时随时下钻</h2></div>
+        <p>主线控制认知顺序，不限制深度。任何一步都可以继续看算法、参数和代码证据。</p>
+      </div>
+      <div class="mastery-track" id="mastery-track"></div>
+      <article class="mastery-detail" id="mastery-detail" aria-live="polite"></article>
+    </section>
+
+    <section class="section course-section" id="course-localization" data-title="为什么知道在哪">
+      <div class="section-heading">
+        <div><p class="kicker">10–25 MIN · LOCATION FROM ZERO</p><h2>机器狗为什么知道自己在哪里？</h2></div>
+        <p>十步课程严格控制新词数量。先建立直觉，再看到 FAST-LIO、VGICP 与坐标链。</p>
+      </div>
+      <div class="course-shell">
+        <div class="course-nav">
+          <div class="course-progress"><span>课程进度</span><b id="localization-progress">1 / 10</b><i><em id="localization-progress-bar"></em></i></div>
+          <div id="localization-steps" class="step-list" role="tablist" aria-label="定位课程步骤"></div>
+        </div>
+        <article class="lesson" id="localization-lesson" aria-live="polite">
+          <div class="lesson-topline"><span class="lesson-number" id="localization-number">STEP 01</span><span class="term-budget" id="localization-budget"></span></div>
+          <h3 id="localization-title"></h3>
+          <div class="reality-callout"><span>现实问题</span><p id="localization-reality"></p></div>
+          <div class="chain-location"><span>当前链路位置</span><p id="localization-chain"></p></div>
+          <div class="lesson-visual"><canvas id="concept-canvas" width="1080" height="520" aria-label="定位课程交互示意"></canvas><div class="canvas-controls" id="concept-controls"></div></div>
+          <div class="lesson-copy">
+            <div><span>先建立直觉</span><p id="localization-intuition"></p></div>
+            <div class="term-arrival"><span>现在才给它名字</span><p id="localization-term"></p></div>
+            <div><span>成功以后得到什么</span><p id="localization-success"></p></div>
+          </div>
+          <div class="depth-box">
+            <div class="depth-tabs" role="tablist" aria-label="解释深度">
+              <button type="button" class="active" data-depth="L1">L1 现场表现</button><button type="button" data-depth="L2">L2 系统模块</button><button type="button" data-depth="L3">L3 原理与失败</button><button type="button" data-depth="L4">L4 当前代码</button>
+            </div>
+            <div id="localization-depth" class="depth-content"></div>
+          </div>
+          <div class="lesson-actions"><button id="localization-prev" type="button">← 上一步</button><button id="localization-next" type="button">下一步 →</button></div>
+        </article>
+      </div>
+      <article class="scenario-studio">
+        <div class="studio-copy">
+          <p class="kicker">AFTER THE SUCCESS MECHANISM</p><h3>现在再看：环境变化为什么有时没事、有时会失败</h3>
+          <p>前面已经理解“稳定几何重合”。这里改变环境、重复程度与初始误差，看三种风险分别破坏了什么条件。</p>
+          <div class="scenario-buttons" id="scenario-buttons"></div><div id="scenario-explanation"></div>
+        </div>
+        <canvas id="scenario-canvas" width="900" height="620" aria-label="环境变化对点云配准的影响"></canvas>
+      </article>
+    </section>
+
+    <section class="section course-section navigation-course" id="course-navigation" data-title="为什么这样走">
+      <div class="section-heading">
+        <div><p class="kicker">25–40 MIN · MOTION FROM ZERO</p><h2>谁决定左转，谁最终让狗动？</h2></div>
+        <p>先区分任务参考、眼前可走线和下一瞬间速度，再把它们接成一个闭环。</p>
+      </div>
+      <div class="nav-story">
+        <div class="nav-steps" id="navigation-steps" role="tablist" aria-label="导航课程步骤"></div>
+        <article class="nav-lesson" id="navigation-lesson" aria-live="polite"></article>
+        <div class="tracking-stage">
+          <div class="visual-preface"><span>现实问题</span><p>狗受到地面和步态影响偏离蓝色 Path。控制器必须用新 Pose 重新算下一步，而不是背诵旧速度。</p><small>当前链路：Smac Path → MPPI → smoother → Collision Monitor → Unitree</small></div>
+          <canvas id="tracking-canvas" width="1200" height="600" aria-label="路径偏离和控制器纠偏"></canvas>
+          <div class="tracking-controls"><label>模拟横向扰动 <input id="tracking-disturbance" type="range" min="-100" max="100" value="45"><output></output></label><label>模拟纠偏强度 <input id="tracking-response" type="range" min="15" max="95" value="58"><output></output></label><button id="tracking-run" type="button">重新运行</button></div>
+          <div class="command-readout" id="command-readout"></div>
+        </div>
+      </div>
+      <div class="motion-chain" id="motion-chain"></div>
+    </section>
+
+    <section class="section" id="map-atlas" data-title="地图图鉴">
+      <div class="section-heading">
+        <div><p class="kicker">40–50 MIN · NOT ONE MAP</p><h2>当代码说“map”，先问它指哪一种</h2></div>
+        <p>每张卡回答：它是什么、谁创建、存在哪里、是否实时变化、谁在使用。</p>
+      </div>
+      <div class="atlas-filters" role="group" aria-label="地图筛选"><button class="active" type="button" data-filter="all">全部</button><button type="button" data-filter="stored">长期保存</button><button type="button" data-filter="live">运行时变化</button><button type="button" data-filter="plan">路线与计划</button></div>
+      <div class="map-atlas" id="map-grid"></div>
+      <article class="frame-classroom"><div class="frame-diagram" id="frame-diagram"></div><div class="frame-teaching"><p class="kicker">ONLY AFTER GLOBAL / RELATIVE / BODY</p><h3>坐标系不是四张地图，而是四种“从哪里看”</h3><div id="frame-list"></div><div class="unknown-note">❓ 当前 FAST-LIO 与 localizer 是否在现场同时广播 odom→base_link authority，仍需 tf2_monitor 取证。</div></div></article>
+    </section>
+
+    <section class="section algorithm-section" id="algorithm-classroom" data-title="算法课堂">
+      <div class="section-heading"><div><p class="kicker">DEEP, BUT ON DEMAND</p><h2>每个核心算法都回答同一组问题</h2></div><p>默认先读现实问题。需要判断替换方案时，再展开输入、步骤、假设、失败、参数和代码。</p></div>
+      <div class="algorithm-tabs" id="algorithm-tabs" role="tablist"></div><article class="algorithm-class" id="algorithm-class" aria-live="polite"></article>
+    </section>
+
+    <section class="section debugger-section" id="field-debugger" data-title="现场反向排查">
+      <div class="section-heading"><div><p class="kicker">FIELD ISSUE → FIRST BROKEN ARROW</p><h2>从现场现象反向追，不从算法名猜</h2></div><p>选择症状，逐个回答系统事实问题。工具会记录你的路径，并指出应先取哪一层证据。</p></div>
+      <div class="debugger-shell"><div class="symptom-list" id="symptom-list"></div><article class="debug-session" id="debug-session"><div class="debug-empty"><span>?</span><h3>请选择一个现场现象</h3><p>例如“一直算不出路径”或“Pose 突然跳了”。</p></div></article></div>
+    </section>
+
+    <section class="section parameter-section" id="parameter-lab" data-title="参数影响">
+      <div class="section-heading"><div><p class="kicker">PARAMETER → FIELD BEHAVIOR</p><h2>改一个数字之前，先看它会推倒哪些多米诺骨牌</h2></div><p>这里区分保存值、默认值和当前有效值；效果方向是工程判断，不是让你在现场直接试。</p></div>
+      <div class="parameter-toolbar"><input id="parameter-search" type="search" placeholder="搜索：速度、VGICP、footprint、watchdog…"><select id="parameter-module" aria-label="按模块筛选"><option value="all">全部模块</option></select></div>
+      <div class="parameter-grid" id="parameter-grid"></div>
+    </section>
+
+    <section class="section health-section" id="repo-health" data-title="仓库体检">
+      <div class="section-heading"><div><p class="kicker">50–60 MIN · CURRENT / LEGACY / UNKNOWN</p><h2>代码存在，不等于当前运行</h2></div><p>每个 legacy 判断都显示原来解决什么、当前替代者、启动证据、Git 能证明什么、删除风险和验证建议。</p></div>
+      <div class="repo-snapshot" id="repo-snapshot"></div>
+      <div class="health-switch" role="tablist"><button type="button" class="active" data-health="findings">当前最严重问题</button><button type="button" data-health="legacy">Legacy 删除判断</button><button type="button" data-health="rules">长期工程规则</button></div>
+      <div class="health-content" id="health-content"></div>
+    </section>
+
+    <section class="section evidence-section" id="evidence" data-title="实现与证据">
+      <div class="section-heading"><div><p class="kicker">L4 · TRACE EVERY CLAIM</p><h2>下钻到 Node、Topic、配置、文件和外部回执</h2></div><p>搜索结果来自四份结构化事实模型。页面没有命中的自由发挥。</p></div>
+      <div class="evidence-search"><input id="evidence-search" type="search" placeholder="搜索 VGICP、/Odometry、GLIM commit、Smac、legacy…"><span id="evidence-count"></span></div>
+      <div class="evidence-results" id="evidence-results"></div><article class="external-card" id="external-card"></article>
+    </section>
+
+    <footer><div><b>GoGoGuard System Takeover Guide · V2</b><span>generation 10 · field receipt r14 · source ce507af</span></div><p>READ → UNDERSTAND → DOCUMENT → EXPLAIN。当前阶段未修改运行代码。</p></footer>
+  </main>
+
+  <div class="term-tooltip" id="term-tooltip" role="tooltip"></div><div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal" id="detail-modal" aria-hidden="true"><div class="modal-backdrop" data-close-modal></div><article class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" type="button" data-close-modal aria-label="关闭">×</button><div id="modal-content"></div></article></div>
+  <script src="assets/model-snapshot.js"></script><script src="assets/app.js" defer></script>
+</body>
+</html>
