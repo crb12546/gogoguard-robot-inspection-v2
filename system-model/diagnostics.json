@@ -1,0 +1,122 @@
+{
+  "schema": "gogoguard.diagnostics_model.v2",
+  "fieldDebugger": [
+    {
+      "id": "relocalization-failed", "symptom": "重定位失败", "startAt": "先看 /localization/status，不要先调 VGICP 参数。",
+      "firstPrinciple": "失败可能发生在数据到达、时间/坐标一致性、搜索先验、几何可辨识度或质量门限五层。",
+      "checks": [
+        {"question": "状态里 inputPoints 是否达到 250，且 cloud/input age 是否新鲜？", "why": "没有足够新鲜点，算法根本没有可靠输入。", "yes": "继续检查匹配质量。", "no": "沿 MID360 → FAST-LIO → cloud transformer 检查 Topic、时间戳、frame 和排队；不是先放宽匹配阈值。", "module": "Sensor / FAST-LIO / Transformer", "evidence": "localization status + ROS topic timestamps"},
+        {"question": "实际放置位置是否在 map-versioned 启动中心 5m、期望 yaw ±60° 范围内？", "why": "当前不是全地图任意姿态盲搜。", "yes": "继续检查几何与候选歧义。", "no": "属于先验/部署问题；移动到审核启动区或重新制作启动先验。", "module": "Candidate start zone", "evidence": "runtime_profile + status searchCenter/searchRadius"},
+        {"question": "inlier、fitness、Hessian 是差，还是出现 ambiguity/jump/stale reason？", "why": "不同拒绝原因对应环境、几何、连续性或调度问题。", "yes": "按 reason 定位：低 inlier/高 MSE 看地图与环境；Hessian 看退化；ambiguity 看重复场景；jump 看初值/漂移。", "no": "若没有明确 reason，补齐 status/log 证据后再判定。", "module": "ContinuousMapLocalizer", "evidence": "reason, inlierRatio, fitnessMse, hessianCondition"}
+      ],
+      "likelyClasses": ["数据/时序 Bug", "启动先验或配置问题", "环境/算法可观性", "地图/外参问题"]
+    },
+    {
+      "id": "dog-drift", "symptom": "狗越走越偏", "startAt": "先分清是 Pose 本身漂、Path 偏，还是实机没有执行控制器命令。",
+      "firstPrinciple": "现场轨迹偏差不等于定位漂移；定位、规划、控制、执行四层都会产生同样表象。",
+      "checks": [
+        {"question": "map Pose 相对固定环境是否也在持续偏移或跳变？", "why": "若 Pose 错，控制器会基于错误世界纠偏。", "yes": "检查 VGICP correction、confidence、map→odom 和 FAST-LIO odom。", "no": "定位大概率正常，转查 Path/Controller/执行。", "module": "Localization", "evidence": "localization pose/status + TF trace"},
+        {"question": "MPPI 输出是否持续包含把狗拉回 Path 的 vy/wz？", "why": "有纠偏意图和没有纠偏意图属于不同层。", "yes": "比较 raw、smoothed、patrol、final 四级命令，查后级归零/限幅。", "no": "检查 Path、critic 权重、local costmap 和控制模型。", "module": "MPPI", "evidence": "runtime trace command stages"},
+        {"question": "最终 /cmd_vel 与 SDK Move 都非零，但实机位移仍小吗？", "why": "这是执行/死区/地面条件，不是上游算法。", "yes": "检查 Unitree 低速死区、模式、遥控权、地面打滑。", "no": "沿命令链找第一个从非零变零的节点。", "module": "Motion bridge / Unitree", "evidence": "UDP event log + motionEvidence"}
+      ],
+      "likelyClasses": ["定位问题", "控制参数问题", "安全撤权", "Unitree 执行问题"]
+    },
+    {
+      "id": "no-path", "symptom": "一直算不出路径", "startAt": "先读 planner 的精确错误，再看完整 Footprint 所覆盖的格子。",
+      "firstPrinciple": "中心点健康不代表整只狗能站在那里。r14 已证明该差异会让现场状态误导排查。",
+      "checks": [
+        {"question": "日志是否为 Starting point in lethal space？", "why": "它直接指向起点 footprint 与 costmap 冲突。", "yes": "保存分层 costmap，检查 footprint 覆盖的 static/obstacle/inflation/keepout 格。", "no": "继续区分目标非法、不可达或超时。", "module": "Smac + global costmap", "evidence": "planner log + layer dump"},
+        {"question": "起点、目标在静态图和 allowed-area 内都合法吗？", "why": "目标或起点非法时换算法没有意义。", "yes": "检查走廊是否被 inflation/动态障碍封死。", "no": "修地图/目标/定位一致性。", "module": "Map / Route / Pose", "evidence": "PGM + keepout + footprint overlay"},
+        {"question": "清除实时 obstacle 后仍失败吗？", "why": "可把静态地图问题和动态幽灵障碍分开。", "yes": "优先查 static/keepout/footprint/inflation。", "no": "查点云过滤、障碍高度和 clearing。", "module": "Obstacle layer", "evidence": "before/after layer snapshot"}
+      ],
+      "likelyClasses": ["地图问题", "定位偏差", "Footprint/Inflation 参数", "动态障碍数据", "PatrolRuntime 无界重试架构问题"]
+    },
+    {
+      "id": "spins", "symptom": "狗原地打转", "startAt": "先判断当前 controllerOwnership 是 FollowPath 还是 Checkpoint Spin。",
+      "firstPrinciple": "同样的转动，可能是正常观察对齐、MPPI 路径纠偏、Pose 跳变或错误路径方向。",
+      "checks": [
+        {"question": "checkpoint.phase 是否正在 ALIGNING/Spin？", "why": "巡检点允许主动转体，不一定是故障。", "yes": "比较目标 yaw、body remainder 与 camera pan；检查是否收敛。", "no": "查 MPPI 与 Pose。", "module": "CheckpointExecutor", "evidence": "checkpoint spin/bodyYaw/targetYaw"},
+        {"question": "Path 的局部朝向是否连续且与 Route 方向一致？", "why": "折返/错误朝向会让控制器持续旋转。", "yes": "继续查 Pose yaw 与 costmap。", "no": "查目标选择、Smac final orientation 和 route tangent。", "module": "Route / Smac", "evidence": "Path poses + target yaw"},
+        {"question": "map Pose yaw 是否跳变，而 odom yaw 连续？", "why": "map→odom 跳变会让控制器以为身体突然转了。", "yes": "查 VGICP 错配/恢复接受。", "no": "查 MPPI critic、近身障碍和实机转向死区。", "module": "Localization / MPPI", "evidence": "TF and localization correction trace"}
+      ],
+      "likelyClasses": ["正常 checkpoint 行为", "路径方向问题", "定位跳变", "控制器/死区参数"]
+    },
+    {
+      "id": "does-not-stop", "symptom": "应该停但没有停", "startAt": "先沿最终命令链反查：SportClient 收到什么、谁最后仍在发非零。",
+      "firstPrinciple": "这是安全关键症状，必须同时验证软件命令和本体实际速度，不能只看上游 state。",
+      "checks": [
+        {"question": "motionAuthorized 是否已经 false？", "why": "任务停止首先应撤销运行授权。", "yes": "看 /patrol_cmd 到 /cmd_vel 是否在 0.2s 内归零。", "no": "查 PatrolRuntime 停止状态机/命令入口。", "module": "PatrolRuntime", "evidence": "runtime status + authorization topic"},
+        {"question": "SDK receiver 在 250ms 内记录 StopMove/watchdog_stop 吗？", "why": "最终硬件边界必须独立于 ROS 上游。", "yes": "若实机仍动，属于 Unitree 模式/执行层，需要硬件现场处置。", "no": "查 UDP receiver 进程、包序列和 watchdog 配置。", "module": "SDK receiver", "evidence": "SDK event log"},
+        {"question": "stop receipt 是否有本体实测速度来源？", "why": "candidate runtime 当前 robotStateRequired=false，‘stopped’不总是独立实测。", "yes": "核对传感器与命令时间。", "no": "不能把软件归零等同真实停车；这是当前证据缺口。", "module": "Stop evidence", "evidence": "stop receipt + robot state requirement"}
+      ],
+      "likelyClasses": ["状态机 Bug", "安全链/进程问题", "SDK/Unitree 问题", "证据架构缺口"]
+    },
+    {
+      "id": "obstacle-anomaly", "symptom": "障碍检测异常", "startAt": "先看过滤后的 /navigation/cloud_obstacles，而不是直接看原始点云。",
+      "firstPrinciple": "障碍链包含自体/地面过滤、二维投影、清除与标记、膨胀和最终近身多边形。",
+      "checks": [
+        {"question": "异常点在 body frame 中是否落在狗身或地面附近？", "why": "自体回波和地面噪声最常造成假障碍。", "yes": "查外参、self crop、min_height=0.05m。", "no": "继续看二维投影和持续性。", "module": "ObstacleCloudFilter", "evidence": "body cloud replay"},
+        {"question": "异常只出现一帧，还是持续进入 costmap？", "why": "一帧孤立点与真实稳定障碍的处理应不同。", "yes": "若只一帧，查 max_points、确认时间和点密度。", "no": "查 clearing/raytrace、遮挡和传感器盲区。", "module": "Costmap / Collision Monitor", "evidence": "point count + costmap sequence"},
+        {"question": "global/local costmap 与 Collision Monitor 判断一致吗？", "why": "前两者用于规划，后者负责近身硬停，职责不同。", "yes": "判断可能是真实障碍。", "no": "找 frame、范围、高度、polygon 参数差异。", "module": "Safety layers", "evidence": "layer dump + safety status"}
+      ],
+      "likelyClasses": ["标定/过滤 Bug", "参数问题", "传感器物理限制", "图层职责差异"]
+    },
+    {
+      "id": "false-obstacle-route", "symptom": "明明没障碍却绕路", "startAt": "比较静态 PGM、keepout、实时 obstacle 和 inflation 四层，而不是只看合成 costmap。",
+      "firstPrinciple": "绕路由全局 Path 的综合代价触发；不一定是实时点云。",
+      "checks": [
+        {"question": "清空实时 obstacle 后路径仍绕吗？", "why": "可快速区分静态/禁区与动态层。", "yes": "检查 PGM、keepout、inflation 和 footprint。", "no": "检查幽灵点、clearing 和传感器遮挡。", "module": "Global costmap", "evidence": "per-layer snapshot"},
+        {"question": "绕路区域是否靠近黑格或 allowed-area 边界？", "why": "inflation 会把靠近障碍的路变贵，即使不是硬禁止。", "yes": "判断是预期安全偏好还是地图过紧。", "no": "查目标/Route 与当前 Pose 偏移。", "module": "Static / keepout / inflation", "evidence": "map overlay"},
+        {"question": "新 Path 是否仍能较快重入 Route？", "why": "绕行本身可能是正确行为，关键是是否恢复任务参考。", "yes": "记录为正常 detour。", "no": "查 rejoinLookahead、Route 投影和目标选择。", "module": "PatrolRuntime", "evidence": "rejoin index + detour trace"}
+      ],
+      "likelyClasses": ["正常绕障", "地图过紧", "幽灵障碍", "重入策略问题"]
+    },
+    {
+      "id": "dog-stopped", "symptom": "狗突然不走了", "startAt": "找命令链上第一个由非零变为零的位置。",
+      "firstPrinciple": "‘狗不走’可能是 planner 没 Path、controller 零速、安全层归零、授权撤销、watchdog 或实机不响应。",
+      "checks": [
+        {"question": "/nav2/raw_cmd_vel 是否非零？", "why": "区分控制器之前和之后。", "yes": "比较 smoothed、/patrol_cmd、/cmd_vel。", "no": "查 Path、MPPI result、Pose/costmap freshness。", "module": "MPPI", "evidence": "four-stage command trace"},
+        {"question": "Collision Monitor 后 /patrol_cmd 是否归零？", "why": "近身安全区可能独立强停。", "yes": "查 safety envelope 点数和 cloud frame。", "no": "继续查 runtime authorization/safe cmd。", "module": "Collision Monitor", "evidence": "SafetyEnvelope points + topics"},
+        {"question": "/cmd_vel 非零且 UDP Move 已发送吗？", "why": "若都非零，问题已下沉到 SDK/本体。", "yes": "查 Unitree 模式、遥控权、死区和错误码。", "no": "查授权新鲜度、限幅或 receiver watchdog。", "module": "Safe cmd / SDK", "evidence": "safety status + SDK event log"}
+      ],
+      "likelyClasses": ["规划/控制", "安全停车", "授权/通信", "Unitree 执行"]
+    },
+    {
+      "id": "pose-jump", "symptom": "Pose 突然跳了", "startAt": "同时画 odom→base_link 与 map→odom；先找哪一段跳。",
+      "firstPrinciple": "最终 Pose 是两段变换组合，单看 map→base_link 无法判断来源。",
+      "checks": [
+        {"question": "odom→base_link 是否先跳？", "why": "指向 FAST-LIO/IMU/LiDAR 时间和退化。", "yes": "查 sensor timestamps、deskew、IMU bias 和局部几何。", "no": "继续看 map→odom。", "module": "FAST-LIO", "evidence": "Odometry trace"},
+        {"question": "map→odom correction 是否跨过 0.75m/15° 门限或进入 recovery？", "why": "指向 VGICP 候选或状态机。", "yes": "确认是否被拒绝；若被发布则查版本/实现不一致。", "no": "查 TF 双发布者和时间插值。", "module": "Localizer / TF", "evidence": "correction metrics + TF authority"},
+        {"question": "是否同时存在两个 odom→base_link broadcaster？", "why": "当前 launch/代码存在双 authority 可能，现场仍未完全取证。", "yes": "先统一 authority 再评价算法。", "no": "保留 Unknown，补抓 tf2_monitor/all_frames。", "module": "TF", "evidence": "tf authority capture"}
+      ],
+      "likelyClasses": ["FAST-LIO 数据问题", "VGICP 错配", "TF 架构问题", "时间同步 Bug"]
+    },
+    {
+      "id": "map-misaligned", "symptom": "点云和地图对不上", "startAt": "先确认比较的两种数据和 frame：原始雷达点、body 点、GLIM PLY、localization PCD 不能混看。",
+      "firstPrinciple": "错位可能来自建图轨迹、雷达安装外参、产品化时重复/漏做变换、或加载了错误 mapVersion。",
+      "checks": [
+        {"question": "当前 candidate 的 PCD/hash/mapVersion 与 Route/PGM 是否属于同一 bundle？", "why": "跨版本混用会产生系统性错位。", "yes": "继续查 frame 和外参。", "no": "停止运行并恢复不可变 bundle 绑定。", "module": "Candidate identity", "evidence": "manifest + hashes"},
+        {"question": "错位是固定刚体偏移，还是随位置越来越大？", "why": "固定偏移更像外参/重复变换；累积变形更像建图轨迹。", "yes": "固定：查 lidar→base 变换次数与方向。", "no": "变化：查 GLIM 轨迹、子图重叠和地图编辑。", "module": "Calibration / Mapping", "evidence": "multi-location overlay"},
+        {"question": "GLIM PLY 与 trajectory 自身一致，但导出的 PCD/PGM 不一致吗？", "why": "可把外部建图和本仓库产品化链分开。", "yes": "查 workspace slice、manual edits、一次性 lidar→base 转换。", "no": "查 GLIM config/commit/recording quality。", "module": "Map factory / GLIM", "evidence": "artifact hashes + transform audit"}
+      ],
+      "likelyClasses": ["资产版本问题", "外参/坐标 Bug", "建图算法问题", "地图产品化问题"]
+    }
+  ],
+  "parameters": [
+    {"id": "target-cruise", "module": "Motion / MPPI", "name": "targetCruiseMps", "controls": "MPPI 前进采样上限，同时覆盖 smoother 的前进上限。", "current": "0.60 m/s（r14 v4 经迁移后有效值）", "default": "0.60 m/s", "increase": "更积极前进，直路可能更快。", "decrease": "速度更保守、停车距离更短。", "improves": "清晰宽路的任务时间。", "sideEffects": "提高会减少拐弯/绕障余量并放大制动、定位延迟影响；过低可能落入 Go2 低速不动区。", "rationale": "现场目标速度；控制层仍有 0.90m/s 硬上限但 normal FollowPath 不直接使用它。", "provenance": "navigation profile + launch override", "status": "confirmed", "evidence": ["modules/navigation/gogoguard_navigation/profiles.py", "modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py"]},
+    {"id": "max-forward", "module": "Final safety", "name": "maxForwardMps", "controls": "safe cmd 与 UDP sender 的绝对 vx 上限。", "current": "0.90 m/s", "default": "0.90 m/s", "increase": "当前校验器不允许超过 0.90；扩大硬件包络。", "decrease": "更早截断异常前进命令。", "improves": "降低异常命令风险。", "sideEffects": "低于 targetCruise 会使 profile 校验失败；它不是正常巡航目标。", "rationale": "Unitree receiver 已验证包络。", "provenance": "generation-10 profile contract", "status": "confirmed", "evidence": ["modules/navigation/gogoguard_navigation/profiles.py", "modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py"]},
+    {"id": "mppi-batch", "module": "MPPI", "name": "batchSize", "controls": "每个控制周期试算的未来速度序列数量。", "current": "1000", "default": "1000；基础 YAML 仍写 700，但 launch 被有效 profile 覆盖", "increase": "更可能采到好轨迹。", "decrease": "减少 Orin 计算负担和截止风险。", "improves": "复杂局部空间的候选覆盖。", "sideEffects": "提高按频率×步数线性增加计算量；当前总工作量有 1,200,000/s 封顶。", "rationale": "旧 v1/v2 的 700 在迁移时定向提升为 1000。", "provenance": "profile migration and contract", "status": "confirmed", "evidence": ["modules/navigation/gogoguard_navigation/profiles.py", "modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py"]},
+    {"id": "mppi-horizon", "module": "MPPI", "name": "frequencyHz × timeSteps", "controls": "控制器一次向前看的时间范围。", "current": "15Hz × 56 ≈ 3.73s", "default": "15Hz / 56", "increase": "看得更远，可能更早准备转弯。", "decrease": "降低计算量、响应更偏局部。", "improves": "平滑预见较长弯道。", "sideEffects": "步数增大直接增加采样工作量；频率变化还必须同步 model_dt。", "rationale": "Orin 实时预算与前瞻折中。", "provenance": "Nav2 YAML + sealed contract", "status": "confirmed", "evidence": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml", "modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py"]},
+    {"id": "footprint-padding", "module": "Costmaps / Smac / MPPI / Collision", "name": "footprint_padding", "controls": "在实测身体轮廓外增加硬安全边界。", "current": "0.10m；最终包络 x[-0.43,0.50], y±0.30m", "default": "0.10m", "increase": "离墙更远、起点和窄路更容易被判非法。", "decrease": "更容易通过窄缝。", "improves": "碰撞余量。", "sideEffects": "过大会重现 r14 start-lethal/通道封死；过小会削弱实体安全。", "rationale": "实测 Go2 轮廓加操作员认可的 10cm shoulder clearance。", "provenance": "Nav2 YAML comments + profile contract", "status": "confirmed", "evidence": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml", "modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/nav2_profile_contract.py"]},
+    {"id": "inflation-radius", "module": "Global/local costmap", "name": "inflation_radius", "controls": "障碍外软代价扩散范围，不是第二个硬身体。", "current": "0.45m", "default": "0.45m", "increase": "更早远离障碍。", "decrease": "更愿意贴近障碍通过。", "improves": "路径安全偏好和平滑绕行。", "sideEffects": "过大封死窄路；过小使路径贴墙。与 0.30m 半宽合起来当前提供 0.15m 软肩。", "rationale": "避免旧 0.48m 硬圆把前后长度误当侧宽。", "provenance": "Nav2 YAML + contract bounds", "status": "confirmed", "evidence": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml"]},
+    {"id": "obstacle-min-height", "module": "Obstacle layer", "name": "min_obstacle_height", "controls": "低于哪个 body-frame Z 的点不标为导航障碍。", "current": "0.05m", "default": "0.05m", "increase": "更少地面/自体假点。", "decrease": "更容易检测贴地低矮物。", "improves": "假障碍抑制。", "sideEffects": "提高会漏掉矮障碍；外参或地面坡度错时固定高度门限会失真。", "rationale": "现场出现一次孤立地面/自体 StopZone 点后加入小标定余量。", "provenance": "Nav2 YAML field comment", "status": "confirmed", "evidence": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml"]},
+    {"id": "collision-points", "module": "Collision Monitor", "name": "SafetyEnvelope.max_points", "controls": "近身多边形内点数超过多少才强制 stop。", "current": "8；即第 9 个一致返回触发", "default": "8", "increase": "更不容易被孤立噪点触发。", "decrease": "对稀疏障碍更敏感、更早停。", "improves": "提高抑噪或提高安全灵敏度，方向取决于调整。", "sideEffects": "过高漏检稀疏/吸光物；过低产生地面、自体和雨雾假停。", "rationale": "Humble 语义为 count > max_points，针对现场一帧孤立 burst。", "provenance": "Nav2 YAML comment and contract", "status": "confirmed", "evidence": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml"]},
+    {"id": "vgicp-window", "module": "Fixed-map localization", "name": "scan range / local target radius", "controls": "每次配准使用的当前和历史几何范围。", "current": "24m scan / 32m target / 4m refresh", "default": "基础 v1 为 35/45/5；镜像 v2 patch 为 24/32/4", "increase": "提供更多远处几何和恢复覆盖。", "decrease": "减少点数和注册时间。", "improves": "几何覆盖或实时性。", "sideEffects": "过大曾出现 144k target/526ms；过小在空旷/遮挡场景缺少约束。", "rationale": "24m + 5m startup/recovery + 3m coarse gate = 32m。", "provenance": "go2-vgicp-orin-v2 build patch", "status": "confirmed", "evidence": ["modules/localization/ros/patches/go2-vgicp-orin-v2.patch"]},
+    {"id": "vgicp-quality", "module": "Fixed-map localization", "name": "inlier / fitness acceptance", "controls": "何时把一次几何匹配当作可信位置。", "current": "inlier≥0.20，fitness MSE≤0.20，points≥250", "default": "同 current，v1/v2 未改变", "increase": "提高 inlier 下限或降低 MSE 上限会更严格。", "decrease": "更容易获得 TRACKING。", "improves": "严格时降低错配；宽松时提高可用率。", "sideEffects": "过严导致频繁 LOST；过松会把错误位置当真，风险更高。", "rationale": "sealed quality profile，节点会拒绝同名不同阈值。", "provenance": "localizer config and runtime validation", "status": "confirmed", "evidence": ["third_party/locked_stack/src/go2_map_manager/config/continuous_map_localizer.yaml", "modules/localization/ros/patches/go2-vgicp-orin-v2.patch"]},
+    {"id": "startup-search", "module": "Relocalization", "name": "initialization search", "controls": "开机时允许从多大位置和方向不确定性中找地图位置。", "current": "XY 半径 5m / 1m 步进；yaw ±60° / 15° 步进", "default": "中心由 candidate 注入，范围为 5m/60°", "increase": "覆盖更随意的放置。", "decrease": "搜索更快且歧义更少。", "improves": "操作容忍度或稳定性。", "sideEffects": "放大候选数和重复场景错配风险；不是免费全局定位。", "rationale": "map-versioned 物理启动区，不要求精确摆放。", "provenance": "candidate runtime profile + localizer config", "status": "confirmed", "evidence": ["third_party/locked_stack/src/go2_map_manager/config/continuous_map_localizer.yaml"]},
+    {"id": "recovery-confirm", "module": "Relocalization recovery", "name": "recovery confirmation", "controls": "LOST 后允许恢复发布前，需要多少个一致匹配。", "current": "3 次，彼此在 0.30m/6° 内", "default": "v2 patch 新增；v1 没有独立三次确认", "increase": "更难错误恢复。", "decrease": "恢复更快。", "improves": "重复场景下的安全性或可用性。", "sideEffects": "过高会延长停驶；过低可能接受单次偶然好匹配。", "rationale": "避免一次好看候选替换最后可信 map→odom。", "provenance": "go2-vgicp-orin-v2 patch", "status": "confirmed", "evidence": ["modules/localization/ros/patches/go2-vgicp-orin-v2.patch"]},
+    {"id": "progress-timeout", "module": "PatrolRuntime / Nav2 progress", "name": "progressTimeoutS", "controls": "多长时间没有足够平移或旋转进展算卡住。", "current": "5.0s", "default": "5.0s", "increase": "更容忍慢速、原地调整。", "decrease": "更早触发恢复/失败。", "improves": "避免误判或更快发现卡死。", "sideEffects": "过大让真卡死等待太久；过小让正常起步/绕行动作反复中断。", "rationale": "V1 曾把它误称障碍决策，迁移后只保留 progress 语义。", "provenance": "profiles.py migration + launch override", "status": "confirmed", "evidence": ["modules/navigation/gogoguard_navigation/profiles.py", "modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py"]},
+    {"id": "replan-interval", "module": "PatrolRuntime", "name": "replanIntervalS", "controls": "路径失败/阻断后再次请求全局 Path 的间隔。", "current": "0.75s", "default": "0.75s", "increase": "降低 planner 压力和日志风暴。", "decrease": "更快响应短暂障碍消失。", "improves": "算力稳定性或恢复速度。", "sideEffects": "当前没有有界终止计数；无论间隔多少都可能无限 SEARCHING_PATH，这是架构问题不是单参数问题。", "rationale": "现场 profile 默认。", "provenance": "profiles.py + PatrolRuntime", "status": "confirmed", "evidence": ["modules/navigation/gogoguard_navigation/profiles.py", "modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py"]},
+    {"id": "sdk-watchdog", "module": "SDK receiver", "name": "GO2_SDK_CMD_TIMEOUT_MS", "controls": "最后一个有效 UDP 速度包消失多久后调用 StopMove。", "current": "250ms（环境变量未覆盖时）", "default": "250ms，允许范围 100–2000ms", "increase": "更容忍网络/调度抖动。", "decrease": "上游卡死后更快停车。", "improves": "通信容错或故障停车速度。", "sideEffects": "过大延长危险残留命令；过小可能因正常抖动频繁停走。", "rationale": "设备 I/O 独立最终 watchdog。", "provenance": "C++ receiver constant/environment", "status": "confirmed", "evidence": ["modules/device_io/ros/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp"]}
+  ]
+}

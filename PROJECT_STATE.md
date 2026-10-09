@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-24
+Updated: 2026-10-09
 
 ## New-task handoff — start here
 
@@ -8,6 +8,22 @@ This section is the compact authoritative handoff for the whole product, not
 only the latest navigation problem. The dated sections below are evidence
 history; do not treat an older "next experiment" paragraph as current when it
 conflicts with this section or the final paragraph of this file.
+
+The operator requested a public source freeze on 2026-10-09, identified by
+`v2-source-20261009`. The handoff is
+`docs/releases/source-freeze-20261009.md`; it includes the existing source,
+the 2026-09-29 GLIM capacity receipt, system-audit notes, structured models
+and the offline interactive guide. All 284 offline tests, Python compilation,
+UI smoke, container-contract checks and generated-knowledge checks passed.
+This is a source handoff only. The robot/cloud deployment and field-acceptance
+facts below retain their original receipt dates; no new robot connection,
+image build, deployment or motion took place during the freeze.
+
+On 2026-09-29 the Alibaba Cloud GLIM worker was operator-resized to
+`ecs.u1-c1m1.xlarge` (4 vCPU, 4 GiB). A repeated real recording completed the
+full cloud map job and all five immutable output artifacts on that instance;
+the capacity receipt and limits are in the final dated section below. No robot
+or workstation release changed in this check.
 
 The current robot edge release is generation-10
 `gogoguard-robot-inspection:v2-edge-20260824-raster-r14`, built from source
@@ -3277,3 +3293,32 @@ authorization before localization, Nav2 or physical motion.
   safe `publishing` state followed by an explicit success or failure result.
   All 284 tests, compilation, knowledge check and UI smoke pass. This UI-only
   commit has not been deployed to the robot yet.
+
+## 2026-09-29 cloud GLIM worker capacity receipt
+
+- The Alibaba Cloud worker at `39.96.72.215` is online after the operator's
+  resize. Instance metadata reports `ecs.u1-c1m1.xlarge` (4 vCPU, 4 GiB),
+  rather than the previously discussed 4 vCPU / 8 GiB candidate. SSH, the
+  installed map-job adapter, GLIM ROS executables, official editor executable and
+  geospatial tools are present. All 23 pre-existing completed cloud jobs remain.
+- An isolated replay of the largest historical recording
+  (`map-28acad0c6b0e`, 263.006 s source recording, 2,648 optimized poses)
+  completed GLIM optimization and map review-artifact generation in 3:47.64.
+  Peak child-process RSS was 1,608,136 KiB, sampled minimum host
+  `MemAvailable` was 1,487,492 KiB and the kernel reported no OOM. The final
+  exporter rejected this older recording because its recording/GLIM alignment
+  failed the current quality gate (RMS 0.365 m, maximum 0.727 m); this is a
+  data-contract failure, not a memory or process failure.
+- A second isolated replay of the previously accepted real recording
+  `map-0d2b63d9da78` completed the entire cloud adapter in 1:22.74 and
+  produced nonempty, parseable `map.json`, `map.ply`,
+  `trajectory-poses.json`, `overview.svg` and `glim-build.json`. The replay
+  quality receipt accepted 2,085 poses and 21 submaps over 207.066 s of source
+  recording. Peak child-process RSS was 471,052 KiB; minimum sampled host
+  `MemAvailable` was 2,628,000 KiB; no OOM occurred.
+- Both replay jobs used separate `map-20260929000{1,2}` cloud directories and
+  never published a candidate to the Mac or robot. Their temporary cloud
+  directories and logs were removed after artifact validation. This proves
+  one complete map job and one larger optimization/review run on the 4 GiB
+  instance. It does not measure simultaneous jobs or concurrent interactive
+  GLIM map editing, and does not change robot or workstation acceptance.

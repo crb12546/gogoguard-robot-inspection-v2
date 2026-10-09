@@ -1,0 +1,227 @@
+{
+  "schema": "gogoguard.system_model.v1",
+  "generatedAt": "2026-08-25T00:00:00+08:00",
+  "scope": {
+    "repository": "gogoguard_robot_inspection_v2_field",
+    "sourceCommit": "ce507afd9022e515bbd8ec376213c66cd5cdd7c6",
+    "branch": "agent/livekit-wss-r14",
+    "fieldGeneration": 10,
+    "latestFieldReceipt": "r14",
+    "mode": "read-understand-document-explain",
+    "warning": "本模型描述当前仓库与现存现场证据；没有证据的外部实现保持 Unknown。"
+  },
+  "statuses": {
+    "confirmed": {"label": "✅ Confirmed", "meaning": "启动、代码、配置或现场证据已交叉确认"},
+    "likely": {"label": "🟡 Likely", "meaning": "证据高度支持，但缺少关键运行层证据"},
+    "unknown": {"label": "❓ Unknown", "meaning": "当前仓库或证据不足"},
+    "inactive": {"label": "⚪ Legacy / Not Active", "meaning": "代码存在但不在当前主链"},
+    "suspected": {"label": "🧹 Suspected Dead Code", "meaning": "高度疑似历史实现，尚未删除"}
+  },
+  "identity": {
+    "mapVersion": "map-0d2b63d9da78",
+    "recordingId": "20260823T131600Z-fcc0bbbe",
+    "assetRevision": 5,
+    "workspaceHashPrefix": "b70ccc",
+    "routeLengthM": 94.903,
+    "recordedRoutePoints": 217,
+    "executionRoutePoints": 714,
+    "checkpointCount": 4,
+    "pcdPoints": 406778,
+    "pcdSha256Prefix": "4d703",
+    "staticMap": {"width": 1944, "height": 1696, "resolutionM": 0.1},
+    "status": "confirmed"
+  },
+  "boundaries": [
+    {"id": "saas", "name": "GoGoGuard SaaS", "owns": ["任务/命令", "心跳服务", "实时媒体房间", "平台 verdict/ack"], "doesNotOwn": ["ROS 实时定位", "Unitree 速度控制"], "status": "likely", "evidence": ["services/platform_edge/gogoguard_platform_edge/heartbeat.py", "services/platform_edge/gogoguard_platform_edge/checkpoint.py"]},
+    {"id": "cloud_glim", "name": "地图生产云", "owns": ["封存 bag 的离线 GLIM 作业", "优化轨迹", "三维地图产物"], "doesNotOwn": ["巡检时实时 Pose", "运动控制"], "status": "confirmed", "evidence": ["deployment/cloud/gogoguard-map-job", "deployment/cloud/export_glim_artifact.py", "runtime-data/analysis/map-dc7036e35379-replanning-20260823T224052+0800/cloud/map-dc7036e35379/work/sessions/map-dc7036e35379/logs/glim_rosbag.log"]},
+    {"id": "workstation", "name": "Mac 工作站", "owns": ["录制同步", "云作业编排", "地图/路线审核", "候选资产发布", "现场 UI"], "doesNotOwn": ["实时 15Hz 控制闭环"], "status": "confirmed", "evidence": ["deployment/workstation/run-native", "apps/field_workstation/backend", "modules/route/gogoguard_route/workspace.py"]},
+    {"id": "edge", "name": "机器狗背板 Edge", "owns": ["LiDAR/IMU 接入", "FAST-LIO", "固定地图定位", "Nav2", "任务状态机", "安全门", "SDK 桥"], "doesNotOwn": ["Unitree 固件内部步态", "GLIM 离线优化内部"], "status": "confirmed", "evidence": ["deployment/container/edge-entrypoint", "modules/navigation/gogoguard_navigation/manager.py"]},
+    {"id": "unitree", "name": "Unitree Go2 本体", "owns": ["SportClient.Move/StopMove 的执行", "底层步态/姿态控制", "电量与硬件状态"], "doesNotOwn": ["map Pose", "全局 Path"], "status": "confirmed", "evidence": ["modules/device_io/ros/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp"]}
+  ],
+  "startupTree": {
+    "robot": ["systemd gogoguard-edge.service", "/opt/gogoguard/bin/run-edge", "Docker host network/ipc/privileged", "edge-entrypoint", "MediaMTX + Livox + mount TF + cloud transformer + FAST-LIO + observers + supervisor + Site Console", "supervisor/manager selects candidate", "active_map_patrol.launch.py runtime_source=candidate", "Nav2/localizer/safety/SDK motion nodes"],
+    "workstation": ["make workstation 或 deployment/workstation/run-native", "field workstation Python server :8080"],
+    "cloud": ["Mac immutable map job", "restricted SSH/rsync", "external GLIM pipeline", "repo exporter", "artifacts returned to Mac"],
+    "status": "confirmed",
+    "evidence": ["deployment/robot/gogoguard-edge.service", "deployment/robot/run-edge", "deployment/container/edge-entrypoint", "modules/navigation/ros/go2_nav2_runtime/launch/active_map_patrol.launch.py"]
+  },
+  "flows": [
+    {
+      "id": "localization", "name": "当前 Pose 从哪里来", "status": "confirmed",
+      "steps": [
+        {"owner": "MID360", "label": "LiDAR 点 + IMU", "output": "/mapping/livox/lidar, /mapping/livox/imu"},
+        {"owner": "FAST-LIO", "label": "IMU 传播、去畸变、局部几何校正", "output": "/Odometry + odom→base_link + /navigation/cloud_lidar"},
+        {"owner": "CloudTransformer", "label": "用 commissioned mount 把点云变到 base_link", "output": "/navigation/cloud_body"},
+        {"owner": "VGICP Localizer", "label": "当前扫描/短时累积对固定 PCD 局部块", "output": "map→odom + localization status"},
+        {"owner": "TF", "label": "map→odom × odom→base_link", "output": "最终 map→base_link Pose"},
+        {"owner": "Nav2", "label": "消费当前 map Pose", "output": "规划/控制反馈"}
+      ],
+      "evidence": ["docs/system-audit/03_localization-chain.md"]
+    },
+    {
+      "id": "mapping", "name": "地图如何产生", "status": "confirmed",
+      "steps": [
+        {"owner": "CaptureManager", "label": "录 bag、checkpoint 图像/姿态、hash seal", "output": "RecordingBundle"},
+        {"owner": "Transfer", "label": "Robot→Mac resumable HTTP Range", "output": "Mac sealed recording"},
+        {"owner": "Cloud GLIM", "label": "离线优化轨迹与三维点云", "output": "trajectory + PLY + build metadata", "status": "confirmed"},
+        {"owner": "Exporter", "label": "时间戳匹配/补齐录制前缀", "output": "完整 base_link route"},
+        {"owner": "Workspace", "label": "一次性 lidar→base 变换、2D slice、manual edits、allowed area", "output": "PCD + PGM + Route + checkpoints"},
+        {"owner": "RouteManager", "label": "生成不可变 candidate bundle", "output": "mapVersion/routeId/revision/hash"}
+      ],
+      "evidence": ["docs/system-audit/04_mapping-chain.md"]
+    },
+    {
+      "id": "inspection", "name": "一次完整巡检", "status": "confirmed",
+      "steps": [
+        {"owner": "SaaS/本地操作员", "label": "start_patrol + expected map/route + MissionPlan", "output": "supervisor command"},
+        {"owner": "NavigationManager", "label": "选择 candidate、启动 SDK receiver 与动态 ROS generation", "output": "runtime process"},
+        {"owner": "PatrolRuntime", "label": "等待 fixed localization、costmap、Nav2 就绪", "output": "PATROLLING 或 fail-closed"},
+        {"owner": "PatrolRuntime", "label": "Route 投影/选择下一 checkpoint target", "output": "ComputePathToPose goal"},
+        {"owner": "Smac", "label": "规划当前 Path", "output": "Path"},
+        {"owner": "MPPI + safety chain", "label": "持续纠偏、避障、授权", "output": "Unitree Move"},
+        {"owner": "CheckpointExecutor", "label": "取消 route、settle、相机 yaw/Spin 对齐、等待 capture/verdict", "output": "checkpoint result"},
+        {"owner": "PatrolRuntime", "label": "继续下一点或最终终止并 StopMove", "output": "mission status/evidence"}
+      ],
+      "evidence": ["docs/system-audit/07_inspection-workflow.md"]
+    },
+    {
+      "id": "motion", "name": "最终运动闭环", "status": "confirmed",
+      "steps": [
+        {"owner": "SmacPlanner2D", "label": "Pose + target + global costmap", "output": "Path"},
+        {"owner": "MPPI", "label": "Pose + Path + local costmap", "output": "/nav2/raw_cmd_vel"},
+        {"owner": "VelocitySmoother", "label": "加减速约束", "output": "/nav2/smoothed_cmd_vel"},
+        {"owner": "CollisionMonitor", "label": "近身 polygon stop", "output": "/patrol_cmd"},
+        {"owner": "unitree_safe_cmd", "label": "授权新鲜度、watchdog、限幅", "output": "/cmd_vel"},
+        {"owner": "UDP sender", "label": "localhost:5005 v2 datagram", "output": "SDK receiver"},
+        {"owner": "SDK receiver", "label": "SportClient.Move / timeout StopMove", "output": "Go2 运动"},
+        {"owner": "Sensors", "label": "运动后的环境/IMU 再输入", "output": "新 Pose，闭环"}
+      ],
+      "evidence": ["docs/system-audit/06_motion-control-chain.md"]
+    }
+  ],
+  "modules": [
+    {"id": "livox", "name": "Livox Driver", "layer": "sensor", "inputs": ["MID360 Ethernet"], "outputs": ["/mapping/livox/lidar", "/mapping/livox/imu"], "status": "confirmed", "code": ["deployment/container/edge-entrypoint"]},
+    {"id": "fastlio", "name": "FAST-LIO", "layer": "localization", "inputs": ["LiDAR", "IMU"], "outputs": ["/Odometry", "odom→base_link", "/navigation/cloud_lidar"], "status": "confirmed", "code": ["third_party/locked_stack/src/FAST_LIO/src/laserMapping.cpp"]},
+    {"id": "transformer", "name": "Calibrated Cloud Transformer", "layer": "localization", "inputs": ["/navigation/cloud_lidar", "mount calibration"], "outputs": ["/navigation/cloud_body"], "status": "confirmed", "code": ["third_party/locked_stack/src/go2_map_manager/src/calibrated_cloud_transformer.cpp"]},
+    {"id": "localizer", "name": "Continuous Map Localizer", "layer": "localization", "inputs": ["body cloud", "/Odometry", "fixed PCD", "seed zone"], "outputs": ["map→odom", "/localization/pose", "/localization/status"], "status": "confirmed", "code": ["third_party/locked_stack/src/go2_map_manager/src/continuous_map_localizer.cpp", "modules/localization/ros/patches/go2-vgicp-orin-v2.patch"]},
+    {"id": "patrol_runtime", "name": "PatrolRuntime", "layer": "mission", "inputs": ["Route", "Pose", "Nav2 action results", "checkpoint inbox"], "outputs": ["goals", "motion authorization", "mission status"], "status": "confirmed", "code": ["modules/navigation/ros/go2_nav2_runtime/go2_nav2_runtime/patrol_runtime_manager.py"]},
+    {"id": "smac", "name": "SmacPlanner2D", "layer": "navigation", "inputs": ["start", "goal", "global costmap"], "outputs": ["Path"], "status": "confirmed", "code": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml"]},
+    {"id": "mppi", "name": "MPPI Controller", "layer": "navigation", "inputs": ["Pose", "Path", "local costmap"], "outputs": ["/nav2/raw_cmd_vel"], "status": "confirmed", "code": ["modules/navigation/ros/go2_nav2_runtime/config/go2_nav2_patrol.yaml"]},
+    {"id": "motion_bridge", "name": "Unitree Motion Bridge", "layer": "control", "inputs": ["/patrol_cmd", "runtime authorization"], "outputs": ["SportClient.Move/StopMove"], "status": "confirmed", "code": ["third_party/locked_stack/src/go2_fastlio_patrol/go2_fastlio_patrol/unitree_safe_cmd_node.py", "modules/device_io/ros/go2_cmd_vel_bridge/src/go2_sdk2_udp_receiver.cpp"]},
+    {"id": "platform_edge", "name": "Platform Edge", "layer": "cloud", "inputs": ["heartbeat response commands", "local status files"], "outputs": ["supervisor command", "results/receipts"], "status": "confirmed", "code": ["services/platform_edge/gogoguard_platform_edge/heartbeat.py"]},
+    {"id": "site_console", "name": "Site Console", "layer": "management", "inputs": ["HTTP API"], "outputs": ["status/files/control side effects"], "status": "confirmed", "risks": ["0.0.0.0:8080; no server-side auth in current code"], "code": ["apps/site_console/backend/gogoguard_site_console/server.py"]},
+    {"id": "interaction", "name": "Realtime Interaction", "layer": "optional", "inputs": ["start_live", "LiveKit DataChannel"], "outputs": ["Z1Pro/BOYA uplink", "Go2 speaker", "pose/data"], "status": "unknown", "note": "代码和条件启动确认；r14 是否 enable 未确认", "code": ["services/interaction_edge/gogoguard_interaction_edge/service.py"]}
+  ],
+  "interfaces": {
+    "topics": [
+      {"name": "/mapping/livox/lidar", "type": "sensor_msgs/PointCloud2", "producer": "Livox", "consumers": ["FAST-LIO", "CaptureManager"], "frame": "lidar_link"},
+      {"name": "/mapping/livox/imu", "type": "sensor_msgs/Imu", "producer": "Livox", "consumers": ["FAST-LIO", "CaptureManager"]},
+      {"name": "/Odometry", "type": "nav_msgs/Odometry", "producer": "FAST-LIO", "consumers": ["localizer", "CaptureManager"], "frame": "odom→base_link"},
+      {"name": "/navigation/cloud_body", "type": "sensor_msgs/PointCloud2", "producer": "cloud transformer", "consumers": ["localizer", "obstacle filter"], "frame": "base_link"},
+      {"name": "/localization/pose", "type": "geometry_msgs/PoseWithCovarianceStamped", "producer": "localizer", "consumers": ["runtime/observers"], "frame": "map→base_link"},
+      {"name": "/nav2/raw_cmd_vel", "type": "geometry_msgs/Twist", "producer": "MPPI/Spin", "consumers": ["velocity smoother"]},
+      {"name": "/nav2/smoothed_cmd_vel", "type": "geometry_msgs/Twist", "producer": "velocity smoother", "consumers": ["Collision Monitor"]},
+      {"name": "/patrol_cmd", "type": "geometry_msgs/Twist", "producer": "Collision Monitor", "consumers": ["unitree_safe_cmd"]},
+      {"name": "/go2/runtime/motion_authorized", "type": "std_msgs/Bool", "producer": "PatrolRuntime", "consumers": ["unitree_safe_cmd", "trace recorder"]},
+      {"name": "/cmd_vel", "type": "geometry_msgs/Twist", "producer": "unitree_safe_cmd", "consumers": ["UDP sender"]}
+    ],
+    "actions": [
+      {"name": "ComputePathToPose", "owner": "planner_server", "caller": "PatrolRuntime", "result": "Path or planner failure"},
+      {"name": "FollowPath", "owner": "controller_server", "caller": "PatrolRuntime", "result": "goal result / feedback"},
+      {"name": "Spin", "owner": "behavior_server", "caller": "CheckpointExecutor", "result": "body yaw remainder"}
+    ],
+    "local": [
+      {"name": "navigation/supervisor.sock", "protocol": "JSON line over Unix socket", "purpose": "Site Console/platform_edge → NavigationManager"},
+      {"name": "interaction/control.sock", "protocol": "JSON line over Unix socket", "purpose": "platform_edge/pose stream → interaction service"},
+      {"name": "127.0.0.1:5005", "protocol": "Unitree UDP v2", "purpose": "ROS sender → SDK receiver"}
+    ]
+  },
+  "frames": [
+    {"id": "map", "meaning": "固定历史地图坐标", "authority": "continuous localizer via map→odom", "drifts": false, "status": "confirmed"},
+    {"id": "odom", "meaning": "本次启动的连续相对坐标", "authority": "FAST-LIO", "drifts": true, "status": "confirmed"},
+    {"id": "base_link", "meaning": "狗体导航基座", "authority": "FAST-LIO output frame conversion", "drifts": false, "status": "confirmed"},
+    {"id": "lidar_link", "meaning": "MID360 光心/安装坐标", "authority": "commissioned static mount TF", "drifts": false, "status": "confirmed"}
+  ],
+  "externalDependencies": [
+    {
+      "id": "glim_cloud_pipeline",
+      "name": "GLIM cloud mapping pipeline",
+      "runtimeLocation": "/opt/go2 on Ubuntu 24.04 x86_64 cloud worker; invoked as user go2mapping",
+      "entrypoint": "/opt/go2/gogoguard_dog_go2_real_code/deploy/cloud_mapping_worker/run_pipeline.sh",
+      "adapter": "deployment/cloud/gogoguard-map-job",
+      "glimCommit": "aafbbff547bef21e48234ed3f810729552c2aa80",
+      "glimRos2Commit": "4dccdaa4a1b27a3ab324981336a8fdb4ea67f1b4",
+      "configFileSetHash": "e5dfdd0a62f22da7c07f1f1b22d2f7d1e65a47574118b011ccee7fd63dd50325",
+      "computeProfile": "cpu",
+      "effectivePlugins": ["libodometry_estimation_cpu.so", "libsub_mapping.so", "libglobal_mapping.so"],
+      "effectiveAlgorithms": ["odometry registration_type=GICP", "submap registration_error_factor_type=VGICP", "global between_registration_type=GICP", "global registration_error_factor_type=VGICP"],
+      "inputs": ["sealed rosbag", "/mapping/livox/lidar PointCloud2", "/mapping/livox/imu Imu", "MID360 factory internal calibration"],
+      "outputs": ["21-submap GLIM dump", "2085 optimized poses", "90.897m optimized trajectory", "map.ply", "glim-build.json"],
+      "observedRun": "map-dc7036e35379; accepted; duration 207.066s; max pose step 0.123m",
+      "knownWarnings": ["CPU config omits three newer global voxel parameters and uses logged defaults", "two consecutive submap overlaps were 0.205 and 0.162; pipeline inserted between factors"],
+      "sourceAvailability": "Exact external source trees are not present in this product worktree; commit identities, effective configs, commands, logs and outputs are preserved locally.",
+      "status": "confirmed",
+      "evidence": [
+        "runtime-data/analysis/map-dc7036e35379-replanning-20260823T224052+0800/cloud/map-dc7036e35379/work/sessions/map-dc7036e35379/config/go2_config_manifest.json",
+        "runtime-data/analysis/map-dc7036e35379-replanning-20260823T224052+0800/cloud/map-dc7036e35379/work/sessions/map-dc7036e35379/config/config.json",
+        "runtime-data/analysis/map-dc7036e35379-replanning-20260823T224052+0800/cloud/map-dc7036e35379/work/sessions/map-dc7036e35379/logs/glim_rosbag.log",
+        "runtime-data/analysis/map-dc7036e35379-replanning-20260823T224052+0800/cloud/map-dc7036e35379/output/glim-build.json"
+      ]
+    }
+  ],
+  "mapTypes": [
+    {"id": "raw_scan", "name": "单帧 PointCloud", "creator": "MID360/FAST-LIO", "storage": "通常不长期保存，bag 内保存原始消息", "live": true, "users": ["FAST-LIO", "VGICP", "ObstacleLayer"], "status": "confirmed"},
+    {"id": "bag", "name": "RecordingBundle/rosbag", "creator": "CaptureManager", "storage": "robot→Mac→archive", "live": false, "users": ["GLIM", "审计"], "status": "confirmed"},
+    {"id": "ply", "name": "GLIM 3D Map PLY", "creator": "cloud GLIM", "storage": "immutable map job artifact", "live": false, "users": ["workspace", "3D review"], "status": "confirmed"},
+    {"id": "pcd", "name": "Fixed Localization PCD", "creator": "export/workspace from GLIM map", "storage": "candidate bundle", "live": false, "users": ["continuous localizer"], "status": "confirmed"},
+    {"id": "map_json", "name": "Browser 3D Map", "creator": "exporter sampling", "storage": "map job artifact", "live": false, "users": ["Site Console visual review"], "note": "不是 localization PCD", "status": "confirmed"},
+    {"id": "static_pgm", "name": "2D Occupancy Grid", "creator": "height slice + edits + corridor clearing", "storage": "candidate nav2 map", "live": false, "users": ["Nav2 StaticLayer"], "status": "confirmed"},
+    {"id": "keepout", "name": "Keepout Mask", "creator": "allowed-area workspace", "storage": "candidate bundle", "live": false, "users": ["Nav2 KeepoutFilter"], "status": "confirmed"},
+    {"id": "global_costmap", "name": "Global Costmap", "creator": "Nav2 runtime", "storage": "不长期保存", "live": true, "users": ["Smac", "runtime health"], "layers": ["static", "obstacle", "inflation", "keepout"], "status": "confirmed"},
+    {"id": "local_costmap", "name": "Local Costmap", "creator": "Nav2 runtime", "storage": "不长期保存", "live": true, "users": ["MPPI", "Spin", "Collision reasoning"], "layers": ["static", "obstacle", "inflation", "keepout"], "status": "confirmed"},
+    {"id": "route", "name": "Route", "creator": "recording + workspace", "storage": "candidate bundle", "live": false, "users": ["mission progress", "checkpoint binding", "target/rejoin"], "note": "不是实时 planner Path", "status": "confirmed"},
+    {"id": "path", "name": "Path", "creator": "SmacPlanner2D", "storage": "运行时", "live": true, "users": ["MPPI"], "status": "confirmed"}
+  ],
+  "algorithms": [
+    {"id": "fastlio", "name": "FAST-LIO", "problem": "连续相对运动与点云去畸变", "inputs": ["LiDAR", "IMU"], "outputs": ["odom pose", "deskewed scan"], "failsWhen": ["退化几何", "动态点过多", "错时/外参错", "长期漂移"], "status": "confirmed"},
+    {"id": "vgicp", "name": "small_gicp VGICP", "problem": "当前扫描在历史3D地图中的6DoF对齐", "inputs": ["current cloud", "fixed PCD local target", "seed/last trusted pose"], "outputs": ["map→odom", "quality/confidence"], "failsWhen": ["初值超窗口", "重复场景", "结构变化过大", "几何不可观"], "status": "confirmed"},
+    {"id": "glim", "name": "GLIM", "problem": "整段录制的离线全局地图/轨迹优化", "inputs": ["sealed bag", "effective CPU config", "MID360 internal calibration"], "outputs": ["optimized trajectory", "submap dump", "PLY"], "failsWhen": ["录制不完整", "重叠不足", "配置漂移", "传感器时序或标定错误"], "status": "confirmed"},
+    {"id": "smac", "name": "SmacPlanner2D", "problem": "代价网格中的全局可行 Path", "inputs": ["start", "goal", "global costmap"], "outputs": ["Path"], "failsWhen": ["start footprint lethal", "目标不可达", "通道被膨胀封死"], "status": "confirmed"},
+    {"id": "mppi", "name": "MPPI Omni", "problem": "滚动预测下的路径跟踪与局部避障", "inputs": ["Pose", "Path", "local costmap"], "outputs": ["Twist"], "failsWhen": ["局部无可行轨迹", "Pose/costmap 陈旧", "模型/死区不匹配", "算力超时"], "status": "confirmed"}
+  ],
+  "parameters": [
+    {"id": "speed", "name": "forward target/max", "effective": "0.60 / 0.90 m/s", "consumers": ["MPPI", "smoother", "SDK cap"], "impacts": ["路径可行性", "刹停距离", "跟踪误差"], "status": "confirmed"},
+    {"id": "mppi_horizon", "name": "MPPI prediction", "effective": "15Hz × 56 steps ≈ 3.73s; batch 1000", "consumers": ["MPPI"], "impacts": ["CPU", "前瞻性", "可行轨迹采样"], "status": "confirmed"},
+    {"id": "footprint", "name": "padded footprint", "effective": "x[-0.43,0.50], y±0.30m", "consumers": ["costmaps", "Smac", "MPPI", "Collision Monitor"], "impacts": ["起点是否合法", "通道宽度", "安全余量"], "status": "confirmed"},
+    {"id": "localizer_window", "name": "VGICP target/scan", "effective": "32m local target / 24m scan / refresh 4m", "consumers": ["continuous localizer"], "impacts": ["计算量", "几何覆盖", "恢复能力"], "status": "confirmed"},
+    {"id": "localizer_quality", "name": "VGICP acceptance", "effective": "points≥250, inlier≥.20, MSE≤.20, jump≤.75m/15°", "consumers": ["localizer state machine"], "impacts": ["误接受", "拒绝率", "定位可用性"], "status": "confirmed"},
+    {"id": "watchdog", "name": "SDK command watchdog", "effective": "250ms", "consumers": ["SDK receiver"], "impacts": ["上游卡死后的 StopMove 延迟"], "status": "confirmed"}
+  ],
+  "findings": [
+    {"id": "r14_start_lethal", "severity": 1, "title": "r14 起点 footprint lethal", "status": "likely", "fact": "现场 Smac 反复 Starting point in lethal space；离线复算现场 footprint 覆盖1个静态黑格，录制起点为0。无layer dump，不能排除实时层。", "category": "map/pose"},
+    {"id": "planner_terminal_gap", "severity": 1, "title": "planner start-lethal 未进入 bounded terminal", "status": "confirmed", "fact": "planner result failure按0.75s恢复重试，但未累计 controller path failure counter，任务保持 SEARCHING_PATH 直到人工停止。", "category": "bug/state-machine"},
+    {"id": "center_vs_footprint", "severity": 1, "title": "costmap health 只看中心格", "status": "confirmed", "fact": "r14 status 中心 cost=92/healthy，但 Smac 按完整 footprint 判 lethal。", "category": "architecture/diagnostics"},
+    {"id": "candidate_readiness", "severity": 1, "title": "candidate 关闭本体/FAST-LIO独立 readiness", "status": "confirmed", "fact": "runtime_source=candidate 使 Unitree state 与 FAST-LIO health required=false；checkpoint true stop不含实测本体速度证明。", "category": "safety/evidence"},
+    {"id": "site_console_auth", "severity": 1, "title": "Site Console 管理 API 无服务端认证", "status": "confirmed", "fact": "绑定0.0.0.0:8080并包含巡检/定位/profile/地图写接口；现场网络隔离未知。", "category": "security/boundary"},
+    {"id": "reproducibility", "severity": 2, "title": "历史 field run 不能只靠 Git 重建", "status": "confirmed", "fact": "60份release中仅12份有commit+digest；其中10份dirty。地图、配置和外部云/SaaS独立版本。", "category": "deployment"},
+    {"id": "receipt_gap", "severity": 2, "title": "r5 资产发布回执链有缺口", "status": "likely", "fact": "Mac upload state只到r3 verified/not activated，r14 robot已选择r5。", "category": "deployment"},
+    {"id": "double_tf", "severity": 2, "title": "odom→base_link 可能双发布", "status": "unknown", "fact": "FAST-LIO与candidate localizer代码/launch都可广播；现场authority未证实。", "category": "tf"}
+  ],
+  "legacy": [
+    {"name": "route_relocalizer.cpp", "replacement": "continuous VGICP map→odom", "status": "inactive", "risk": "误以为当前使用PCL ICP"},
+    {"name": "localization_registration_benchmark.cpp", "replacement": "runtime sealed VGICP", "status": "inactive", "risk": "把NDT/GICP benchmark当fallback"},
+    {"name": "submap_builder.cpp", "replacement": "rosbag→cloud GLIM", "status": "inactive", "risk": "第二套建图叙事"},
+    {"name": "waypoint_follower_go2_2.py", "replacement": "Smac + MPPI", "status": "suspected", "risk": "若误启动可争夺/patrol_cmd"},
+    {"name": "MissionCoordinator", "replacement": "PatrolRuntime + CheckpointExecutor", "status": "inactive", "risk": "状态机职责误读"},
+    {"name": "EvidenceFrameBuffer", "replacement": "platform checkpoint transaction", "status": "inactive", "risk": "证据上传职责误读"}
+  ],
+  "unknowns": [
+    "GLIM 外部源码树与云 worker 镜像 digest 未保存在当前产品仓库；精确 commit、插件、有效配置哈希、运行日志与产物已确认",
+    "SaaS 服务端任务/判定/报告内部实现",
+    "r14 是否启用 interaction 与 checkpoint evidence transaction",
+    "现场 TF graph 的 odom→base_link authority",
+    "r14 start-lethal 的各 costmap layer 实际贡献",
+    "现场网络是否隔离 Site Console 8080",
+    "r5 完整 upload→verify→activate receipt"
+  ]
+}
